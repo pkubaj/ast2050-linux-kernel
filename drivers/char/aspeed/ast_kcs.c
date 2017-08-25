@@ -41,6 +41,16 @@ inline void ast_kcs_write_reg(uint32_t data, uint32_t reg)
 	iowrite32(data, ast_kcs_virt_base + reg);
 }
 
+inline uint32_t ast_lpcreset_read_reg(uint32_t reg)
+{
+	return ioread32(ast_kcs_virt_base + reg);
+}
+
+inline void ast_lpcreset_write_reg(uint32_t data, uint32_t reg)
+{
+	iowrite32(data, ast_kcs_virt_base + reg);
+}
+
 static void ast_kcs_enable_channel(void)
 {
 	uint32_t reg;
@@ -163,6 +173,24 @@ static void ast_kcs_disable_interrupt(void)
 #endif
 }
 
+static void ast_lpcreset_enable_interrupt(void)
+{
+	uint32_t reg;
+
+	reg = ast_lpcreset_read_reg(AST_LPC_HICR2);
+	reg |= AST_LPC_HICR2_ERRIE;
+	ast_lpcreset_write_reg(reg, AST_LPC_HICR2);
+}
+
+static void ast_lpcreset_disable_interrupt(void)
+{
+	uint32_t reg;
+
+	reg = ast_lpcreset_read_reg(AST_LPC_HICR2);
+	reg &= ~(AST_LPC_HICR2_ERRIE);
+	ast_lpcreset_write_reg(reg, AST_LPC_HICR2);
+}
+
 static void ast_kcs_read_status(u8 channel, u8 *status)
 {
 	if (channel == 3)
@@ -261,15 +289,42 @@ static irqreturn_t ast_kcs_irq_handler(int irq, void *dev_id)
 
 	reg = ast_kcs_read_reg(AST_LPC_HICR6);
 
+
 	if (reg & (AST_LPC_HICR6_SNP0_STR | AST_LPC_HICR6_SNP1_STR)) { /* snoop interrupt is occured */
-		return IRQ_NONE; /* handled by snoop driver */
+		printk(KERN_WARNING "ast_kcs: Unhandled snoop request!\n");
+		return IRQ_NONE;
 	}
 
 	reg = ast_kcs_read_reg(AST_LPC_HICR2);
 
-	if (reg & (AST_LPC_HICR2_LRST | AST_LPC_HICR2_SDWN | AST_LPC_HICR2_ABRT)) { /* LRESET | SDWN | ABRT interrupt is occured */
-		return IRQ_NONE; /* handled by LPC-reset driver */
+	if (reg & AST_LPC_HICR2_LRST) {
+		/* clear interrupt flag */
+		reg &= ~(AST_LPC_HICR2_LRST);
+		ast_lpcreset_write_reg(reg, AST_LPC_HICR2);
+
+		// FIXME
+		// How to signal reset request to userspace application / kernel kcs state machine?
+		// Ignore reset for now...
+		printk(KERN_DEBUG "LPC RESET [IGNORED]\n");
+		handled = 1;
 	}
+
+	if (reg & AST_LPC_HICR2_SDWN) {
+		/* clear interrupt flag */
+		reg &= ~AST_LPC_HICR2_SDWN;
+		ast_lpcreset_write_reg(reg, AST_LPC_HICR2);
+		printk(KERN_DEBUG "LPC SWDN\n");
+		handled = 1;
+	}
+
+	if (reg & AST_LPC_HICR2_ABRT) {
+		/* clear interrupt flag */
+		reg &= ~AST_LPC_HICR2_ABRT;
+		ast_lpcreset_write_reg(reg, AST_LPC_HICR2);
+		printk(KERN_DEBUG "LPC ABORT\n");
+		handled = 1;
+	}
+
 	for (ch = 0; ch < AST_KCS_CHANNEL_NUM; ch ++) {
 		ast_kcs_read_status(ch, &status);
 		if (status & 0x02) { /* Command or Data_In register has been written by system-side software */
@@ -332,6 +387,7 @@ static void ast_kcs_init_hw(void)
 
 static int ast_kcs_probe(struct platform_device *pdev) {
 	int ret = 0;
+	uint32_t reg;
 	struct resource *res0;
 
 	dev_dbg(&pdev->dev, "ast_kcs_probe() \n\n\n");
@@ -354,6 +410,21 @@ static int ast_kcs_probe(struct platform_device *pdev) {
 		ret = -ENOMEM;
 		goto err_no_io_res;
 	}
+
+	/* clear interrupt status and disable interrupt of KCS and LPC-reset */
+	reg = ast_lpcreset_read_reg(AST_LPC_HICR2);
+	reg &= ~(AST_LPC_HICR2_LRST | AST_LPC_HICR2_SDWN | AST_LPC_HICR2_ABRT | AST_LPC_HICR2_IBFIE1 | AST_LPC_HICR2_IBFIE2 | AST_LPC_HICR2_IBFIE3 | AST_LPC_HICR2_ERRIE);
+	ast_lpcreset_write_reg(reg, AST_LPC_HICR2);
+
+	/* disable interrupt of snoop */
+	reg = ast_lpcreset_read_reg(AST_LPC_HICR5);
+	reg &= ~(AST_LPC_HICR5_SNP0_EN | AST_LPC_HICR5_SNP0_ENINT | AST_LPC_HICR5_SNP1_EN | AST_LPC_HICR5_SNP1_ENINT);
+	ast_lpcreset_write_reg(reg, AST_LPC_HICR5);
+
+	/* clear interrupt status of snoop */
+	reg = ast_lpcreset_read_reg(AST_LPC_HICR6);
+	reg |= (AST_LPC_HICR6_SNP0_STR | AST_LPC_HICR6_SNP1_STR);
+	ast_lpcreset_write_reg(reg, AST_LPC_HICR6);
 
 	IRQ_SET_LEVEL_TRIGGER(0, AST_KCS_IRQ);
 	IRQ_SET_HIGH_LEVEL(0, AST_KCS_IRQ);
