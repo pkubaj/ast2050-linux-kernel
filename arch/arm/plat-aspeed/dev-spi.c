@@ -340,8 +340,8 @@ static struct mtd_partition ast_spi_flash_partitions[] = {
 			.mask_flags = MTD_CAP_NORFLASH & (~MTD_WRITEABLE),	/* Read-write */
 		}, {
 			.name   = "rootfs",
-			.offset = 0x300000, /* From 3M */
-			.size   = 0xCB0000, /* Size 12.7M */
+			.offset = 0x240000, /* From 2.4M */
+			.size   = 0xd70000, /* Size 13.7M */
 			.mask_flags = MTD_CAP_NORFLASH & (~MTD_WRITEABLE),	/* Read-write */
 		}, {
 			.name   = "data0",
