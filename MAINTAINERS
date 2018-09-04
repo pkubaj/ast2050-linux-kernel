@@ -4294,6 +4294,13 @@ L:	linux-kernel@vger.kernel.org
 W:	http://www.kernel.dk
 S:	Maintained
 
+UNIONFS
+M:	Erez Zadok <ezk@cs.sunysb.edu>
+L:	unionfs@filesystems.org
+W:	http://unionfs.filesystems.org
+T:	git git.kernel.org/pub/scm/linux/kernel/git/ezk/unionfs.git
+S:	Maintained
+
 UNSORTED BLOCK IMAGES (UBI)
 P:	Artem Bityutskiy
 M:	dedekind@infradead.org
