@@ -217,7 +217,7 @@ static void __init ast_setup_timer(void)
                                                     &clockevent_ast);
   clockevent_ast.min_delta_ns = clockevent_delta2ns(ASPEED_TIMER_RELOAD_MIN,
                                                     &clockevent_ast);
-  clockevent_ast.cpumask = cpumask_of_cpu(0);
+  clockevent_ast.cpumask = cpumask_of(0);
   clockevents_register_device(&clockevent_ast);
 }
 

@@ -312,7 +312,7 @@ static void ast_gmac_set_mac(struct ftgmac100_priv *priv, const unsigned char *m
  */
 static void getMacHwConfig( struct net_device* dev, struct AstMacHwConfig* out )
 {
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 
 //	out->macId   = dev->dev_id;
 //..	getMacAndPhy(dev, out);
@@ -368,7 +368,7 @@ no_phy_access:
 // --------------------------------------------------------------------
 void NCSI_Struct_Initialize(struct net_device *dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long i;
 
   for (i = 0; i < 6; i++) {
@@ -402,7 +402,7 @@ void NCSI_Struct_Initialize(struct net_device *dev)
 
 void Calculate_Checksum(struct net_device * dev, unsigned char *buffer_base, int Length)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned int i, CheckSum = 0;
   unsigned int Data, Data1;
 
@@ -423,7 +423,7 @@ void Calculate_Checksum(struct net_device * dev, unsigned char *buffer_base, int
 
 void copy_data (struct net_device * dev, struct sk_buff * skb, int Length)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
 
   memcpy ((unsigned char *)(skb->data + 30), &lp->Payload_Data, Length);
   Calculate_Checksum(dev, skb->data + 14, 30 + Length);
@@ -432,7 +432,7 @@ void copy_data (struct net_device * dev, struct sk_buff * skb, int Length)
 
 void NCSI_Rx (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long status, length, i = 0;
   volatile RX_DESC *cur_desc;
 
@@ -467,7 +467,7 @@ ncsi_rx:
 
 void DeSelect_Package (struct net_device * dev, int Package_ID)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -502,7 +502,7 @@ void DeSelect_Package (struct net_device * dev, int Package_ID)
 
 int Select_Package (struct net_device * dev, int Package_ID)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID, Found = 0;
   struct sk_buff * skb;
 
@@ -545,7 +545,7 @@ int Select_Package (struct net_device * dev, int Package_ID)
 
 void DeSelect_Active_Package (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -580,7 +580,7 @@ void DeSelect_Active_Package (struct net_device * dev)
 
 int Select_Active_Package (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID, Found = 0;
   struct sk_buff * skb;
 
@@ -622,7 +622,7 @@ int Select_Active_Package (struct net_device * dev)
 
 int Clear_Initial_State (struct net_device * dev, int Channel_ID)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID, Found = 0;
   struct sk_buff * skb;
 
@@ -661,7 +661,7 @@ int Clear_Initial_State (struct net_device * dev, int Channel_ID)
 
 void Get_Version_ID (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -696,7 +696,7 @@ void Get_Version_ID (struct net_device * dev)
 
 void Get_Capabilities (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -736,7 +736,7 @@ void Get_Capabilities (struct net_device * dev)
 
 void Enable_AEN (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -774,7 +774,7 @@ void Enable_AEN (struct net_device * dev)
 
 void Get_MAC_Address (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID, i;
   struct sk_buff * skb;
 
@@ -831,7 +831,7 @@ printk("\n");
 
 void Set_MAC_Affinity (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID, i;
   struct sk_buff * skb;
 
@@ -885,7 +885,7 @@ void Set_MAC_Affinity (struct net_device * dev)
 
 void Enable_Set_MAC_Address (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID, i;
   struct sk_buff * skb;
 
@@ -926,7 +926,7 @@ void Enable_Set_MAC_Address (struct net_device * dev)
 
 void Enable_Broadcast_Filter (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -964,7 +964,7 @@ void Enable_Broadcast_Filter (struct net_device * dev)
 
 void Disable_Multicast_Filter (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -999,7 +999,7 @@ void Disable_Multicast_Filter (struct net_device * dev)
 
 void Disable_VLAN (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1034,7 +1034,7 @@ void Disable_VLAN (struct net_device * dev)
 
 void Get_Parameters (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1075,7 +1075,7 @@ void Get_Parameters (struct net_device * dev)
 
 void Enable_Network_TX (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1110,7 +1110,7 @@ void Enable_Network_TX (struct net_device * dev)
 
 void Disable_Network_TX (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1144,7 +1144,7 @@ void Disable_Network_TX (struct net_device * dev)
 
 void Enable_Channel (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1179,7 +1179,7 @@ void Enable_Channel (struct net_device * dev)
 
 void Disable_Channel (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1217,7 +1217,7 @@ void Disable_Channel (struct net_device * dev)
 
 int Get_Link_Status (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1258,7 +1258,7 @@ int Get_Link_Status (struct net_device * dev)
 
 void Set_Link (struct net_device * dev)
 {
-  struct ftgmac100_priv *lp = (struct ftgmac100_priv *)dev->priv;
+  struct ftgmac100_priv *lp = netdev_priv(dev);
   unsigned long Combined_Channel_ID;
   struct sk_buff * skb;
 
@@ -1297,7 +1297,7 @@ void Set_Link (struct net_device * dev)
 
 static void ftgmac100_reset( struct net_device* dev )
 {
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 	struct AstMacHwConfig* ids = &priv->ids;
 	unsigned int tmp, speed, duplex;
 
@@ -1419,7 +1419,7 @@ static void ftgmac100_reset( struct net_device* dev )
 static void ftgmac100_enable( struct net_device *dev )
 {
 	int i;
-	struct ftgmac100_priv *priv 	= (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv 	= netdev_priv(dev);
 	unsigned int tmp_rsize;		//Richard
 	unsigned int rfifo_rsize;	//Richard
 	unsigned int tfifo_rsize;	//Richard
@@ -1613,7 +1613,7 @@ Re_Get_Link_Status:
 static void aspeed_mac_timer(unsigned long data)
 {
 	struct net_device *dev = (struct net_device *)data;
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 	unsigned int status, tmp, speed, duplex, macSpeed;
 
 #ifdef CONFIG_ARCH_AST2300
@@ -1736,7 +1736,7 @@ static void ftgmac100_shutdown( unsigned int ioaddr )
 */
 static int ftgmac100_wait_to_send_packet( struct sk_buff * skb, struct net_device * dev )
 {
-	struct ftgmac100_priv *priv 	= (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv 	= netdev_priv(dev);
 	unsigned long ioaddr 	= dev->base_addr;
 	volatile TX_DESC *cur_desc;
 	int		length;
@@ -1909,7 +1909,7 @@ static void print_packet( u8 * buf, int length )
  .-------------------------------------------------------------*/
 static void ftgmac100_phy_configure(struct net_device* dev)
 {
-    struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+    struct ftgmac100_priv *priv = netdev_priv(dev);
     unsigned long ioaddr = dev->base_addr;
 	u32 tmp;
 //	printk("priv->ids.miiPhyId = %x \n",priv->ids.miiPhyId);
@@ -1979,7 +1979,7 @@ static void ftgmac100_timeout (struct net_device *dev)
 
 static void ftgmac100_free_tx (struct net_device *dev)
 {
- struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+ struct ftgmac100_priv *priv = netdev_priv(dev);
  int entry = priv->old_tx % TXDES_NUM;
  unsigned long flags = 0;
 
@@ -2021,7 +2021,7 @@ static void ftgmac100_free_tx (struct net_device *dev)
 
 static void ftgmac100_rcv(struct net_device *dev)
 {
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 	unsigned long ioaddr 	= dev->base_addr;
 	int 	packet_length;
 	int 	rcv_cnt;
@@ -2276,7 +2276,7 @@ done:
 static irqreturn_t ftgmac100_interrupt(int irq, void * dev_id,  struct pt_regs * regs)
 {
 	struct net_device *dev 	= dev_id;
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 	unsigned long ioaddr 	= dev->base_addr;
 	int		timeout;
 	unsigned int tmp;
@@ -2421,7 +2421,7 @@ static irqreturn_t ftgmac100_interrupt(int irq, void * dev_id,  struct pt_regs *
  .-------------------------------------------------------------*/
 static struct net_device_stats* ftgmac100_query_statistics(struct net_device *dev)
 {
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 
 	return &priv->stats;
 }
@@ -2467,7 +2467,7 @@ static void ftgmac100_setmulticast( struct net_device *dev, int count, struct de
 	struct dev_mc_list	* cur_addr;
 	int crc_val;
 	unsigned int	ioaddr = dev->base_addr;
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 	struct AstMacHwConfig* ids = &priv->ids;
 	unsigned long Combined_Channel_ID, i;
 	struct sk_buff * skb;
@@ -2560,7 +2560,7 @@ static void ftgmac100_setmulticast( struct net_device *dev, int count, struct de
 static void ftgmac100_set_multicast_list(struct net_device *dev)
 {
 	unsigned int ioaddr = dev->base_addr;
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 
 	PRINTK2("%s:ftgmac100_set_multicast_list\n", dev->name);
 
@@ -2592,7 +2592,7 @@ static void ftgmac100_set_multicast_list(struct net_device *dev)
 
 static int ast_gmac_stop(struct net_device *dev)
 {
-	struct ftgmac100_priv *priv = (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv = netdev_priv(dev);
 
 	netif_stop_queue(dev);
 
@@ -2623,7 +2623,7 @@ static struct proc_dir_entry *proc_ftgmac100;
 static int ftgmac100_read_proc(char *page, char **start,  off_t off, int count, int *eof, void *data)
 {
 	struct net_device *dev = (struct net_device *)data;
-	struct ftgmac100_priv *priv 	= (struct ftgmac100_priv *)dev->priv;
+	struct ftgmac100_priv *priv 	= netdev_priv(dev);
 	int num;
 	int i;
 
@@ -2655,8 +2655,7 @@ static int ftgmac100_open(struct net_device *netdev)
 	{
 		DO_PRINT("%s: unable to get IRQ %d (retval=%d).\n",
 			 netdev->name, netdev->irq, err);
-		kfree(netdev->priv);
-		netdev->priv = NULL;
+		kfree(priv);
 		return err;
 	}
 
