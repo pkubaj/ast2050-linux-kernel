@@ -581,6 +581,16 @@ config SENSORS_LTC4245
 	  This driver can also be built as a module. If so, the module will
 	  be called ltc4245.
 
+config SENSORS_MAX127
+	tristate "Maxim MAX127 sensor chip"
+	depends on I2C
+	help
+	  If you say yes here you get support for the MAX127,
+	  5 channel, 12-bit DAC sensor chip.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called max127.
+
 config SENSORS_MAX1111
 	tristate "Maxim MAX1111 Multichannel, Serial 8-bit ADC chip"
 	depends on SPI_MASTER
@@ -794,6 +804,17 @@ config SENSORS_W83793
 	  This driver can also be built as a module.  If so, the module
 	  will be called w83793.
 
+config SENSORS_W83795
+	tristate "Winbond/Nuvoton W83795G/ADG"
+	depends on I2C
+	help
+	  If you say yes here you get support for the Winbond W83795G and
+	  W83795ADG hardware monitoring chip, including manual fan speed
+	  control.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called w83795.
+
 config SENSORS_W83L785TS
 	tristate "Winbond W83L785TS-S"
 	depends on I2C && EXPERIMENTAL
@@ -895,6 +916,31 @@ config SENSORS_LIS3LV02D
 	  Say Y here if you have an applicable laptop and want to experience
 	  the awesome power of lis3lv02d.
 
+config SENSORS_AST_ADC
+	tristate "ASPEED ADC Controller Driver"
+        depends on ARCH_ASPEED
+	default n
+	help
+          This driver provides support for the ASPEED ADC
+          Controller, which provides an Voltage Sensor.
+
+config SENSORS_AST_PWM_FAN
+        tristate "ASPEED PWM & FAN Tacho Controller Driver"
+        depends on ARCH_ASPEED
+        default n
+        help
+          This driver provides support for the ASPEED PWM & FAN Tacho
+          Controller, which provides an Sensor, fan control.
+
+config SENSORS_FB_PANTHER_PLUS
+	tristate "Facebook Panther+ Microserver Driver"
+	depends on ARCH_ASPEED && I2C
+	default n
+	help
+    This driver provides support for Facebook Panther+ microserver.
+
+	  Say Y here if you run on the BMC which connects to Panther+ microserver
+
 config SENSORS_APPLESMC
 	tristate "Apple SMC (Motion sensor, light sensor, keyboard backlight)"
 	depends on INPUT && X86
@@ -919,6 +965,8 @@ config SENSORS_APPLESMC
 
 	  Say Y here if you have an applicable laptop and want to experience
 	  the awesome power of applesmc.
+
+source drivers/hwmon/pmbus/Kconfig
 
 config HWMON_DEBUG_CHIP
 	bool "Hardware Monitoring Chip debugging messages"

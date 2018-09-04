@@ -198,6 +198,16 @@ choice
 	prompt "ARM system type"
 	default ARCH_VERSATILE
 
+config ARCH_ASPEED
+	bool "ASPEED AST Family"
+	select ARM_AMBA
+	select PLAT_ASPEED
+        select ARCH_REQUIRE_GPIOLIB
+	select GENERIC_GPIO
+	select GENERIC_TIME
+	select GENERIC_CLOCKEVENTS
+
+
 config ARCH_AAEC2000
 	bool "Agilent AAEC-2000 based"
 	select CPU_ARM920T
@@ -592,6 +602,8 @@ config ARCH_W90X900
 
 endchoice
 
+source "arch/arm/mach-aspeed/Kconfig"
+
 source "arch/arm/mach-clps711x/Kconfig"
 
 source "arch/arm/mach-ep93xx/Kconfig"
@@ -684,6 +696,9 @@ config PLAT_IOP
 	bool
 
 config PLAT_ORION
+	bool
+
+config PLAT_ASPEED
 	bool
 
 source arch/arm/mm/Kconfig
