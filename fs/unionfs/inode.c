@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2003-2006 Charles P. Wright
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2005-2006 Junjiro Okajima
@@ -8,8 +8,8 @@
  * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
  * Copyright (c) 2003      Puja Gupta
  * Copyright (c) 2003      Harikesavan Krishnan
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -125,12 +125,12 @@ static int unionfs_create(struct inode *dir, struct dentry *dentry,
 	lower_parent_dentry = lock_parent(lower_dentry);
 	if (IS_ERR(lower_parent_dentry)) {
 		err = PTR_ERR(lower_parent_dentry);
-		goto out_unlock;
+		goto out;
 	}
 
 	err = init_lower_nd(&lower_nd, LOOKUP_CREATE);
 	if (unlikely(err < 0))
-		goto out_unlock;
+		goto out;
 	err = vfs_create(lower_parent_dentry->d_inode, lower_dentry, mode,
 			 &lower_nd);
 	release_lower_nd(&lower_nd, err);
@@ -146,8 +146,8 @@ static int unionfs_create(struct inode *dir, struct dentry *dentry,
 		}
 	}
 
-out_unlock:
 	unlock_dir(lower_parent_dentry);
+
 out:
 	if (!err) {
 		unionfs_postcopyup_setmnt(dentry);
@@ -390,7 +390,7 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
 	lower_parent_dentry = lock_parent(lower_dentry);
 	if (IS_ERR(lower_parent_dentry)) {
 		err = PTR_ERR(lower_parent_dentry);
-		goto out_unlock;
+		goto out;
 	}
 
 	mode = S_IALLUGO;
@@ -406,8 +406,8 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
 		}
 	}
 
-out_unlock:
 	unlock_dir(lower_parent_dentry);
+
 out:
 	dput(wh_dentry);
 	kfree(name);
@@ -583,7 +583,7 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
 	lower_parent_dentry = lock_parent(lower_dentry);
 	if (IS_ERR(lower_parent_dentry)) {
 		err = PTR_ERR(lower_parent_dentry);
-		goto out_unlock;
+		goto out;
 	}
 
 	err = vfs_mknod(lower_parent_dentry->d_inode, lower_dentry, mode, dev);
@@ -598,8 +598,8 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
 		}
 	}
 
-out_unlock:
 	unlock_dir(lower_parent_dentry);
+
 out:
 	dput(wh_dentry);
 	kfree(name);
@@ -835,26 +835,12 @@ static int unionfs_permission(struct inode *inode, int mask)
 		if (err && err != -EACCES && err != EPERM && bindex > 0) {
 			umode_t mode = lower_inode->i_mode;
 			if ((is_robranch_super(inode->i_sb, bindex) ||
-			     __is_rdonly(lower_inode)) &&
+			     IS_RDONLY(lower_inode)) &&
 			    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 				err = 0;
 			if (IS_COPYUP_ERR(err))
 				err = 0;
 		}
-
-		/*
-		 * NFS HACK: NFSv2/3 return EACCES on readonly-exported,
-		 * locally readonly-mounted file systems, instead of EROFS
-		 * like other file systems do.  So we have no choice here
-		 * but to intercept this and ignore it for NFS branches
-		 * marked readonly.  Specifically, we avoid using NFS's own
-		 * "broken" ->permission method, and rely on
-		 * generic_permission() to do basic checking for us.
-		 */
-		if (err && err == -EACCES &&
-		    is_robranch_super(inode->i_sb, bindex) &&
-		    lower_inode->i_sb->s_magic == NFS_SUPER_MAGIC)
-			err = generic_permission(lower_inode, mask, NULL);
 
 		/*
 		 * The permissions are an intersection of the overall directory
@@ -895,12 +881,6 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
 	struct inode *lower_inode;
 	int bstart, bend, bindex;
 	loff_t size;
-	struct iattr lower_ia;
-
-	/* check if user has permission to change inode */
-	err = inode_change_ok(dentry->d_inode, ia);
-	if (err)
-		goto out_err;
 
 	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
@@ -927,12 +907,7 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
 		err = -EINVAL;
 		goto out;
 	}
-
-	/*
-	 * Get the lower inode directly from lower dentry, in case ibstart
-	 * is -1 (which happens when the file is open but unlinked.
-	 */
-	lower_inode = lower_dentry->d_inode;
+	lower_inode = unionfs_lower_inode(inode);
 
 	/* check if user has permission to change lower inode */
 	err = inode_change_ok(lower_inode, ia);
@@ -941,7 +916,7 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
 
 	/* copyup if the file is on a read only branch */
 	if (is_robranch_super(dentry->d_sb, bstart)
-	    || __is_rdonly(lower_inode)) {
+	    || IS_RDONLY(lower_inode)) {
 		/* check if we have a branch to copy up to */
 		if (bstart <= 0) {
 			err = -EACCES;
@@ -967,16 +942,6 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
 		/* get updated lower_dentry/inode after copyup */
 		lower_dentry = unionfs_lower_dentry(dentry);
 		lower_inode = unionfs_lower_inode(inode);
-		/*
-		 * check for whiteouts in writeable branch, and remove them
-		 * if necessary.
-		 */
-		if (lower_dentry) {
-			err = check_unlink_whiteout(dentry, lower_dentry,
-						    bindex);
-			if (err > 0) /* ignore if whiteout found and removed */
-				err = 0;
-		}
 	}
 
 	/*
@@ -998,27 +963,14 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
 	}
 
 	/* notify the (possibly copied-up) lower inode */
-	/*
-	 * Note: we use lower_dentry->d_inode, because lower_inode may be
-	 * unlinked (no inode->i_sb and i_ino==0.  This happens if someone
-	 * tries to open(), unlink(), then ftruncate() a file.
-	 */
-	/* prepare our own lower struct iattr (with our own lower file) */
-	memcpy(&lower_ia, ia, sizeof(lower_ia));
-	if (ia->ia_valid & ATTR_FILE) {
-		lower_ia.ia_file = unionfs_lower_file(ia->ia_file);
-		BUG_ON(!lower_ia.ia_file); // XXX?
-	}
-
-	mutex_lock(&lower_dentry->d_inode->i_mutex);
-	err = notify_change(lower_dentry, &lower_ia);
-	mutex_unlock(&lower_dentry->d_inode->i_mutex);
+	mutex_lock(&lower_inode->i_mutex);
+	err = notify_change(lower_dentry, ia);
+	mutex_unlock(&lower_inode->i_mutex);
 	if (err)
 		goto out;
 
 	/* get attributes from the first lower inode */
-	if (ibstart(inode) >= 0)
-		unionfs_copy_attr_all(inode, lower_inode);
+	unionfs_copy_attr_all(inode, lower_inode);
 	/*
 	 * unionfs_copy_attr_all will copy the lower times to our inode if
 	 * the lower ones are newer (useful for cache coherency).  However,
@@ -1039,7 +991,7 @@ out:
 	unionfs_unlock_dentry(dentry);
 	unionfs_unlock_parent(dentry, parent);
 	unionfs_read_unlock(dentry->d_sb);
-out_err:
+
 	return err;
 }
 

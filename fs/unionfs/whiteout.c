@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2003-2006 Charles P. Wright
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2005-2006 Junjiro Okajima
@@ -8,8 +8,8 @@
  * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
  * Copyright (c) 2003      Puja Gupta
  * Copyright (c) 2003      Harikesavan Krishnan
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -203,8 +203,8 @@ int unlink_whiteout(struct dentry *wh_dentry)
  * Checks to see if there's a whiteout in @lower_dentry's parent directory,
  * whose name is taken from @dentry.  Then tries to remove that whiteout, if
  * found.  If <dentry,bindex> is a branch marked readonly, return -EROFS.
- * If it finds both a regular file and a whiteout, delete whiteout (this
- * should never happen).
+ * If it finds both a regular file and a whiteout, return -EIO (this should
+ * never happen).
  *
  * Return 0 if no whiteout was found.  Return 1 if one was found and
  * successfully removed.  Therefore a value >= 0 tells the caller that
@@ -234,10 +234,13 @@ int check_unlink_whiteout(struct dentry *dentry, struct dentry *lower_dentry,
 	}
 
 	/* check if regular file and whiteout were both found */
-	if (unlikely(lower_dentry->d_inode))
-		printk(KERN_WARNING "unionfs: removing whiteout; regular "
-		       "file exists in directory %s (branch %d)\n",
+	if (unlikely(lower_dentry->d_inode)) {
+		err = -EIO;
+		printk(KERN_ERR "unionfs: found both whiteout and regular "
+		       "file in directory %s (branch %d)\n",
 		       lower_dir_dentry->d_name.name, bindex);
+		goto out_dput;
+	}
 
 	/* check if branch is writeable */
 	err = is_robranch_super(dentry->d_sb, bindex);

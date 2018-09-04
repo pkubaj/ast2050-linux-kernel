@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2003-2013 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
- * Copyright (c) 2003-2013 Stony Brook University
- * Copyright (c) 2003-2013 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as

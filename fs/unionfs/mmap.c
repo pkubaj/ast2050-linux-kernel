@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2003-2006 Charles P. Wright
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2005-2006 Junjiro Okajima
@@ -9,8 +9,8 @@
  * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
  * Copyright (c) 2003      Puja Gupta
  * Copyright (c) 2003      Harikesavan Krishnan
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -65,54 +65,13 @@ static int unionfs_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return err;
 }
 
-static int unionfs_page_mkwrite(struct vm_area_struct *vma,
-				struct vm_fault *vmf)
-{
-	int err = 0;
-	struct file *file, *lower_file;
-	const struct vm_operations_struct *lower_vm_ops;
-	struct vm_area_struct lower_vma;
-
-	BUG_ON(!vma);
-	memcpy(&lower_vma, vma, sizeof(struct vm_area_struct));
-	file = lower_vma.vm_file;
-	lower_vm_ops = UNIONFS_F(file)->lower_vm_ops;
-	BUG_ON(!lower_vm_ops);
-	if (!lower_vm_ops->page_mkwrite)
-		goto out;
-
-	lower_file = unionfs_lower_file(file);
-	BUG_ON(!lower_file);
-	/*
-	 * XXX: vm_ops->page_mkwrite may be called in parallel.
-	 * Because we have to resort to temporarily changing the
-	 * vma->vm_file to point to the lower file, a concurrent
-	 * invocation of unionfs_page_mkwrite could see a different
-	 * value.  In this workaround, we keep a different copy of the
-	 * vma structure in our stack, so we never expose a different
-	 * value of the vma->vm_file called to us, even temporarily.
-	 * A better fix would be to change the calling semantics of
-	 * ->page_mkwrite to take an explicit file pointer.
-	 */
-	lower_vma.vm_file = lower_file;
-	err = lower_vm_ops->page_mkwrite(&lower_vma, vmf);
-out:
-	return err;
-}
-
 /*
- * This function should never be called directly.
- * It's here only for the check a_ops->direct_IO during vfs_open.
+ * XXX: the default address_space_ops for unionfs is empty.  We cannot set
+ * our inode->i_mapping->a_ops to NULL because too many code paths expect
+ * the a_ops vector to be non-NULL.
  */
-static ssize_t unionfs_direct_IO(int rw, struct kiocb *iocb,
-				 const struct iovec *iov, loff_t offset,
-				 unsigned long nr_segs)
-{
-	return -EINVAL;
-}
-
 struct address_space_operations unionfs_aops = {
-	.direct_IO	= unionfs_direct_IO,
+	/* empty on purpose */
 };
 
 /*
@@ -127,5 +86,4 @@ struct address_space_operations unionfs_dummy_aops = {
 
 struct vm_operations_struct unionfs_vm_ops = {
 	.fault		= unionfs_fault,
-	.page_mkwrite	= unionfs_page_mkwrite,
 };

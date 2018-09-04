@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2006-2014 Erez Zadok
+ * Copyright (c) 2006-2009 Erez Zadok
  * Copyright (c) 2006      Charles P. Wright
  * Copyright (c) 2006-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2006      Junjiro Okajima
  * Copyright (c) 2006      David P. Quigley
- * Copyright (c) 2006-2014 Stony Brook University
- * Copyright (c) 2006-2014 The Research Foundation of SUNY
+ * Copyright (c) 2006-2009 Stony Brook University
+ * Copyright (c) 2006-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
