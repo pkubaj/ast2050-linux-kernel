@@ -936,6 +936,10 @@ config EFS_FS
 	  To compile the EFS file system support as a module, choose M here: the
 	  module will be called efs.
 
+
+# Patched by YAFFS
+#source "fs/yaffs2/Kconfig"
+
 source "fs/jffs2/Kconfig"
 # UBIFS File system configuration
 source "fs/ubifs/Kconfig"
@@ -959,6 +963,8 @@ config CRAMFS
 	  directory /) cannot be compiled as a module.
 
 	  If unsure, say N.
+
+source "fs/squashfs/Kconfig"
 
 config VXFS_FS
 	tristate "FreeVxFS file system support (VERITAS VxFS(TM) compatible)"
