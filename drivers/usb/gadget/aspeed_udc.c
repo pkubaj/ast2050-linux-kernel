@@ -82,7 +82,7 @@ static struct aspeed_udc udc = {
     .is_dualspeed = 1,
     .name = "aspeed_udc",
     .dev = {
-      .bus_id = "gadget",
+      .init_name = "gadget",
       .release = norelease,
     },
   },
