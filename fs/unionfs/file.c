@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2003-2006 Charles P. Wright
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2005-2006 Junjiro Okajima
@@ -8,8 +8,8 @@
  * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
  * Copyright (c) 2003      Puja Gupta
  * Copyright (c) 2003      Harikesavan Krishnan
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -78,89 +78,6 @@ static ssize_t unionfs_write(struct file *file, const char __user *buf,
 		unionfs_check_file(file);
 	}
 
-out:
-	unionfs_unlock_dentry(dentry);
-	unionfs_unlock_parent(dentry, parent);
-	unionfs_read_unlock(dentry->d_sb);
-	return err;
-}
-
-static ssize_t unionfs_aio_read(struct kiocb *iocb, const struct iovec
-				*iov, unsigned long nr_segs, loff_t pos)
-{
-	int err = -EINVAL;
-	struct file *file = iocb->ki_filp, *lower_file;
-	struct dentry *dentry = file->f_path.dentry;
-	struct dentry *parent;
-
-	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
-	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
-	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
-
-	err = unionfs_file_revalidate(file, parent, true);
-	if (unlikely(err))
-		goto out;
-
-	lower_file = unionfs_lower_file(file);
-	if (!lower_file->f_op->aio_read)
-		goto out;
-
-	get_file(lower_file);
-	iocb->ki_filp = lower_file;
-	err = lower_file->f_op->aio_read(iocb, iov, nr_segs, pos);
-	iocb->ki_filp = file;
-	fput(lower_file);
-
-	/* update our inode atime upon a successful lower read */
-	/* XXX: need to update upper inode atime when AIO completes */
-	if (err >= 0) {
-		fsstack_copy_attr_atime(dentry->d_inode,
-					lower_file->f_path.dentry->d_inode);
-		unionfs_check_file(file);
-	}
-out:
-	unionfs_unlock_dentry(dentry);
-	unionfs_unlock_parent(dentry, parent);
-	unionfs_read_unlock(dentry->d_sb);
-	return err;
-}
-
-static ssize_t unionfs_aio_write(struct kiocb *iocb, const struct iovec
-		*iov, unsigned long nr_segs, loff_t pos)
-{
-	int err = -EINVAL;
-	struct file *file = iocb->ki_filp, *lower_file;
-	struct dentry *dentry = file->f_path.dentry;
-	struct dentry *parent;
-
-	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
-	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
-	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
-
-	err = unionfs_file_revalidate(file, parent, true);
-	if (unlikely(err))
-		goto out;
-
-	lower_file = unionfs_lower_file(file);
-	if (!lower_file->f_op->aio_write)
-		goto out;
-
-	get_file(lower_file);
-	iocb->ki_filp = lower_file;
-	err = lower_file->f_op->aio_write(iocb, iov, nr_segs, pos);
-	iocb->ki_filp = file;
-	fput(lower_file);
-
-	/* update our inode times+sizes upon a successful lower write */
-	/* XXX: need to update upper inode times/sizes when AIO completes */
-	if (err >= 0) {
-		fsstack_copy_inode_size(dentry->d_inode,
-					lower_file->f_path.dentry->d_inode);
-		fsstack_copy_attr_times(dentry->d_inode,
-					lower_file->f_path.dentry->d_inode);
-		UNIONFS_F(file)->wrote_to_file = true; /* for delayed copyup */
-		unionfs_check_file(file);
-	}
 out:
 	unionfs_unlock_dentry(dentry);
 	unionfs_unlock_parent(dentry, parent);
@@ -450,8 +367,6 @@ struct file_operations unionfs_main_fops = {
 	.llseek		= generic_file_llseek,
 	.read		= unionfs_read,
 	.write		= unionfs_write,
-	.aio_read	= unionfs_aio_read,
-	.aio_write	= unionfs_aio_write,
 	.readdir	= unionfs_file_readdir,
 	.unlocked_ioctl	= unionfs_ioctl,
 	.mmap		= unionfs_mmap,

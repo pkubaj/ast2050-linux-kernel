@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2003-2006 Charles P. Wright
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2005-2006 Junjiro Okajima
@@ -8,8 +8,8 @@
  * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
  * Copyright (c) 2003      Puja Gupta
  * Copyright (c) 2003      Harikesavan Krishnan
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -287,7 +287,7 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
 	if (options[0] == '\0') {
 		printk(KERN_ERR "unionfs: no branches specified\n");
 		err = -EINVAL;
-		goto out_return;
+		goto out;
 	}
 
 	/*
@@ -303,17 +303,14 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
 		kcalloc(branches, sizeof(struct unionfs_data), GFP_KERNEL);
 	if (unlikely(!UNIONFS_SB(sb)->data)) {
 		err = -ENOMEM;
-		goto out_return;
+		goto out;
 	}
 
 	lower_root_info->lower_paths =
 		kcalloc(branches, sizeof(struct path), GFP_KERNEL);
 	if (unlikely(!lower_root_info->lower_paths)) {
 		err = -ENOMEM;
-		/* free the underlying pointer array */
-		kfree(UNIONFS_SB(sb)->data);
-		UNIONFS_SB(sb)->data = NULL;
-		goto out_return;
+		goto out;
 	}
 
 	/* now parsing a string such as "b1:b2=rw:b3=ro:b4" */
@@ -430,7 +427,6 @@ out:
 		lower_root_info->lower_paths = NULL;
 		UNIONFS_SB(sb)->data = NULL;
 	}
-out_return:
 	return err;
 }
 

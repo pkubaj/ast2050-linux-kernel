@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2003-2006 Charles P. Wright
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
  * Copyright (c) 2005      Arun M. Krishnakumar
@@ -7,8 +7,8 @@
  * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
  * Copyright (c) 2003      Puja Gupta
  * Copyright (c) 2003      Harikesavan Krishnan
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -22,7 +22,6 @@
 #include <linux/file.h>
 #include <linux/list.h>
 #include <linux/fs.h>
-#include <linux/aio.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mount.h>
@@ -486,15 +485,6 @@ static inline int set_branchperms(struct super_block *sb, int index, int perms)
 	return perms;
 }
 
-/* check if readonly lower inode, but possibly unlinked (no inode->i_sb) */
-static inline int __is_rdonly(const struct inode *inode)
-{
-	/* if unlinked, can't be readonly (?) */
-	if (!inode->i_sb)
-		return 0;
-	return IS_RDONLY(inode);
-
-}
 /* Is this file on a read-only branch? */
 static inline int is_robranch_super(const struct super_block *sb, int index)
 {
@@ -665,7 +655,6 @@ extern void __show_inode_counts(const struct inode *inode,
 #define show_inode_times(i)		do { } while (0)
 #define show_dinode_times(d)		do { } while (0)
 #define show_inode_counts(i)		do { } while (0)
-#define UDBG				do { } while (0)
 
 #endif /* not CONFIG_UNION_FS_DEBUG */
 

@@ -5724,7 +5724,8 @@ F:	drivers/cdrom/cdrom.c
 F:	include/linux/cdrom.h
 
 UNIONFS
-M:	Erez Zadok <ezk@cs.sunysb.edu>
+P:	Erez Zadok
+M:	ezk@cs.sunysb.edu
 L:	unionfs@filesystems.org
 W:	http://unionfs.filesystems.org/
 T:	git git.kernel.org/pub/scm/linux/kernel/git/ezk/unionfs.git

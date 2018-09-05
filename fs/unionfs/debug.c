@@ -1,8 +1,8 @@
 /*
- * Copyright (c) 2003-2014 Erez Zadok
+ * Copyright (c) 2003-2009 Erez Zadok
  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
- * Copyright (c) 2003-2014 Stony Brook University
- * Copyright (c) 2003-2014 The Research Foundation of SUNY
+ * Copyright (c) 2003-2009 Stony Brook University
+ * Copyright (c) 2003-2009 The Research Foundation of SUNY
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -362,13 +362,12 @@ void __unionfs_check_file(const struct file *file,
 		pr_debug(" CF0: file/dentry=%p:%p fstart/end=%d:%d\n",
 			 file, dentry, fstart, fend);
 	}
-	/* d_deleted dentries can be ignored for this test */
-	if (unlikely(fstart != dstart) && !d_deleted(dentry)) {
+	if (unlikely(fstart != dstart)) {
 		PRINT_CALLER(fname, fxn, line);
 		pr_debug(" CF1: file/dentry=%p:%p fstart=%d dstart=%d\n",
 			 file, dentry, fstart, dstart);
 	}
-	if (unlikely(fend != dend) && !d_deleted(dentry)) {
+	if (unlikely(fend != dend)) {
 		PRINT_CALLER(fname, fxn, line);
 		pr_debug(" CF2: file/dentry=%p:%p fend=%d dend=%d\n",
 			 file, dentry, fend, dend);
