@@ -26,7 +26,7 @@
 static void pl_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int rsize)
 {
-	if (rsize >= 60 && rdesc[39] == 0x2a && rdesc[40] == 0xf5 &&
+	if (rsize >= 62 && rdesc[39] == 0x2a && rdesc[40] == 0xf5 &&
 			rdesc[41] == 0x00 && rdesc[59] == 0x26 &&
 			rdesc[60] == 0xf9 && rdesc[61] == 0x00) {
 		dev_info(&hdev->dev, "fixing up Petalynx Maxter Remote report "
@@ -105,12 +105,12 @@ static struct hid_driver pl_driver = {
 	.probe = pl_probe,
 };
 
-static int pl_init(void)
+static int __init pl_init(void)
 {
 	return hid_register_driver(&pl_driver);
 }
 
-static void pl_exit(void)
+static void __exit pl_exit(void)
 {
 	hid_unregister_driver(&pl_driver);
 }

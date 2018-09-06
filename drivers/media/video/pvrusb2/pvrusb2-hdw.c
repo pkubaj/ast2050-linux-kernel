@@ -85,8 +85,8 @@ MODULE_PARM_DESC(video_std,"specify initial video standard");
 module_param_array(tolerance,    int, NULL, 0444);
 MODULE_PARM_DESC(tolerance,"specify stream error tolerance");
 
-/* US Broadcast channel 7 (175.25 MHz) */
-static int default_tv_freq    = 175250000L;
+/* US Broadcast channel 3 (61.25 MHz), to help with testing */
+static int default_tv_freq    = 61250000L;
 /* 104.3 MHz, a usable FM station for my area */
 static int default_radio_freq = 104300000L;
 
@@ -139,6 +139,15 @@ static const unsigned char *module_i2c_addresses[] = {
 	[PVR2_CLIENT_ID_WM8775] = "\x1b",
 	[PVR2_CLIENT_ID_CX25840] = "\x44",
 	[PVR2_CLIENT_ID_CS53L32A] = "\x11",
+};
+
+
+static const char *ir_scheme_names[] = {
+	[PVR2_IR_SCHEME_NONE] = "none",
+	[PVR2_IR_SCHEME_29XXX] = "29xxx",
+	[PVR2_IR_SCHEME_24XXX] = "24xxx (29xxx emulation)",
+	[PVR2_IR_SCHEME_24XXX_MCE] = "24xxx (MCE device)",
+	[PVR2_IR_SCHEME_ZILOG] = "Zilog",
 };
 
 
@@ -2054,8 +2063,8 @@ static int pvr2_hdw_load_subdev(struct pvr2_hdw *hdw,
 		return -EINVAL;
 	}
 
-	/* Note how the 2nd and 3rd arguments are the same for both
-	 * v4l2_i2c_new_subdev() and v4l2_i2c_new_probed_subdev().  Why?
+	/* Note how the 2nd and 3rd arguments are the same for
+	 * v4l2_i2c_new_subdev().  Why?
 	 * Well the 2nd argument is the module name to load, while the 3rd
 	 * argument is documented in the framework as being the "chipid" -
 	 * and every other place where I can find examples of this, the
@@ -2068,15 +2077,15 @@ static int pvr2_hdw_load_subdev(struct pvr2_hdw *hdw,
 			   mid, i2caddr[0]);
 		sd = v4l2_i2c_new_subdev(&hdw->v4l2_dev, &hdw->i2c_adap,
 					 fname, fname,
-					 i2caddr[0]);
+					 i2caddr[0], NULL);
 	} else {
 		pvr2_trace(PVR2_TRACE_INIT,
 			   "Module ID %u:"
 			   " Setting up with address probe list",
 			   mid);
-		sd = v4l2_i2c_new_probed_subdev(&hdw->v4l2_dev, &hdw->i2c_adap,
+		sd = v4l2_i2c_new_subdev(&hdw->v4l2_dev, &hdw->i2c_adap,
 						fname, fname,
-						i2caddr);
+						0, i2caddr);
 	}
 
 	if (!sd) {
@@ -2174,7 +2183,7 @@ static void pvr2_hdw_setup_low(struct pvr2_hdw *hdw)
 	}
 
 	/* Take the IR chip out of reset, if appropriate */
-	if (hdw->hdw_desc->ir_scheme == PVR2_IR_SCHEME_ZILOG) {
+	if (hdw->ir_scheme_active == PVR2_IR_SCHEME_ZILOG) {
 		pvr2_issue_simple_cmd(hdw,
 				      FX2CMD_HCW_ZILOG_RESET |
 				      (1 << 8) |
@@ -2457,6 +2466,7 @@ struct pvr2_hdw *pvr2_hdw_create(struct usb_interface *intf,
 				GFP_KERNEL);
 	if (!hdw->controls) goto fail;
 	hdw->hdw_desc = hdw_desc;
+	hdw->ir_scheme_active = hdw->hdw_desc->ir_scheme;
 	for (idx = 0; idx < hdw->control_cnt; idx++) {
 		cptr = hdw->controls + idx;
 		cptr->hdw = hdw;
@@ -2969,6 +2979,8 @@ static void pvr2_subdev_update(struct pvr2_hdw *hdw)
 	if (hdw->input_dirty || hdw->audiomode_dirty || hdw->force_dirty) {
 		struct v4l2_tuner vt;
 		memset(&vt, 0, sizeof(vt));
+		vt.type = (hdw->input_val == PVR2_CVAL_INPUT_RADIO) ?
+			V4L2_TUNER_RADIO : V4L2_TUNER_ANALOG_TV;
 		vt.audmode = hdw->audiomode_val;
 		v4l2_device_call_all(&hdw->v4l2_dev, 0, tuner, s_tuner, &vt);
 	}
@@ -4817,6 +4829,12 @@ static unsigned int pvr2_hdw_report_unlocked(struct pvr2_hdw *hdw,int which,
 			stats.buffers_processed,
 			stats.buffers_failed);
 	}
+	case 6: {
+		unsigned int id = hdw->ir_scheme_active;
+		return scnprintf(buf, acnt, "ir scheme: id=%d %s", id,
+				 (id >= ARRAY_SIZE(ir_scheme_names) ?
+				  "?" : ir_scheme_names[id]));
+	}
 	default: break;
 	}
 	return 0;
@@ -4833,65 +4851,35 @@ static unsigned int pvr2_hdw_report_clients(struct pvr2_hdw *hdw,
 	unsigned int tcnt = 0;
 	unsigned int ccnt;
 	struct i2c_client *client;
-	struct list_head *item;
-	void *cd;
 	const char *p;
 	unsigned int id;
 
-	ccnt = scnprintf(buf, acnt, "Associated v4l2-subdev drivers:");
+	ccnt = scnprintf(buf, acnt, "Associated v4l2-subdev drivers and I2C clients:\n");
 	tcnt += ccnt;
 	v4l2_device_for_each_subdev(sd, &hdw->v4l2_dev) {
 		id = sd->grp_id;
 		p = NULL;
 		if (id < ARRAY_SIZE(module_names)) p = module_names[id];
 		if (p) {
-			ccnt = scnprintf(buf + tcnt, acnt - tcnt, " %s", p);
+			ccnt = scnprintf(buf + tcnt, acnt - tcnt, "  %s:", p);
 			tcnt += ccnt;
 		} else {
 			ccnt = scnprintf(buf + tcnt, acnt - tcnt,
-					 " (unknown id=%u)", id);
+					 "  (unknown id=%u):", id);
+			tcnt += ccnt;
+		}
+		client = v4l2_get_subdevdata(sd);
+		if (client) {
+			ccnt = scnprintf(buf + tcnt, acnt - tcnt,
+					 " %s @ %02x\n", client->name,
+					 client->addr);
+			tcnt += ccnt;
+		} else {
+			ccnt = scnprintf(buf + tcnt, acnt - tcnt,
+					 " no i2c client\n");
 			tcnt += ccnt;
 		}
 	}
-	ccnt = scnprintf(buf + tcnt, acnt - tcnt, "\n");
-	tcnt += ccnt;
-
-	ccnt = scnprintf(buf + tcnt, acnt - tcnt, "I2C clients:\n");
-	tcnt += ccnt;
-
-	mutex_lock(&hdw->i2c_adap.clist_lock);
-	list_for_each(item, &hdw->i2c_adap.clients) {
-		client = list_entry(item, struct i2c_client, list);
-		ccnt = scnprintf(buf + tcnt, acnt - tcnt,
-				 "  %s: i2c=%02x", client->name, client->addr);
-		tcnt += ccnt;
-		cd = i2c_get_clientdata(client);
-		v4l2_device_for_each_subdev(sd, &hdw->v4l2_dev) {
-			if (cd == sd) {
-				id = sd->grp_id;
-				p = NULL;
-				if (id < ARRAY_SIZE(module_names)) {
-					p = module_names[id];
-				}
-				if (p) {
-					ccnt = scnprintf(buf + tcnt,
-							 acnt - tcnt,
-							 " subdev=%s", p);
-					tcnt += ccnt;
-				} else {
-					ccnt = scnprintf(buf + tcnt,
-							 acnt - tcnt,
-							 " subdev= id %u)",
-							 id);
-					tcnt += ccnt;
-				}
-				break;
-			}
-		}
-		ccnt = scnprintf(buf + tcnt, acnt - tcnt, "\n");
-		tcnt += ccnt;
-	}
-	mutex_unlock(&hdw->i2c_adap.clist_lock);
 	return tcnt;
 }
 
@@ -5078,6 +5066,8 @@ void pvr2_hdw_status_poll(struct pvr2_hdw *hdw)
 {
 	struct v4l2_tuner *vtp = &hdw->tuner_signal_info;
 	memset(vtp, 0, sizeof(*vtp));
+	vtp->type = (hdw->input_val == PVR2_CVAL_INPUT_RADIO) ?
+		V4L2_TUNER_RADIO : V4L2_TUNER_ANALOG_TV;
 	hdw->tuner_signal_stale = 0;
 	/* Note: There apparently is no replacement for VIDIOC_CROPCAP
 	   using v4l2-subdev - therefore we can't support that AT ALL right

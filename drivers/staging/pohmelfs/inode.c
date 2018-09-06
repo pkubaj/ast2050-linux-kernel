@@ -386,7 +386,7 @@ static int pohmelfs_write_inode_create_children(struct inode *inode)
 		if (inode && (inode->i_state & I_DIRTY)) {
 			struct pohmelfs_inode *pi = POHMELFS_I(inode);
 			pohmelfs_write_create_inode(pi);
-			//pohmelfs_meta_command(pi, NETFS_INODE_INFO, 0, NULL, NULL, 0);
+			/* pohmelfs_meta_command(pi, NETFS_INODE_INFO, 0, NULL, NULL, 0); */
 			iput(inode);
 		}
 	}
@@ -845,7 +845,7 @@ static void pohmelfs_destroy_inode(struct inode *inode)
 	struct pohmelfs_sb *psb = POHMELFS_SB(sb);
 	struct pohmelfs_inode *pi = POHMELFS_I(inode);
 
-	//pohmelfs_data_unlock(pi, 0, inode->i_size, POHMELFS_READ_LOCK);
+	/* pohmelfs_data_unlock(pi, 0, inode->i_size, POHMELFS_READ_LOCK); */
 
 	pohmelfs_inode_del_inode(psb, pi);
 
@@ -921,16 +921,16 @@ ssize_t pohmelfs_write(struct file *file, const char __user *buf,
 	if (ret)
 		goto err_out_unlock;
 
-	ret = generic_file_aio_write_nolock(&kiocb, &iov, 1, pos);
+	ret = __generic_file_aio_write(&kiocb, &iov, 1, &kiocb.ki_pos);
 	*ppos = kiocb.ki_pos;
 
 	mutex_unlock(&inode->i_mutex);
 	WARN_ON(ret < 0);
 
-	if (ret > 0 && ((file->f_flags & O_SYNC) || IS_SYNC(inode))) {
+	if (ret > 0) {
 		ssize_t err;
 
-		err = sync_page_range(inode, mapping, pos, ret);
+		err = generic_write_sync(file, pos, ret);
 		if (err < 0)
 			ret = err;
 		WARN_ON(ret < 0);
@@ -943,7 +943,7 @@ err_out_unlock:
 	return ret;
 }
 
-const static struct file_operations pohmelfs_file_ops = {
+static const struct file_operations pohmelfs_file_ops = {
 	.open		= generic_file_open,
 	.fsync		= pohmelfs_fsync,
 
@@ -1504,7 +1504,9 @@ static void pohmelfs_flush_inode(struct pohmelfs_inode *pi, unsigned int count)
 		inode->i_sb->s_op->write_inode(inode, 0);
 	}
 
+#ifdef POHMELFS_TRUNCATE_ON_INODE_FLUSH
 	truncate_inode_pages(inode->i_mapping, 0);
+#endif
 
 	pohmelfs_data_unlock(pi, 0, ~0, POHMELFS_WRITE_LOCK);
 	mutex_unlock(&inode->i_mutex);
@@ -1529,9 +1531,9 @@ static void pohmelfs_drop_scan(struct work_struct *work)
 	struct pohmelfs_inode *pi;
 	unsigned int count = 0;
 
-	while ((pi = pohmelfs_get_inode_from_list(psb, &psb->drop_list, &count))) {
+	while ((pi = pohmelfs_get_inode_from_list(psb, &psb->drop_list, &count)))
 		pohmelfs_put_inode_count(pi, count);
-	}
+
 	pohmelfs_check_states(psb);
 
 	if (psb->drop_scan_timeout)
@@ -1568,9 +1570,8 @@ static void pohmelfs_trans_scan_state(struct netfs_state *st)
 		rb_node = rb_next(rb_node);
 
 		err = -ETIMEDOUT;
-		if (timeout && (++dst->retries < psb->trans_retries)) {
+		if (timeout && (++dst->retries < psb->trans_retries))
 			err = netfs_trans_resend(t, psb);
-		}
 
 		if (err || (t->flags & NETFS_TRANS_SINGLE_DST)) {
 			if (netfs_trans_remove_nolock(dst, st))
@@ -1744,11 +1745,10 @@ static int pohmelfs_root_handshake(struct pohmelfs_sb *psb)
 	err = wait_event_interruptible_timeout(psb->wait,
 			(psb->flags != ~0),
 			psb->wait_on_page_timeout);
-	if (!err) {
+	if (!err)
 		err = -ETIMEDOUT;
-	} else {
+	else if (err > 0)
 		err = -psb->flags;
-	}
 
 	if (err)
 		goto err_out_exit;
@@ -1777,7 +1777,7 @@ static int pohmelfs_show_stats(struct seq_file *m, struct vfsmount *mnt)
 		seq_printf(m, "%u ", ctl->idx);
 		if (ctl->addr.sa_family == AF_INET) {
 			struct sockaddr_in *sin = (struct sockaddr_in *)&st->ctl.addr;
-			//seq_printf(m, "%pi4:%u", &sin->sin_addr.s_addr, ntohs(sin->sin_port));
+			/* seq_printf(m, "%pi4:%u", &sin->sin_addr.s_addr, ntohs(sin->sin_port)); */
 			seq_printf(m, "%u.%u.%u.%u:%u", NIPQUAD(sin->sin_addr.s_addr), ntohs(sin->sin_port));
 		} else if (ctl->addr.sa_family == AF_INET6) {
 			struct sockaddr_in6 *sin = (struct sockaddr_in6 *)&st->ctl.addr;
@@ -1866,7 +1866,7 @@ static int pohmelfs_fill_super(struct super_block *sb, void *data, int silent)
 	INIT_LIST_HEAD(&psb->crypto_active_list);
 
 	atomic_set(&psb->trans_gen, 1);
-	atomic_set(&psb->total_inodes, 0);
+	atomic_long_set(&psb->total_inodes, 0);
 
 	mutex_init(&psb->state_lock);
 	INIT_LIST_HEAD(&psb->state_list);
@@ -1951,14 +1951,7 @@ static int pohmelfs_get_sb(struct file_system_type *fs_type,
  */
 static void pohmelfs_kill_super(struct super_block *sb)
 {
-	struct writeback_control wbc = {
-		.sync_mode	= WB_SYNC_ALL,
-		.range_start	= 0,
-		.range_end	= LLONG_MAX,
-		.nr_to_write	= LONG_MAX,
-	};
-	generic_sync_sb_inodes(sb, &wbc);
-
+	sync_inodes_sb(sb);
 	kill_anon_super(sb);
 }
 

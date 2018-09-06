@@ -491,7 +491,7 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 	    pdn->eeh_mode & EEH_MODE_NOCHECK) {
 		ignored_check++;
 		pr_debug("EEH: Ignored check (%x) for %s %s\n",
-			 pdn->eeh_mode, pci_name (dev), dn->full_name);
+			 pdn->eeh_mode, eeh_pci_name(dev), dn->full_name);
 		return 0;
 	}
 
@@ -515,7 +515,7 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 			printk (KERN_ERR "EEH: %d reads ignored for recovering device at "
 				"location=%s driver=%s pci addr=%s\n",
 				pdn->eeh_check_count, location,
-				dev->driver->name, pci_name(dev));
+				dev->driver->name, eeh_pci_name(dev));
 			printk (KERN_ERR "EEH: Might be infinite loop in %s driver\n",
 				dev->driver->name);
 			dump_stack();
@@ -744,7 +744,15 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
 
 static void __rtas_set_slot_reset(struct pci_dn *pdn)
 {
-	rtas_pci_slot_reset (pdn, 1);
+	struct pci_dev *dev = pdn->pcidev;
+
+	/* Determine type of EEH reset required by device,
+	 * default hot reset or fundamental reset
+	 */
+	if (dev->needs_freset)
+		rtas_pci_slot_reset(pdn, 3);
+	else
+		rtas_pci_slot_reset(pdn, 1);
 
 	/* The PCI bus requires that the reset be held high for at least
 	 * a 100 milliseconds. We wait a bit longer 'just in case'.  */

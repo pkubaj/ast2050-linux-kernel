@@ -23,11 +23,15 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <linux/keyctl.h>
+#include <linux/key-type.h>
 #include <keys/user-type.h>
 #include "dns_resolve.h"
 #include "cifsglob.h"
 #include "cifsproto.h"
 #include "cifs_debug.h"
+
+static const struct cred *dns_resolver_cache;
 
 /* Checks if supplied name is IP address
  * returns:
@@ -35,26 +39,11 @@
  * 		0 - name is not IP
  */
 static int
-is_ip(const char *name)
+is_ip(char *name)
 {
-	int rc;
-	struct sockaddr_in sin_server;
-	struct sockaddr_in6 sin_server6;
+	struct sockaddr_storage ss;
 
-	rc = cifs_inet_pton(AF_INET, name,
-			&sin_server.sin_addr.s_addr);
-
-	if (rc <= 0) {
-		/* not ipv4 address, try ipv6 */
-		rc = cifs_inet_pton(AF_INET6, name,
-				&sin_server6.sin6_addr.in6_u);
-		if (rc > 0)
-			return 1;
-	} else {
-		return 1;
-	}
-	/* we failed translating address */
-	return 0;
+	return cifs_convert_address(name, &ss);
 }
 
 static int
@@ -72,7 +61,7 @@ dns_resolver_instantiate(struct key *key, const void *data,
 	ip[datalen] = '\0';
 
 	/* make sure this looks like an address */
-	if (!is_ip((const char *) ip)) {
+	if (!is_ip(ip)) {
 		kfree(ip);
 		return -EINVAL;
 	}
@@ -108,6 +97,7 @@ struct key_type key_type_dns_resolver = {
 int
 dns_resolve_server_name_to_ip(const char *unc, char **ip_addr)
 {
+	const struct cred *saved_cred;
 	int rc = -EAGAIN;
 	struct key *rkey = ERR_PTR(-EAGAIN);
 	char *name;
@@ -147,8 +137,15 @@ dns_resolve_server_name_to_ip(const char *unc, char **ip_addr)
 		goto skip_upcall;
 	}
 
+	saved_cred = override_creds(dns_resolver_cache);
 	rkey = request_key(&key_type_dns_resolver, name, "");
+	revert_creds(saved_cred);
 	if (!IS_ERR(rkey)) {
+		if (!(rkey->perm & KEY_USR_VIEW)) {
+			down_read(&rkey->sem);
+			rkey->perm |= KEY_USR_VIEW;
+			up_read(&rkey->sem);
+		}
 		len = rkey->type_data.x[0];
 		data = rkey->payload.data;
 	} else {
@@ -179,4 +176,61 @@ out:
 	return rc;
 }
 
+int __init cifs_init_dns_resolver(void)
+{
+	struct cred *cred;
+	struct key *keyring;
+	int ret;
 
+	printk(KERN_NOTICE "Registering the %s key type\n",
+	       key_type_dns_resolver.name);
+
+	/* create an override credential set with a special thread keyring in
+	 * which DNS requests are cached
+	 *
+	 * this is used to prevent malicious redirections from being installed
+	 * with add_key().
+	 */
+	cred = prepare_kernel_cred(NULL);
+	if (!cred)
+		return -ENOMEM;
+
+	keyring = key_alloc(&key_type_keyring, ".dns_resolver", 0, 0, cred,
+			    (KEY_POS_ALL & ~KEY_POS_SETATTR) |
+			    KEY_USR_VIEW | KEY_USR_READ,
+			    KEY_ALLOC_NOT_IN_QUOTA);
+	if (IS_ERR(keyring)) {
+		ret = PTR_ERR(keyring);
+		goto failed_put_cred;
+	}
+
+	ret = key_instantiate_and_link(keyring, NULL, 0, NULL, NULL);
+	if (ret < 0)
+		goto failed_put_key;
+
+	ret = register_key_type(&key_type_dns_resolver);
+	if (ret < 0)
+		goto failed_put_key;
+
+	/* instruct request_key() to use this special keyring as a cache for
+	 * the results it looks up */
+	cred->thread_keyring = keyring;
+	cred->jit_keyring = KEY_REQKEY_DEFL_THREAD_KEYRING;
+	dns_resolver_cache = cred;
+	return 0;
+
+failed_put_key:
+	key_put(keyring);
+failed_put_cred:
+	put_cred(cred);
+	return ret;
+}
+
+void cifs_exit_dns_resolver(void)
+{
+	key_revoke(dns_resolver_cache->thread_keyring);
+	unregister_key_type(&key_type_dns_resolver);
+	put_cred(dns_resolver_cache);
+	printk(KERN_NOTICE "Unregistered %s key type\n",
+	       key_type_dns_resolver.name);
+}

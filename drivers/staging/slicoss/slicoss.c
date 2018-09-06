@@ -845,7 +845,7 @@ static int slic_xmit_start(struct sk_buff *skb, struct net_device *dev)
 				 hcmd->paddrh, DONT_FLUSH);
 	}
 xmit_done:
-	return 0;
+	return NETDEV_TX_OK;
 xmit_fail:
 	slic_xmit_fail(adapter, skb, offloadcmd, skbtype, status);
 	goto xmit_done;
@@ -1306,7 +1306,7 @@ static void slic_mcast_init_crc32(void)
 
 	static int p[] = { 0, 1, 2, 4, 5, 7, 8, 10, 11, 12, 16, 22, 23, 26 };
 
-	for (i = 0; i < sizeof(p) / sizeof(int); i++)
+	for (i = 0; i < ARRAY_SIZE(p); i++)
 		e |= 1L << (31 - p[i]);
 
 	for (i = 1; i < 256; i++) {
@@ -1872,7 +1872,6 @@ static int slic_card_download(struct adapter *adapter)
 	__iomem struct slic_regs *slic_regs = adapter->slic_regs;
 	u32 instruction;
 	u32 baseaddress;
-	u32 failure;
 	u32 i;
 	u32 numsects = 0;
 	u32 sectsize[3];
@@ -4049,7 +4048,7 @@ static struct pci_driver slic_driver = {
 	.name = DRV_NAME,
 	.id_table = slic_pci_tbl,
 	.probe = slic_entry_probe,
-	.remove = slic_entry_remove,
+	.remove = __devexit_p(slic_entry_remove),
 };
 
 static int __init slic_module_init(void)

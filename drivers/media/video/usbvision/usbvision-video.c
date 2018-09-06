@@ -50,8 +50,8 @@
 #include <linux/list.h>
 #include <linux/timer.h>
 #include <linux/slab.h>
+#include <linux/smp_lock.h>
 #include <linux/mm.h>
-#include <linux/utsname.h>
 #include <linux/highmem.h>
 #include <linux/vmalloc.h>
 #include <linux/module.h>
@@ -541,7 +541,7 @@ static int vidioc_enum_input (struct file *file, void *priv,
 	struct usb_usbvision *usbvision = video_drvdata(file);
 	int chan;
 
-	if ((vi->index >= usbvision->video_inputs) || (vi->index < 0) )
+	if (vi->index >= usbvision->video_inputs)
 		return -EINVAL;
 	if (usbvision->have_tuner) {
 		chan = vi->index;
@@ -1651,6 +1651,13 @@ static int __devinit usbvision_probe(struct usb_interface *intf,
 	printk(KERN_INFO "%s: %s found\n", __func__,
 				usbvision_device_data[model].ModelString);
 
+	/*
+	 * this is a security check.
+	 * an exploit using an incorrect bInterfaceNumber is known
+	 */
+	if (ifnum >= USB_MAXINTERFACES || !dev->actconfig->interface[ifnum])
+		return -ENODEV;
+
 	if (usbvision_device_data[model].Interface >= 0) {
 		interface = &dev->actconfig->interface[usbvision_device_data[model].Interface]->altsetting[0];
 	} else {
@@ -1794,7 +1801,7 @@ static struct usb_driver usbvision_driver = {
 	.name		= "usbvision",
 	.id_table	= usbvision_table,
 	.probe		= usbvision_probe,
-	.disconnect	= usbvision_disconnect
+	.disconnect	= __devexit_p(usbvision_disconnect),
 };
 
 /*

@@ -37,18 +37,22 @@ enum {
 	THE_NILFS_LOADED,       /* Roll-back/roll-forward has done and
 				   the latest checkpoint was loaded */
 	THE_NILFS_DISCONTINUED,	/* 'next' pointer chain has broken */
+	THE_NILFS_GC_RUNNING,	/* gc process is running */
 };
 
 /**
  * struct the_nilfs - struct to supervise multiple nilfs mount points
  * @ns_flags: flags
  * @ns_count: reference count
+ * @ns_list: list head for nilfs_list
  * @ns_bdev: block device
  * @ns_bdi: backing dev info
  * @ns_writer: back pointer to writable nilfs_sb_info
  * @ns_sem: semaphore for shared states
- * @ns_writer_mutex: mutex protecting ns_writer attach/detach
- * @ns_writer_refcount: number of referrers on ns_writer
+ * @ns_super_sem: semaphore for global operations across super block instances
+ * @ns_mount_mutex: mutex protecting mount process of nilfs
+ * @ns_writer_sem: semaphore protecting ns_writer attach/detach
+ * @ns_current: back pointer to current mount
  * @ns_sbh: buffer heads of on-disk super blocks
  * @ns_sbp: pointers to super block data
  * @ns_sbwtime: previous write time of super blocks
@@ -88,13 +92,21 @@ enum {
 struct the_nilfs {
 	unsigned long		ns_flags;
 	atomic_t		ns_count;
+	struct list_head	ns_list;
 
 	struct block_device    *ns_bdev;
 	struct backing_dev_info *ns_bdi;
 	struct nilfs_sb_info   *ns_writer;
 	struct rw_semaphore	ns_sem;
-	struct mutex		ns_writer_mutex;
-	atomic_t		ns_writer_refcount;
+	struct rw_semaphore	ns_super_sem;
+	struct mutex		ns_mount_mutex;
+	struct rw_semaphore	ns_writer_sem;
+
+	/*
+	 * components protected by ns_super_sem
+	 */
+	struct nilfs_sb_info   *ns_current;
+	struct list_head	ns_supers;
 
 	/*
 	 * used for
@@ -108,7 +120,6 @@ struct the_nilfs {
 	time_t			ns_sbwtime[2];
 	unsigned		ns_sbsize;
 	unsigned		ns_mount_state;
-	struct list_head	ns_supers;
 
 	/*
 	 * Following fields are dedicated to a writable FS-instance.
@@ -185,17 +196,33 @@ static inline int nilfs_##name(struct the_nilfs *nilfs)			\
 THE_NILFS_FNS(INIT, init)
 THE_NILFS_FNS(LOADED, loaded)
 THE_NILFS_FNS(DISCONTINUED, discontinued)
+THE_NILFS_FNS(GC_RUNNING, gc_running)
 
 /* Minimum interval of periodical update of superblocks (in seconds) */
 #define NILFS_SB_FREQ		10
 #define NILFS_ALTSB_FREQ	60  /* spare superblock */
 
+static inline int nilfs_sb_need_update(struct the_nilfs *nilfs)
+{
+	u64 t = get_seconds();
+	return t < nilfs->ns_sbwtime[0] ||
+		 t > nilfs->ns_sbwtime[0] + NILFS_SB_FREQ;
+}
+
+static inline int nilfs_altsb_need_update(struct the_nilfs *nilfs)
+{
+	u64 t = get_seconds();
+	struct nilfs_super_block **sbp = nilfs->ns_sbp;
+	return sbp[1] && t > nilfs->ns_sbwtime[1] + NILFS_ALTSB_FREQ;
+}
+
 void nilfs_set_last_segment(struct the_nilfs *, sector_t, u64, __u64);
-struct the_nilfs *alloc_nilfs(struct block_device *);
+struct the_nilfs *find_or_create_nilfs(struct block_device *);
 void put_nilfs(struct the_nilfs *);
 int init_nilfs(struct the_nilfs *, struct nilfs_sb_info *, char *);
 int load_nilfs(struct the_nilfs *, struct nilfs_sb_info *);
 int nilfs_count_free_blocks(struct the_nilfs *, sector_t *);
+struct nilfs_sb_info *nilfs_find_sbinfo(struct the_nilfs *, int, __u64);
 int nilfs_checkpoint_is_mounted(struct the_nilfs *, __u64, int);
 int nilfs_near_disk_full(struct the_nilfs *);
 void nilfs_fall_back_super_block(struct the_nilfs *);
@@ -208,34 +235,27 @@ static inline void get_nilfs(struct the_nilfs *nilfs)
 	atomic_inc(&nilfs->ns_count);
 }
 
-static inline struct nilfs_sb_info *nilfs_get_writer(struct the_nilfs *nilfs)
-{
-	if (atomic_inc_and_test(&nilfs->ns_writer_refcount))
-		mutex_lock(&nilfs->ns_writer_mutex);
-	return nilfs->ns_writer;
-}
-
-static inline void nilfs_put_writer(struct the_nilfs *nilfs)
-{
-	if (atomic_add_negative(-1, &nilfs->ns_writer_refcount))
-		mutex_unlock(&nilfs->ns_writer_mutex);
-}
-
 static inline void
 nilfs_attach_writer(struct the_nilfs *nilfs, struct nilfs_sb_info *sbi)
 {
-	mutex_lock(&nilfs->ns_writer_mutex);
+	down_write(&nilfs->ns_writer_sem);
 	nilfs->ns_writer = sbi;
-	mutex_unlock(&nilfs->ns_writer_mutex);
+	up_write(&nilfs->ns_writer_sem);
 }
 
 static inline void
 nilfs_detach_writer(struct the_nilfs *nilfs, struct nilfs_sb_info *sbi)
 {
-	mutex_lock(&nilfs->ns_writer_mutex);
+	down_write(&nilfs->ns_writer_sem);
 	if (sbi == nilfs->ns_writer)
 		nilfs->ns_writer = NULL;
-	mutex_unlock(&nilfs->ns_writer_mutex);
+	up_write(&nilfs->ns_writer_sem);
+}
+
+static inline void nilfs_put_sbinfo(struct nilfs_sb_info *sbi)
+{
+	if (atomic_dec_and_test(&sbi->s_count))
+		kfree(sbi);
 }
 
 static inline void

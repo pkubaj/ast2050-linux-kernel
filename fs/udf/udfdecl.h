@@ -29,6 +29,13 @@ do { \
 #define udf_debug(f, a...) /**/
 #endif
 
+__attribute__((format(printf, 3, 4)))
+extern void udf_warning(struct super_block *, const char *, const char *, ...);
+
+__attribute__((format(printf, 3, 4)))
+extern void udf_error(struct super_block *sb, const char *function,
+		      const char *fmt, ...);
+
 #define udf_info(f, a...) \
 	printk(KERN_INFO "UDF-fs INFO " f, ##a);
 
@@ -110,7 +117,6 @@ struct extent_position {
 };
 
 /* super.c */
-extern void udf_warning(struct super_block *, const char *, const char *, ...);
 static inline void udf_updated_lvid(struct super_block *sb)
 {
 	struct buffer_head *bh = UDF_SB(sb)->s_lvid_bh;
@@ -200,7 +206,8 @@ udf_get_lb_pblock(struct super_block *sb, struct kernel_lb_addr *loc,
 }
 
 /* unicode.c */
-extern int udf_get_filename(struct super_block *, uint8_t *, uint8_t *, int);
+extern int udf_get_filename(struct super_block *, uint8_t *, int, uint8_t *,
+			    int);
 extern int udf_put_filename(struct super_block *, const uint8_t *, uint8_t *,
 			    int);
 extern int udf_build_ustr(struct ustr *, dstring *, int);
@@ -222,9 +229,6 @@ extern int udf_prealloc_blocks(struct super_block *, struct inode *, uint16_t,
 			       uint32_t, uint32_t);
 extern int udf_new_block(struct super_block *, struct inode *, uint16_t,
 			 uint32_t, int *);
-
-/* fsync.c */
-extern int udf_fsync_file(struct file *, struct dentry *, int);
 
 /* directory.c */
 extern struct fileIdentDesc *udf_fileident_read(struct inode *, loff_t *,

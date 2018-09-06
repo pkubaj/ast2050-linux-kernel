@@ -43,6 +43,9 @@
 #include <linux/seq_file.h>
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
+#include "sleep.h"
+
+#define PREFIX "ACPI: "
 
 #define _COMPONENT			ACPI_POWER_COMPONENT
 ACPI_MODULE_NAME("power");
@@ -194,7 +197,7 @@ static int acpi_power_get_list_state(struct acpi_handle_list *list, int *state)
 
 static int acpi_power_on(acpi_handle handle, struct acpi_device *dev)
 {
-	int result = 0, state;
+	int result = 0;
 	int found = 0;
 	acpi_status status = AE_OK;
 	struct acpi_power_resource *resource = NULL;
@@ -236,18 +239,6 @@ static int acpi_power_on(acpi_handle handle, struct acpi_device *dev)
 	if (ACPI_FAILURE(status))
 		return -ENODEV;
 
-	if (!acpi_power_nocheck) {
-		/*
-		 * If acpi_power_nocheck is set, it is unnecessary to check
-		 * the power state after power transition.
-		 */
-		result = acpi_power_get_state(resource->device->handle,
-				&state);
-		if (result)
-			return result;
-		if (state != ACPI_POWER_RESOURCE_STATE_ON)
-			return -ENOEXEC;
-	}
 	/* Update the power resource's _device_ power state */
 	resource->device->power.state = ACPI_STATE_D0;
 
@@ -258,7 +249,7 @@ static int acpi_power_on(acpi_handle handle, struct acpi_device *dev)
 
 static int acpi_power_off_device(acpi_handle handle, struct acpi_device *dev)
 {
-	int result = 0, state;
+	int result = 0;
 	acpi_status status = AE_OK;
 	struct acpi_power_resource *resource = NULL;
 	struct list_head *node, *next;
@@ -292,18 +283,6 @@ static int acpi_power_off_device(acpi_handle handle, struct acpi_device *dev)
 	status = acpi_evaluate_object(resource->device->handle, "_OFF", NULL, NULL);
 	if (ACPI_FAILURE(status))
 		return -ENODEV;
-
-	if (!acpi_power_nocheck) {
-		/*
-		 * If acpi_power_nocheck is set, it is unnecessary to check
-		 * the power state after power transition.
-		 */
-		result = acpi_power_get_state(handle, &state);
-		if (result)
-			return result;
-		if (state != ACPI_POWER_RESOURCE_STATE_OFF)
-			return -ENOEXEC;
-	}
 
 	/* Update the power resource's _device_ power state */
 	resource->device->power.state = ACPI_STATE_D3;
@@ -385,17 +364,15 @@ int acpi_device_sleep_wake(struct acpi_device *dev,
  */
 int acpi_enable_wakeup_device_power(struct acpi_device *dev, int sleep_state)
 {
-	int i, err;
+	int i, err = 0;
 
 	if (!dev || !dev->wakeup.flags.valid)
 		return -EINVAL;
 
-	/*
-	 * Do not execute the code below twice in a row without calling
-	 * acpi_disable_wakeup_device_power() in between for the same device
-	 */
-	if (dev->wakeup.flags.prepared)
-		return 0;
+	mutex_lock(&acpi_device_lock);
+
+	if (dev->wakeup.prepare_count++)
+		goto out;
 
 	/* Open power resource */
 	for (i = 0; i < dev->wakeup.resources.count; i++) {
@@ -403,7 +380,8 @@ int acpi_enable_wakeup_device_power(struct acpi_device *dev, int sleep_state)
 		if (ret) {
 			printk(KERN_ERR PREFIX "Transition power state\n");
 			dev->wakeup.flags.valid = 0;
-			return -ENODEV;
+			err = -ENODEV;
+			goto err_out;
 		}
 	}
 
@@ -412,9 +390,13 @@ int acpi_enable_wakeup_device_power(struct acpi_device *dev, int sleep_state)
 	 * in arbitrary power state afterwards.
 	 */
 	err = acpi_device_sleep_wake(dev, 1, sleep_state, 3);
-	if (!err)
-		dev->wakeup.flags.prepared = 1;
 
+ err_out:
+	if (err)
+		dev->wakeup.prepare_count = 0;
+
+ out:
+	mutex_unlock(&acpi_device_lock);
 	return err;
 }
 
@@ -426,35 +408,42 @@ int acpi_enable_wakeup_device_power(struct acpi_device *dev, int sleep_state)
  */
 int acpi_disable_wakeup_device_power(struct acpi_device *dev)
 {
-	int i, ret;
+	int i, err = 0;
 
 	if (!dev || !dev->wakeup.flags.valid)
 		return -EINVAL;
 
+	mutex_lock(&acpi_device_lock);
+
+	if (--dev->wakeup.prepare_count > 0)
+		goto out;
+
 	/*
-	 * Do not execute the code below twice in a row without calling
-	 * acpi_enable_wakeup_device_power() in between for the same device
+	 * Executing the code below even if prepare_count is already zero when
+	 * the function is called may be useful, for example for initialisation.
 	 */
-	if (!dev->wakeup.flags.prepared)
-		return 0;
+	if (dev->wakeup.prepare_count < 0)
+		dev->wakeup.prepare_count = 0;
 
-	dev->wakeup.flags.prepared = 0;
-
-	ret = acpi_device_sleep_wake(dev, 0, 0, 0);
-	if (ret)
-		return ret;
+	err = acpi_device_sleep_wake(dev, 0, 0, 0);
+	if (err)
+		goto out;
 
 	/* Close power resource */
 	for (i = 0; i < dev->wakeup.resources.count; i++) {
-		ret = acpi_power_off_device(dev->wakeup.resources.handles[i], dev);
+		int ret = acpi_power_off_device(
+				dev->wakeup.resources.handles[i], dev);
 		if (ret) {
 			printk(KERN_ERR PREFIX "Transition power state\n");
 			dev->wakeup.flags.valid = 0;
-			return -ENODEV;
+			err = -ENODEV;
+			goto out;
 		}
 	}
 
-	return ret;
+ out:
+	mutex_unlock(&acpi_device_lock);
+	return err;
 }
 
 /* --------------------------------------------------------------------------

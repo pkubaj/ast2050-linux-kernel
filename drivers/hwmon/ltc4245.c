@@ -22,15 +22,6 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 
-/* Valid addresses are 0x20 - 0x3f
- *
- * For now, we do not probe, since some of these addresses
- * are known to be unfriendly to probing */
-static const unsigned short normal_i2c[] = { I2C_CLIENT_END };
-
-/* Insmod parameters */
-I2C_CLIENT_INSMOD_1(ltc4245);
-
 /* Here are names of the chip's registers (a.k.a. commands) */
 enum ltc4245_cmd {
 	LTC4245_STATUS			= 0x00, /* readonly */
@@ -54,9 +45,7 @@ enum ltc4245_cmd {
 	LTC4245_VEEIN			= 0x19,
 	LTC4245_VEESENSE		= 0x1a,
 	LTC4245_VEEOUT			= 0x1b,
-	LTC4245_GPIOADC1		= 0x1c,
-	LTC4245_GPIOADC2		= 0x1d,
-	LTC4245_GPIOADC3		= 0x1e,
+	LTC4245_GPIOADC			= 0x1c,
 };
 
 struct ltc4245_data {
@@ -70,7 +59,7 @@ struct ltc4245_data {
 	u8 cregs[0x08];
 
 	/* Voltage registers */
-	u8 vregs[0x0f];
+	u8 vregs[0x0d];
 };
 
 static struct ltc4245_data *ltc4245_update_device(struct device *dev)
@@ -95,7 +84,7 @@ static struct ltc4245_data *ltc4245_update_device(struct device *dev)
 				data->cregs[i] = val;
 		}
 
-		/* Read voltage registers -- 0x10 to 0x1f */
+		/* Read voltage registers -- 0x10 to 0x1c */
 		for (i = 0; i < ARRAY_SIZE(data->vregs); i++) {
 			val = i2c_smbus_read_byte_data(client, i+0x10);
 			if (unlikely(val < 0))
@@ -137,9 +126,7 @@ static int ltc4245_get_voltage(struct device *dev, u8 reg)
 	case LTC4245_VEEOUT:
 		voltage = regval * -55;
 		break;
-	case LTC4245_GPIOADC1:
-	case LTC4245_GPIOADC2:
-	case LTC4245_GPIOADC3:
+	case LTC4245_GPIOADC:
 		voltage = regval * 10;
 		break;
 	default:
@@ -306,9 +293,7 @@ LTC4245_ALARM(in7_min_alarm,	(1 << 2),	LTC4245_FAULT2);
 LTC4245_ALARM(in8_min_alarm,	(1 << 3),	LTC4245_FAULT2);
 
 /* GPIO voltages */
-LTC4245_VOLTAGE(in9_input,			LTC4245_GPIOADC1);
-LTC4245_VOLTAGE(in10_input,			LTC4245_GPIOADC2);
-LTC4245_VOLTAGE(in11_input,			LTC4245_GPIOADC3);
+LTC4245_VOLTAGE(in9_input,			LTC4245_GPIOADC);
 
 /* Power Consumption (virtual) */
 LTC4245_POWER(power1_input,			LTC4245_12VSENSE);
@@ -351,8 +336,6 @@ static struct attribute *ltc4245_attributes[] = {
 	&sensor_dev_attr_in8_min_alarm.dev_attr.attr,
 
 	&sensor_dev_attr_in9_input.dev_attr.attr,
-	&sensor_dev_attr_in10_input.dev_attr.attr,
-	&sensor_dev_attr_in11_input.dev_attr.attr,
 
 	&sensor_dev_attr_power1_input.dev_attr.attr,
 	&sensor_dev_attr_power2_input.dev_attr.attr,
@@ -369,8 +352,12 @@ static const struct attribute_group ltc4245_group = {
 static int ltc4245_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
+	struct i2c_adapter *adapter = client->adapter;
 	struct ltc4245_data *data;
 	int ret;
+
+	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
+		return -ENODEV;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data) {
@@ -382,7 +369,8 @@ static int ltc4245_probe(struct i2c_client *client,
 	mutex_init(&data->update_lock);
 
 	/* Initialize the LTC4245 chip */
-	/* TODO */
+	i2c_smbus_write_byte_data(client, LTC4245_FAULT1, 0x00);
+	i2c_smbus_write_byte_data(client, LTC4245_FAULT2, 0x00);
 
 	/* Register sysfs hooks */
 	ret = sysfs_create_group(&client->dev.kobj, &ltc4245_group);
@@ -417,136 +405,20 @@ static int ltc4245_remove(struct i2c_client *client)
 	return 0;
 }
 
-/* Check that some bits in a control register appear at all possible
- * locations without changing value
- *
- * @client: the i2c client to use
- * @reg: the register to read
- * @bits: the bits to check (0xff checks all bits,
- *                           0x03 checks only the last two bits)
- *
- * return -ERRNO if the register read failed
- * return -ENODEV if the register value doesn't stay constant at all
- * possible addresses
- *
- * return 0 for success
- */
-static int ltc4245_check_control_reg(struct i2c_client *client, u8 reg, u8 bits)
-{
-	int i;
-	s32 v, voff1, voff2;
-
-	/* Read register and check for error */
-	v = i2c_smbus_read_byte_data(client, reg);
-	if (v < 0)
-		return v;
-
-	v &= bits;
-
-	for (i = 0x00; i < 0xff; i += 0x20) {
-
-		voff1 = i2c_smbus_read_byte_data(client, reg + i);
-		if (voff1 < 0)
-			return voff1;
-
-		voff2 = i2c_smbus_read_byte_data(client, reg + i + 0x08);
-		if (voff2 < 0)
-			return voff2;
-
-		voff1 &= bits;
-		voff2 &= bits;
-
-		if (v != voff1 || v != voff2)
-			return -ENODEV;
-	}
-
-	return 0;
-}
-
-static int ltc4245_detect(struct i2c_client *client,
-			  int kind,
-			  struct i2c_board_info *info)
-{
-	struct i2c_adapter *adapter = client->adapter;
-
-	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
-		return -ENODEV;
-
-	if (kind < 0) {		/* probed detection - check the chip type */
-		s32 v;		/* 8 bits from the chip, or -ERRNO */
-
-		/* Chip registers 0x00-0x07 are control registers
-		 * Chip registers 0x10-0x1f are data registers
-		 *
-		 * Address bits b7-b5 are ignored. This makes the chip "repeat"
-		 * in steps of 0x20. Any control registers should appear with
-		 * the same values across all duplicated addresses.
-		 *
-		 * Register 0x02 bit b2 is reserved, expect 0
-		 * Register 0x07 bits b7 to b4 are reserved, expect 0
-		 *
-		 * Registers 0x01, 0x02 are control registers and should not
-		 * change on their own.
-		 *
-		 * Register 0x06 bits b6 and b7 are control bits, and should
-		 * not change on their own.
-		 *
-		 * Register 0x07 bits b3 to b0 are control bits, and should
-		 * not change on their own.
-		 */
-
-		/* read register 0x02 reserved bit, expect 0 */
-		v = i2c_smbus_read_byte_data(client, LTC4245_CONTROL);
-		if (v < 0 || (v & 0x04) != 0)
-			return -ENODEV;
-
-		/* read register 0x07 reserved bits, expect 0 */
-		v = i2c_smbus_read_byte_data(client, LTC4245_ADCADR);
-		if (v < 0 || (v & 0xf0) != 0)
-			return -ENODEV;
-
-		/* check that the alert register appears at all locations */
-		if (ltc4245_check_control_reg(client, LTC4245_ALERT, 0xff))
-			return -ENODEV;
-
-		/* check that the control register appears at all locations */
-		if (ltc4245_check_control_reg(client, LTC4245_CONTROL, 0xff))
-			return -ENODEV;
-
-		/* check that register 0x06 bits b6 and b7 stay constant */
-		if (ltc4245_check_control_reg(client, LTC4245_GPIO, 0xc0))
-			return -ENODEV;
-
-		/* check that register 0x07 bits b3-b0 stay constant */
-		if (ltc4245_check_control_reg(client, LTC4245_ADCADR, 0x0f))
-			return -ENODEV;
-	}
-
-	strlcpy(info->type, "ltc4245", I2C_NAME_SIZE);
-	dev_info(&adapter->dev, "ltc4245 %s at address 0x%02x\n",
-			kind < 0 ? "probed" : "forced",
-			client->addr);
-
-	return 0;
-}
-
 static const struct i2c_device_id ltc4245_id[] = {
-	{ "ltc4245", ltc4245 },
+	{ "ltc4245", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ltc4245_id);
 
 /* This is the driver that will be inserted */
 static struct i2c_driver ltc4245_driver = {
-	.class		= I2C_CLASS_HWMON,
 	.driver = {
 		.name	= "ltc4245",
 	},
 	.probe		= ltc4245_probe,
 	.remove		= ltc4245_remove,
 	.id_table	= ltc4245_id,
-	.detect		= ltc4245_detect,
-	.address_data	= &addr_data,
 };
 
 static int __init ltc4245_init(void)

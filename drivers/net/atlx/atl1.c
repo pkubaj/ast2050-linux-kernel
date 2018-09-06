@@ -2213,8 +2213,7 @@ static void atl1_tx_map(struct atl1_adapter *adapter, struct sk_buff *skb,
 	nr_frags = skb_shinfo(skb)->nr_frags;
 	next_to_use = atomic_read(&tpd_ring->next_to_use);
 	buffer_info = &tpd_ring->buffer_info[next_to_use];
-	if (unlikely(buffer_info->skb))
-		BUG();
+	BUG_ON(buffer_info->skb);
 	/* put skb in last TPD */
 	buffer_info->skb = NULL;
 
@@ -2280,8 +2279,8 @@ static void atl1_tx_map(struct atl1_adapter *adapter, struct sk_buff *skb,
 			ATL1_MAX_TX_BUF_LEN;
 		for (i = 0; i < nseg; i++) {
 			buffer_info = &tpd_ring->buffer_info[next_to_use];
-			if (unlikely(buffer_info->skb))
-				BUG();
+			BUG_ON(buffer_info->skb);
+
 			buffer_info->skb = NULL;
 			buffer_info->length = (buf_len > ATL1_MAX_TX_BUF_LEN) ?
 				ATL1_MAX_TX_BUF_LEN : buf_len;
@@ -2350,7 +2349,8 @@ static void atl1_tx_queue(struct atl1_adapter *adapter, u16 count,
 	atomic_set(&tpd_ring->next_to_use, next_to_use);
 }
 
-static int atl1_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t atl1_xmit_frame(struct sk_buff *skb,
+					 struct net_device *netdev)
 {
 	struct atl1_adapter *adapter = netdev_priv(netdev);
 	struct atl1_tpd_ring *tpd_ring = &adapter->tpd_ring;
@@ -2383,7 +2383,7 @@ static int atl1_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 	mss = skb_shinfo(skb)->gso_size;
 	if (mss) {
-		if (skb->protocol == ntohs(ETH_P_IP)) {
+		if (skb->protocol == htons(ETH_P_IP)) {
 			proto_hdr_len = (skb_transport_offset(skb) +
 					 tcp_hdrlen(skb));
 			if (unlikely(proto_hdr_len > len)) {
@@ -2438,7 +2438,6 @@ static int atl1_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 	atl1_tx_queue(adapter, count, ptpd);
 	atl1_update_mailbox(adapter);
 	mmiowb();
-	netdev->trans_start = jiffies;
 	return NETDEV_TX_OK;
 }
 
@@ -2479,7 +2478,7 @@ static irqreturn_t atl1_intr(int irq, void *data)
 					"pcie phy link down %x\n", status);
 			if (netif_running(adapter->netdev)) {	/* reset MAC */
 				iowrite32(0, adapter->hw.hw_addr + REG_IMR);
-				schedule_work(&adapter->pcie_dma_to_rst_task);
+				schedule_work(&adapter->reset_dev_task);
 				return IRQ_HANDLED;
 			}
 		}
@@ -2491,7 +2490,7 @@ static irqreturn_t atl1_intr(int irq, void *data)
 					"pcie DMA r/w error (status = 0x%x)\n",
 					status);
 			iowrite32(0, adapter->hw.hw_addr + REG_IMR);
-			schedule_work(&adapter->pcie_dma_to_rst_task);
+			schedule_work(&adapter->reset_dev_task);
 			return IRQ_HANDLED;
 		}
 
@@ -2636,10 +2635,10 @@ static void atl1_down(struct atl1_adapter *adapter)
 	atl1_clean_rx_ring(adapter);
 }
 
-static void atl1_tx_timeout_task(struct work_struct *work)
+static void atl1_reset_dev_task(struct work_struct *work)
 {
 	struct atl1_adapter *adapter =
-		container_of(work, struct atl1_adapter, tx_timeout_task);
+		container_of(work, struct atl1_adapter, reset_dev_task);
 	struct net_device *netdev = adapter->netdev;
 
 	netif_device_detach(netdev);
@@ -2857,10 +2856,11 @@ static int atl1_resume(struct pci_dev *pdev)
 	pci_enable_wake(pdev, PCI_D3cold, 0);
 
 	atl1_reset_hw(&adapter->hw);
-	adapter->cmb.cmb->int_stats = 0;
 
-	if (netif_running(netdev))
+	if (netif_running(netdev)) {
+		adapter->cmb.cmb->int_stats = 0;
 		atl1_up(adapter);
+	}
 	netif_device_attach(netdev);
 
 	return 0;
@@ -3050,11 +3050,9 @@ static int __devinit atl1_probe(struct pci_dev *pdev,
 		    (unsigned long)adapter);
 	adapter->phy_timer_pending = false;
 
-	INIT_WORK(&adapter->tx_timeout_task, atl1_tx_timeout_task);
+	INIT_WORK(&adapter->reset_dev_task, atl1_reset_dev_task);
 
 	INIT_WORK(&adapter->link_chg_task, atlx_link_chg_task);
-
-	INIT_WORK(&adapter->pcie_dma_to_rst_task, atl1_tx_timeout_task);
 
 	err = register_netdev(netdev);
 	if (err)
@@ -3380,11 +3378,11 @@ static void atl1_get_drvinfo(struct net_device *netdev,
 {
 	struct atl1_adapter *adapter = netdev_priv(netdev);
 
-	strncpy(drvinfo->driver, ATLX_DRIVER_NAME, sizeof(drvinfo->driver));
-	strncpy(drvinfo->version, ATLX_DRIVER_VERSION,
+	strlcpy(drvinfo->driver, ATLX_DRIVER_NAME, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, ATLX_DRIVER_VERSION,
 		sizeof(drvinfo->version));
-	strncpy(drvinfo->fw_version, "N/A", sizeof(drvinfo->fw_version));
-	strncpy(drvinfo->bus_info, pci_name(adapter->pdev),
+	strlcpy(drvinfo->fw_version, "N/A", sizeof(drvinfo->fw_version));
+	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
 		sizeof(drvinfo->bus_info));
 	drvinfo->eedump_len = ATL1_EEDUMP_LEN;
 }

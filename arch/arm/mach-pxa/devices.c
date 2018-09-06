@@ -8,7 +8,7 @@
 #include <mach/pxafb.h>
 #include <mach/mmc.h>
 #include <mach/irda.h>
-#include <mach/i2c.h>
+#include <plat/i2c.h>
 #include <mach/ohci.h>
 #include <mach/pxa27x_keypad.h>
 #include <mach/pxa2xx_spi.h>
@@ -290,7 +290,7 @@ static struct resource pxa3xx_resources_i2c_power[] = {
 };
 
 struct platform_device pxa3xx_device_i2c_power = {
-	.name		= "pxa2xx-i2c",
+	.name		= "pxa3xx-pwri2c",
 	.id		= 1,
 	.resource	= pxa3xx_resources_i2c_power,
 	.num_resources	= ARRAY_SIZE(pxa3xx_resources_i2c_power),
@@ -935,6 +935,33 @@ void __init pxa3xx_set_nand_info(struct pxa3xx_nand_platform_data *info)
 {
 	pxa_register_device(&pxa3xx_device_nand, info);
 }
+
+static struct resource pxa3xx_resources_gcu[] = {
+	{
+		.start	= 0x54000000,
+		.end	= 0x54000fff,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= IRQ_GCU,
+		.end	= IRQ_GCU,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static u64 pxa3xx_gcu_dmamask = DMA_BIT_MASK(32);
+
+struct platform_device pxa3xx_device_gcu = {
+	.name		= "pxa3xx-gcu",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(pxa3xx_resources_gcu),
+	.resource	= pxa3xx_resources_gcu,
+	.dev		= {
+		.dma_mask = &pxa3xx_gcu_dmamask,
+		.coherent_dma_mask = 0xffffffff,
+	},
+};
+
 #endif /* CONFIG_PXA3xx */
 
 /* pxa2xx-spi platform-device ID equals respective SSP platform-device ID + 1.

@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1997-2000  Jakub Jelinek  (jakub@redhat.com)
  * Copyright (C) 1998  Eddie C. Dost  (ecd@skynet.be)
- * Copyright (C) 2001,2002  Andi Kleen, SuSE Labs
+ * Copyright (C) 2001,2002  Andi Kleen, SuSE Labs 
  * Copyright (C) 2003       Pavel Machek (pavel@suse.cz)
  *
  * These routines maintain argument size conversion between 32bit and 64bit
@@ -19,6 +19,7 @@
 #include <linux/compiler.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
+#include <linux/smp_lock.h>
 #include <linux/ioctl.h>
 #include <linux/if.h>
 #include <linux/if_bridge.h>
@@ -31,6 +32,7 @@
 #include <linux/skbuff.h>
 #include <linux/netlink.h>
 #include <linux/vt.h>
+#include <linux/falloc.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/ppp_defs.h>
@@ -94,7 +96,6 @@
 #include <linux/atm_tcp.h>
 #include <linux/sonet.h>
 #include <linux/atm_suni.h>
-#include <linux/mtd/mtd.h>
 
 #include <linux/usb.h>
 #include <linux/usbdevice_fs.h>
@@ -125,7 +126,7 @@ static int w_long(unsigned int fd, unsigned int cmd, unsigned long arg)
 	mm_segment_t old_fs = get_fs();
 	int err;
 	unsigned long val;
-
+	
 	set_fs (KERNEL_DS);
 	err = sys_ioctl(fd, cmd, (unsigned long)&val);
 	set_fs (old_fs);
@@ -133,14 +134,14 @@ static int w_long(unsigned int fd, unsigned int cmd, unsigned long arg)
 		return -EFAULT;
 	return err;
 }
-
+ 
 static int rw_long(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
 	mm_segment_t old_fs = get_fs();
 	u32 __user *argptr = compat_ptr(arg);
 	int err;
 	unsigned long val;
-
+	
 	if(get_user(val, argptr))
 		return -EFAULT;
 	set_fs (KERNEL_DS);
@@ -233,6 +234,8 @@ static int do_video_set_spu_palette(unsigned int fd, unsigned int cmd, unsigned 
 	up = (struct compat_video_spu_palette __user *) arg;
 	err  = get_user(palp, &up->palette);
 	err |= get_user(length, &up->length);
+	if (err)
+		return -EFAULT;
 
 	up_native = compat_alloc_user_space(sizeof(struct video_spu_palette));
 	err  = put_user(compat_ptr(palp), &up_native->palette);
@@ -349,6 +352,7 @@ static int dev_ifconf(unsigned int fd, unsigned int cmd, unsigned long arg)
 	if (copy_from_user(&ifc32, compat_ptr(arg), sizeof(struct ifconf32)))
 		return -EFAULT;
 
+	memset(&ifc, 0, sizeof(ifc));
 	if (ifc32.ifcbuf == 0) {
 		ifc32.ifc_len = 0;
 		ifc.ifc_len = 0;
@@ -365,17 +369,17 @@ static int dev_ifconf(unsigned int fd, unsigned int cmd, unsigned long arg)
 			if (copy_in_user(ifr, ifr32, sizeof(struct ifreq32)))
 				return -EFAULT;
 			ifr++;
-			ifr32++;
+			ifr32++; 
 		}
 	}
 	if (copy_to_user(uifc, &ifc, sizeof(struct ifconf)))
 		return -EFAULT;
 
-	err = sys_ioctl (fd, SIOCGIFCONF, (unsigned long)uifc);
+	err = sys_ioctl (fd, SIOCGIFCONF, (unsigned long)uifc);	
 	if (err)
 		return err;
 
-	if (copy_from_user(&ifc, uifc, sizeof(struct ifconf)))
+	if (copy_from_user(&ifc, uifc, sizeof(struct ifconf))) 
 		return -EFAULT;
 
 	ifr = ifc.ifc_req;
@@ -411,7 +415,7 @@ static int ethtool_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 	struct ifreq32 __user *ifr32;
 	u32 data;
 	void __user *datap;
-
+	
 	ifr = compat_alloc_user_space(sizeof(*ifr));
 	ifr32 = compat_ptr(arg);
 
@@ -507,7 +511,7 @@ static int dev_ifsioc(unsigned int fd, unsigned int cmd, unsigned long arg)
 	struct ifmap32 __user *uifmap32;
 	mm_segment_t old_fs;
 	int err;
-
+	
 	uifr32 = compat_ptr(arg);
 	uifmap32 = &uifr32->ifr_ifru.ifru_map;
 	switch (cmd) {
@@ -615,7 +619,7 @@ static int routing_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 	char devname[16];
 	u32 rtdev;
 	mm_segment_t old_fs = get_fs();
-
+	
 	struct socket *mysock = sockfd_lookup(fd, &ret);
 
 	if (mysock && mysock->sk && mysock->sk->sk_family == AF_INET6) { /* ipv6 */
@@ -629,7 +633,7 @@ static int routing_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 		ret |= __get_user (r6.rtmsg_info, &(ur6->rtmsg_info));
 		ret |= __get_user (r6.rtmsg_flags, &(ur6->rtmsg_flags));
 		ret |= __get_user (r6.rtmsg_ifindex, &(ur6->rtmsg_ifindex));
-
+		
 		r = (void *) &r6;
 	} else { /* ipv4 */
 		struct rtentry32 __user *ur4 = compat_ptr(arg);
@@ -786,12 +790,6 @@ static int sg_ioctl_trans(unsigned int fd, unsigned int cmd, unsigned long arg)
 	if (get_user(data, &sgio32->usr_ptr))
 		return -EFAULT;
 	if (put_user(compat_ptr(data), &sgio->usr_ptr))
-		return -EFAULT;
-
-	if (copy_in_user(&sgio->status, &sgio32->status,
-			 (4 * sizeof(unsigned char)) +
-			 (2 * sizeof(unsigned short)) +
-			 (3 * sizeof(int))))
 		return -EFAULT;
 
 	err = sys_ioctl(fd, cmd, (unsigned long) sgio);
@@ -1051,14 +1049,14 @@ static int vt_check(struct file *file)
 	struct tty_struct *tty;
 	struct inode *inode = file->f_path.dentry->d_inode;
 	struct vc_data *vc;
-
+	
 	if (file->f_op->unlocked_ioctl != tty_ioctl)
 		return -EINVAL;
-
+	                
 	tty = (struct tty_struct *)file->private_data;
 	if (tty_paranoia_check(tty, inode, "tty_ioctl"))
 		return -EINVAL;
-
+	                                                
 	if (tty->ops->ioctl != vt_ioctl)
 		return -EINVAL;
 
@@ -1072,7 +1070,7 @@ static int vt_check(struct file *file)
 	 */
 	if (current->signal->tty == tty || capable(CAP_SYS_TTY_CONFIG))
 		return 1;
-	return 0;
+	return 0;                                                    
 }
 
 struct consolefontdesc32 {
@@ -1090,7 +1088,7 @@ static int do_fontx_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg, 
 
 	perm = vt_check(file);
 	if (perm < 0) return perm;
-
+	
 	switch (cmd) {
 	case PIO_FONTX:
 		if (!perm)
@@ -1135,16 +1133,16 @@ struct console_font_op32 {
 	compat_uint_t charcount;
 	compat_caddr_t data;    /* font data with height fixed to 32 */
 };
-
+                                        
 static int do_kdfontop_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg, struct file *file)
 {
 	struct console_font_op op;
 	struct console_font_op32 __user *fontop = compat_ptr(arg);
 	int perm = vt_check(file), i;
 	struct vc_data *vc;
-
+	
 	if (perm < 0) return perm;
-
+	
 	if (copy_from_user(&op, fontop, sizeof(struct console_font_op32)))
 		return -EFAULT;
 	if (!perm && op.op != KD_FONT_OP_GET)
@@ -1308,7 +1306,7 @@ static int do_atmif_sioc(unsigned int fd, unsigned int cmd, unsigned long arg)
 	u32 data;
 	void __user *datap;
 	int err;
-
+        
 	sioc = compat_alloc_user_space(sizeof(*sioc));
 	sioc32 = compat_ptr(arg);
 
@@ -1333,7 +1331,7 @@ static int do_atm_ioctl(unsigned int fd, unsigned int cmd32, unsigned long arg)
 {
         int i;
         unsigned int cmd = 0;
-
+        
 	switch (cmd32) {
 	case SONET_GETSTAT:
 	case SONET_GETSTATZ:
@@ -1354,11 +1352,11 @@ static int do_atm_ioctl(unsigned int fd, unsigned int cmd32, unsigned long arg)
 	}
 	if (i == NR_ATM_IOCTL)
 	        return -EINVAL;
-
+        
         switch (cmd) {
 	case ATM_GETNAMES:
 		return do_atm_iobuf(fd, cmd, arg);
-
+	    
 	case ATM_GETLINKRATE:
         case ATM_GETTYPE:
         case ATM_GETESI:
@@ -1410,46 +1408,6 @@ static int ioc_settimeout(unsigned int fd, unsigned int cmd, unsigned long arg)
 #define HIDPCONNDEL	_IOW('H', 201, int)
 #define HIDPGETCONNLIST	_IOR('H', 210, int)
 #define HIDPGETCONNINFO	_IOR('H', 211, int)
-
-struct mtd_oob_buf32 {
-	u_int32_t start;
-	u_int32_t length;
-	compat_caddr_t ptr;	/* unsigned char* */
-};
-
-#define MEMWRITEOOB32 	_IOWR('M',3,struct mtd_oob_buf32)
-#define MEMREADOOB32 	_IOWR('M',4,struct mtd_oob_buf32)
-
-static int mtd_rw_oob(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	struct mtd_oob_buf __user *buf = compat_alloc_user_space(sizeof(*buf));
-	struct mtd_oob_buf32 __user *buf32 = compat_ptr(arg);
-	u32 data;
-	char __user *datap;
-	unsigned int real_cmd;
-	int err;
-
-	real_cmd = (cmd == MEMREADOOB32) ?
-		MEMREADOOB : MEMWRITEOOB;
-
-	if (copy_in_user(&buf->start, &buf32->start,
-			 2 * sizeof(u32)) ||
-	    get_user(data, &buf32->ptr))
-		return -EFAULT;
-	datap = compat_ptr(data);
-	if (put_user(datap, &buf->ptr))
-		return -EFAULT;
-
-	err = sys_ioctl(fd, real_cmd, (unsigned long) buf);
-
-	if (!err) {
-		if (copy_in_user(&buf32->start, &buf->start,
-				 2 * sizeof(u32)))
-			err = -EFAULT;
-	}
-
-	return err;
-}
 
 #ifdef CONFIG_BLOCK
 struct raw32_config_request
@@ -1765,7 +1723,7 @@ static int do_i2c_smbus_ioctl(unsigned int fd, unsigned int cmd, unsigned long a
 
 /* Since old style bridge ioctl's endup using SIOCDEVPRIVATE
  * for some operations; this forces use of the newer bridge-utils that
- * use compatiable ioctls
+ * use compatible ioctls
  */
 static int old_bridge_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
@@ -1803,7 +1761,7 @@ static int rtc_ioctl(unsigned fd, unsigned cmd, unsigned long arg)
 		val32 = kval;
 		return put_user(val32, (unsigned int __user *)arg);
 	case RTC_IRQP_SET32:
-		return sys_ioctl(fd, RTC_IRQP_SET, arg);
+		return sys_ioctl(fd, RTC_IRQP_SET, arg); 
 	case RTC_EPOCH_SET32:
 		return sys_ioctl(fd, RTC_EPOCH_SET, arg);
 	default:
@@ -1825,6 +1783,41 @@ lp_timeout_trans(unsigned int fd, unsigned int cmd, unsigned long arg)
 		return -EFAULT;
 	return sys_ioctl(fd, cmd, (unsigned long)tn);
 }
+
+/* on ia32 l_start is on a 32-bit boundary */
+#if defined(CONFIG_IA64) || defined(CONFIG_X86_64)
+struct space_resv_32 {
+	__s16		l_type;
+	__s16		l_whence;
+	__s64		l_start	__attribute__((packed));
+			/* len == 0 means until end of file */
+	__s64		l_len __attribute__((packed));
+	__s32		l_sysid;
+	__u32		l_pid;
+	__s32		l_pad[4];	/* reserve area */
+};
+
+#define FS_IOC_RESVSP_32		_IOW ('X', 40, struct space_resv_32)
+#define FS_IOC_RESVSP64_32	_IOW ('X', 42, struct space_resv_32)
+
+/* just account for different alignment */
+static int compat_ioctl_preallocate(struct file *file, unsigned long arg)
+{
+	struct space_resv_32	__user *p32 = compat_ptr(arg);
+	struct space_resv	__user *p = compat_alloc_user_space(sizeof(*p));
+
+	if (copy_in_user(&p->l_type,	&p32->l_type,	sizeof(s16)) ||
+	    copy_in_user(&p->l_whence,	&p32->l_whence, sizeof(s16)) ||
+	    copy_in_user(&p->l_start,	&p32->l_start,	sizeof(s64)) ||
+	    copy_in_user(&p->l_len,	&p32->l_len,	sizeof(s64)) ||
+	    copy_in_user(&p->l_sysid,	&p32->l_sysid,	sizeof(s32)) ||
+	    copy_in_user(&p->l_pid,	&p32->l_pid,	sizeof(u32)) ||
+	    copy_in_user(&p->l_pad,	&p32->l_pad,	4*sizeof(u32)))
+		return -EFAULT;
+
+	return ioctl_preallocate(file, p);
+}
+#endif
 
 
 typedef int (*ioctl_trans_handler_t)(unsigned int, unsigned int,
@@ -2433,15 +2426,6 @@ COMPATIBLE_IOCTL(USBDEVFS_SUBMITURB32)
 COMPATIBLE_IOCTL(USBDEVFS_REAPURB32)
 COMPATIBLE_IOCTL(USBDEVFS_REAPURBNDELAY32)
 COMPATIBLE_IOCTL(USBDEVFS_CLEAR_HALT)
-/* MTD */
-COMPATIBLE_IOCTL(MEMGETINFO)
-COMPATIBLE_IOCTL(MEMERASE)
-COMPATIBLE_IOCTL(MEMLOCK)
-COMPATIBLE_IOCTL(MEMUNLOCK)
-COMPATIBLE_IOCTL(MEMGETREGIONCOUNT)
-COMPATIBLE_IOCTL(MEMGETREGIONINFO)
-COMPATIBLE_IOCTL(MEMGETBADBLOCK)
-COMPATIBLE_IOCTL(MEMSETBADBLOCK)
 /* NBD */
 ULONG_IOCTL(NBD_SET_SOCK)
 ULONG_IOCTL(NBD_SET_BLKSIZE)
@@ -2551,8 +2535,6 @@ COMPATIBLE_IOCTL(JSIOCGBUTTONS)
 COMPATIBLE_IOCTL(JSIOCGNAME(0))
 
 /* now things that need handlers */
-HANDLE_IOCTL(MEMREADOOB32, mtd_rw_oob)
-HANDLE_IOCTL(MEMWRITEOOB32, mtd_rw_oob)
 #ifdef CONFIG_NET
 HANDLE_IOCTL(SIOCGIFNAME, dev_ifname32)
 HANDLE_IOCTL(SIOCGIFCONF, dev_ifconf)
@@ -2692,7 +2674,6 @@ COMPATIBLE_IOCTL(USBDEVFS_IOCTL32)
 /* i2c */
 HANDLE_IOCTL(I2C_FUNCS, w_long)
 HANDLE_IOCTL(I2C_RDWR, do_i2c_rdwr_ioctl)
-HANDLE_IOCTL(I2C_SLAVE_RDWR, do_i2c_rdwr_ioctl)
 HANDLE_IOCTL(I2C_SMBUS, do_i2c_smbus_ioctl)
 /* bridge */
 HANDLE_IOCTL(SIOCSIFBR, old_bridge_ioctl)
@@ -2815,6 +2796,18 @@ asmlinkage long compat_sys_ioctl(unsigned int fd, unsigned int cmd,
 	case FIOASYNC:
 	case FIOQSIZE:
 		break;
+
+#if defined(CONFIG_IA64) || defined(CONFIG_X86_64)
+	case FS_IOC_RESVSP_32:
+	case FS_IOC_RESVSP64_32:
+		error = compat_ioctl_preallocate(filp, arg);
+		goto out_fput;
+#else
+	case FS_IOC_RESVSP:
+	case FS_IOC_RESVSP64:
+		error = ioctl_preallocate(filp, compat_ptr(arg));
+		goto out_fput;
+#endif
 
 	case FIBMAP:
 	case FIGETBSZ:

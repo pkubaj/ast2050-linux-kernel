@@ -86,10 +86,8 @@ static int buffer_size;
 static int xbof = -1;
 
 static int  ir_startup (struct usb_serial *serial);
-static int  ir_open(struct tty_struct *tty, struct usb_serial_port *port,
-					struct file *filep);
-static void ir_close(struct tty_struct *tty, struct usb_serial_port *port,
-					struct file *filep);
+static int  ir_open(struct tty_struct *tty, struct usb_serial_port *port);
+static void ir_close(struct usb_serial_port *port);
 static int  ir_write(struct tty_struct *tty, struct usb_serial_port *port,
 					const unsigned char *buf, int count);
 static void ir_write_bulk_callback (struct urb *urb);
@@ -297,8 +295,7 @@ static int ir_startup(struct usb_serial *serial)
 	return 0;
 }
 
-static int ir_open(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static int ir_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	char *buffer;
 	int result = 0;
@@ -315,6 +312,7 @@ static int ir_open(struct tty_struct *tty,
 		kfree(port->read_urb->transfer_buffer);
 		port->read_urb->transfer_buffer = buffer;
 		port->read_urb->transfer_buffer_length = buffer_size;
+		port->bulk_in_buffer = buffer;
 
 		buffer = kmalloc(buffer_size, GFP_KERNEL);
 		if (!buffer) {
@@ -324,6 +322,7 @@ static int ir_open(struct tty_struct *tty,
 		kfree(port->write_urb->transfer_buffer);
 		port->write_urb->transfer_buffer = buffer;
 		port->write_urb->transfer_buffer_length = buffer_size;
+		port->bulk_out_buffer = buffer;
 		port->bulk_out_size = buffer_size;
 	}
 
@@ -346,8 +345,7 @@ static int ir_open(struct tty_struct *tty,
 	return result;
 }
 
-static void ir_close(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file * filp)
+static void ir_close(struct usb_serial_port *port)
 {
 	dbg("%s - port %d", __func__, port->number);
 

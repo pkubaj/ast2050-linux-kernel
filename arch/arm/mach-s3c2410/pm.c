@@ -25,6 +25,7 @@
 #include <linux/errno.h>
 #include <linux/time.h>
 #include <linux/sysdev.h>
+#include <linux/gpio.h>
 #include <linux/io.h>
 
 #include <mach/hardware.h>
@@ -76,7 +77,7 @@ static void s3c2410_pm_prepare(void)
 	}
 
 	if ( machine_is_aml_m5900() )
-		s3c2410_gpio_setpin(S3C2410_GPF2, 1);
+		s3c2410_gpio_setpin(S3C2410_GPF(2), 1);
 
 }
 
@@ -91,7 +92,7 @@ static int s3c2410_pm_resume(struct sys_device *dev)
 	__raw_writel(tmp, S3C2410_GSTATUS2);
 
 	if ( machine_is_aml_m5900() )
-		s3c2410_gpio_setpin(S3C2410_GPF2, 0);
+		s3c2410_gpio_setpin(S3C2410_GPF(2), 0);
 
 	return 0;
 }
@@ -118,6 +119,18 @@ static int __init s3c2410_pm_drvinit(void)
 }
 
 arch_initcall(s3c2410_pm_drvinit);
+
+static struct sysdev_driver s3c2410a_pm_driver = {
+	.add		= s3c2410_pm_add,
+	.resume		= s3c2410_pm_resume,
+};
+
+static int __init s3c2410a_pm_drvinit(void)
+{
+	return sysdev_driver_register(&s3c2410a_sysclass, &s3c2410a_pm_driver);
+}
+
+arch_initcall(s3c2410a_pm_drvinit);
 #endif
 
 #if defined(CONFIG_CPU_S3C2440)

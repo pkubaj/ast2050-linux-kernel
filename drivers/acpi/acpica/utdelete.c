@@ -75,6 +75,7 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 	union acpi_operand_object *handler_desc;
 	union acpi_operand_object *second_desc;
 	union acpi_operand_object *next_desc;
+	union acpi_operand_object **last_obj_ptr;
 
 	ACPI_FUNCTION_TRACE_PTR(ut_delete_internal_obj, object);
 
@@ -214,6 +215,12 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 		ACPI_DEBUG_PRINT((ACPI_DB_ALLOCATIONS,
 				  "***** Region %p\n", object));
 
+		/* Invalidate the region address/length via the host OS */
+
+		acpi_os_invalidate_address(object->region.space_id,
+					  object->region.address,
+					  (acpi_size) object->region.length);
+
 		second_desc = acpi_ns_get_secondary_object(object);
 		if (second_desc) {
 			/*
@@ -223,6 +230,26 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 			 */
 			handler_desc = object->region.handler;
 			if (handler_desc) {
+				next_desc =
+				    handler_desc->address_space.region_list;
+				last_obj_ptr =
+				    &handler_desc->address_space.region_list;
+
+				/* Remove the region object from the handler's list */
+
+				while (next_desc) {
+					if (next_desc == object) {
+						*last_obj_ptr =
+						    next_desc->region.next;
+						break;
+					}
+
+					/* Walk the linked list of handler */
+
+					last_obj_ptr = &next_desc->region.next;
+					next_desc = next_desc->region.next;
+				}
+
 				if (handler_desc->address_space.handler_flags &
 				    ACPI_ADDR_HANDLER_DEFAULT_INSTALLED) {
 

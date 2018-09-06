@@ -17,6 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/input.h>
+#include <linux/input/matrix_keypad.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/ads7846.h>
 #include <linux/i2c/twl4030.h>
@@ -38,15 +39,12 @@
 #include <mach/gpmc.h>
 
 #include <mach/control.h>
-#include <mach/keypad.h>
+#include <mach/gpmc-smc91x.h>
 
+#include "sdram-qimonda-hyb18m512160af-6.h"
 #include "mmc-twl4030.h"
 
 #define CONFIG_DISABLE_HFCLK 1
-
-#define SDP3430_ETHR_GPIO_IRQ_SDPV1	29
-#define SDP3430_ETHR_GPIO_IRQ_SDPV2	6
-#define SDP3430_SMC91X_CS		3
 
 #define SDP3430_TS_GPIO_IRQ_SDPV1	3
 #define SDP3430_TS_GPIO_IRQ_SDPV2	2
@@ -56,25 +54,7 @@
 
 #define TWL4030_MSECURE_GPIO 22
 
-static struct resource sdp3430_smc91x_resources[] = {
-	[0] = {
-		.flags	= IORESOURCE_MEM,
-	},
-	[1] = {
-		.start	= 0,
-		.end	= 0,
-		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_LOWLEVEL,
-	},
-};
-
-static struct platform_device sdp3430_smc91x_device = {
-	.name		= "smc91x",
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(sdp3430_smc91x_resources),
-	.resource	= sdp3430_smc91x_resources,
-};
-
-static int sdp3430_keymap[] = {
+static int board_keymap[] = {
 	KEY(0, 0, KEY_LEFT),
 	KEY(0, 1, KEY_RIGHT),
 	KEY(0, 2, KEY_A),
@@ -108,11 +88,15 @@ static int sdp3430_keymap[] = {
 	0
 };
 
+static struct matrix_keymap_data board_map_data = {
+	.keymap			= board_keymap,
+	.keymap_size		= ARRAY_SIZE(board_keymap),
+};
+
 static struct twl4030_keypad_data sdp3430_kp_data = {
+	.keymap_data	= &board_map_data,
 	.rows		= 5,
 	.cols		= 6,
-	.keymap		= sdp3430_keymap,
-	.keymapsize	= ARRAY_SIZE(sdp3430_keymap),
 	.rep		= 1,
 };
 
@@ -184,52 +168,7 @@ static struct regulator_consumer_supply sdp3430_vdvi_supply = {
 };
 
 static struct platform_device *sdp3430_devices[] __initdata = {
-	&sdp3430_smc91x_device,
 	&sdp3430_lcd_device,
-};
-
-static inline void __init sdp3430_init_smc91x(void)
-{
-	int eth_cs;
-	unsigned long cs_mem_base;
-	int eth_gpio = 0;
-
-	eth_cs = SDP3430_SMC91X_CS;
-
-	if (gpmc_cs_request(eth_cs, SZ_16M, &cs_mem_base) < 0) {
-		printk(KERN_ERR "Failed to request GPMC mem for smc91x\n");
-		return;
-	}
-
-	sdp3430_smc91x_resources[0].start = cs_mem_base + 0x300;
-	sdp3430_smc91x_resources[0].end = cs_mem_base + 0x30f;
-	udelay(100);
-
-	if (omap_rev() > OMAP3430_REV_ES1_0)
-		eth_gpio = SDP3430_ETHR_GPIO_IRQ_SDPV2;
-	else
-		eth_gpio = SDP3430_ETHR_GPIO_IRQ_SDPV1;
-
-	sdp3430_smc91x_resources[1].start = gpio_to_irq(eth_gpio);
-
-	if (gpio_request(eth_gpio, "SMC91x irq") < 0) {
-		printk(KERN_ERR "Failed to request GPIO%d for smc91x IRQ\n",
-			eth_gpio);
-		return;
-	}
-	gpio_direction_input(eth_gpio);
-}
-
-static void __init omap_3430sdp_init_irq(void)
-{
-	omap2_init_common_hw(NULL);
-	omap_init_irq();
-	omap_gpio_init();
-	sdp3430_init_smc91x();
-}
-
-static struct omap_uart_config sdp3430_uart_config __initdata = {
-	.enabled_uarts	= ((1 << 0) | (1 << 1) | (1 << 2)),
 };
 
 static struct omap_lcd_config sdp3430_lcd_config __initdata = {
@@ -237,9 +176,17 @@ static struct omap_lcd_config sdp3430_lcd_config __initdata = {
 };
 
 static struct omap_board_config_kernel sdp3430_config[] __initdata = {
-	{ OMAP_TAG_UART,	&sdp3430_uart_config },
 	{ OMAP_TAG_LCD,		&sdp3430_lcd_config },
 };
+
+static void __init omap_3430sdp_init_irq(void)
+{
+	omap_board_config = sdp3430_config;
+	omap_board_config_size = ARRAY_SIZE(sdp3430_config);
+	omap2_init_common_hw(hyb18m512160af6_sdrc_params, NULL);
+	omap_init_irq();
+	omap_gpio_init();
+}
 
 static int sdp3430_batt_table[] = {
 /* 0 C*/
@@ -506,12 +453,41 @@ static int __init omap3430_i2c_init(void)
 	return 0;
 }
 
+#if defined(CONFIG_SMC91X) || defined(CONFIG_SMC91X_MODULE)
+
+static struct omap_smc91x_platform_data board_smc91x_data = {
+	.cs		= 3,
+	.flags		= GPMC_MUX_ADD_DATA | GPMC_TIMINGS_SMC91C96 |
+				IORESOURCE_IRQ_LOWLEVEL,
+};
+
+static void __init board_smc91x_init(void)
+{
+	if (omap_rev() > OMAP3430_REV_ES1_0)
+		board_smc91x_data.gpio_irq = 6;
+	else
+		board_smc91x_data.gpio_irq = 29;
+
+	gpmc_smc91x_init(&board_smc91x_data);
+}
+
+#else
+
+static inline void board_smc91x_init(void)
+{
+}
+
+#endif
+
+static void enable_board_wakeup_source(void)
+{
+	omap_cfg_reg(AF26_34XX_SYS_NIRQ); /* T2 interrupt line (keypad) */
+}
+
 static void __init omap_3430sdp_init(void)
 {
 	omap3430_i2c_init();
 	platform_add_devices(sdp3430_devices, ARRAY_SIZE(sdp3430_devices));
-	omap_board_config = sdp3430_config;
-	omap_board_config_size = ARRAY_SIZE(sdp3430_config);
 	if (omap_rev() > OMAP3430_REV_ES1_0)
 		ts_gpio = SDP3430_TS_GPIO_IRQ_SDPV2;
 	else
@@ -522,6 +498,8 @@ static void __init omap_3430sdp_init(void)
 	ads7846_dev_init();
 	omap_serial_init();
 	usb_musb_init();
+	board_smc91x_init();
+	enable_board_wakeup_source();
 }
 
 static void __init omap_3430sdp_map_io(void)

@@ -81,7 +81,8 @@ static void ixgb_clean_tx_ring(struct ixgb_adapter *adapter);
 static void ixgb_clean_rx_ring(struct ixgb_adapter *adapter);
 static void ixgb_set_multi(struct net_device *netdev);
 static void ixgb_watchdog(unsigned long data);
-static int ixgb_xmit_frame(struct sk_buff *skb, struct net_device *netdev);
+static netdev_tx_t ixgb_xmit_frame(struct sk_buff *skb,
+				   struct net_device *netdev);
 static struct net_device_stats *ixgb_get_stats(struct net_device *netdev);
 static int ixgb_change_mtu(struct net_device *netdev, int new_mtu);
 static int ixgb_set_mac(struct net_device *netdev, void *p);
@@ -265,6 +266,8 @@ ixgb_up(struct ixgb_adapter *adapter)
 
 	napi_enable(&adapter->napi);
 	ixgb_irq_enable(adapter);
+
+	netif_wake_queue(netdev);
 
 	mod_timer(&adapter->watchdog_timer, jiffies);
 
@@ -471,10 +474,8 @@ ixgb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto err_register;
 
-	/* we're going to reset, so assume we have no link for now */
-
+	/* carrier off reporting is important to ethtool even BEFORE open */
 	netif_carrier_off(netdev);
-	netif_stop_queue(netdev);
 
 	DPRINTK(PROBE, INFO, "Intel(R) PRO/10GbE Network Connection\n");
 	ixgb_check_options(adapter);
@@ -592,6 +593,8 @@ ixgb_open(struct net_device *netdev)
 	if (err)
 		goto err_setup_tx;
 
+	netif_carrier_off(netdev);
+
 	/* allocate receive descriptors */
 
 	err = ixgb_setup_rx_resources(adapter);
@@ -601,6 +604,8 @@ ixgb_open(struct net_device *netdev)
 	err = ixgb_up(adapter);
 	if (err)
 		goto err_up;
+
+	netif_start_queue(netdev);
 
 	return 0;
 
@@ -1116,7 +1121,6 @@ ixgb_watchdog(unsigned long data)
 			adapter->link_speed = 10000;
 			adapter->link_duplex = FULL_DUPLEX;
 			netif_carrier_on(netdev);
-			netif_wake_queue(netdev);
 		}
 	} else {
 		if (netif_carrier_ok(netdev)) {
@@ -1125,8 +1129,6 @@ ixgb_watchdog(unsigned long data)
 			printk(KERN_INFO "ixgb: %s NIC Link is Down\n",
 			       netdev->name);
 			netif_carrier_off(netdev);
-			netif_stop_queue(netdev);
-
 		}
 	}
 
@@ -1139,6 +1141,8 @@ ixgb_watchdog(unsigned long data)
 			 * to get done, so reset controller to flush Tx.
 			 * (Do the reset outside of interrupt context). */
 			schedule_work(&adapter->tx_timeout_task);
+			/* return immediately since reset is imminent */
+			return;
 		}
 	}
 
@@ -1297,7 +1301,7 @@ ixgb_tx_map(struct ixgb_adapter *adapter, struct sk_buff *skb,
 		buffer_info->length = size;
 		WARN_ON(buffer_info->dma != 0);
 		buffer_info->time_stamp = jiffies;
-		buffer_info->dma = map[0] + offset;
+		buffer_info->dma = skb_shinfo(skb)->dma_head + offset;
 			pci_map_single(adapter->pdev,
 				skb->data + offset,
 				size,
@@ -1337,7 +1341,7 @@ ixgb_tx_map(struct ixgb_adapter *adapter, struct sk_buff *skb,
 
 			buffer_info->length = size;
 			buffer_info->time_stamp = jiffies;
-			buffer_info->dma = map[f + 1] + offset;
+			buffer_info->dma = map[f] + offset;
 			buffer_info->next_to_watch = 0;
 
 			len -= size;
@@ -1439,7 +1443,7 @@ static int ixgb_maybe_stop_tx(struct net_device *netdev,
 	MAX_SKB_FRAGS * TXD_USE_COUNT(PAGE_SIZE) + 1 /* for context */ \
 	+ 1 /* one more needed for sentinel TSO workaround */
 
-static int
+static netdev_tx_t
 ixgb_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct ixgb_adapter *adapter = netdev_priv(netdev);
@@ -1456,7 +1460,7 @@ ixgb_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 	if (skb->len <= 0) {
 		dev_kfree_skb(skb);
-		return 0;
+		return NETDEV_TX_OK;
 	}
 
 	if (unlikely(ixgb_maybe_stop_tx(netdev, &adapter->tx_ring,
@@ -1485,7 +1489,6 @@ ixgb_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 	if (count) {
 		ixgb_tx_queue(adapter, count, vlan_id, tx_flags);
-		netdev->trans_start = jiffies;
 		/* Make sure there is space in the ring for the next send. */
 		ixgb_maybe_stop_tx(netdev, &adapter->tx_ring, DESC_NEEDED);
 
@@ -2224,6 +2227,11 @@ static pci_ers_result_t ixgb_io_error_detected(struct pci_dev *pdev,
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct ixgb_adapter *adapter = netdev_priv(netdev);
+
+	netif_device_detach(netdev);
+
+	if (state == pci_channel_io_perm_failure)
+		return PCI_ERS_RESULT_DISCONNECT;
 
 	if (netif_running(netdev))
 		ixgb_down(adapter, true);

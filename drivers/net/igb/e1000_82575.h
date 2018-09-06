@@ -28,9 +28,13 @@
 #ifndef _E1000_82575_H_
 #define _E1000_82575_H_
 
-void igb_update_mc_addr_list(struct e1000_hw*, u8*, u32, u32, u32);
-extern void igb_shutdown_fiber_serdes_link_82575(struct e1000_hw *hw);
+extern void igb_shutdown_serdes_link_82575(struct e1000_hw *hw);
 extern void igb_rx_fifo_flush_82575(struct e1000_hw *hw);
+
+#define ID_LED_DEFAULT_82575_SERDES ((ID_LED_DEF1_DEF2 << 12) | \
+                                     (ID_LED_DEF1_DEF2 <<  8) | \
+                                     (ID_LED_DEF1_DEF2 <<  4) | \
+                                     (ID_LED_OFF1_ON2))
 
 #define E1000_RAR_ENTRIES_82575   16
 #define E1000_RAR_ENTRIES_82576   24
@@ -130,6 +134,7 @@ struct e1000_adv_tx_context_desc {
 #define E1000_ADVTXD_MACLEN_SHIFT    9  /* Adv ctxt desc mac len shift */
 #define E1000_ADVTXD_TUCMD_IPV4    0x00000400  /* IP Packet Type: 1=IPv4 */
 #define E1000_ADVTXD_TUCMD_L4T_TCP 0x00000800  /* L4 Packet TYPE of TCP */
+#define E1000_ADVTXD_TUCMD_L4T_SCTP 0x00001000 /* L4 packet TYPE of SCTP */
 /* IPSec Encrypt Enable for ESP */
 #define E1000_ADVTXD_L4LEN_SHIFT     8  /* Adv ctxt L4LEN shift */
 #define E1000_ADVTXD_MSS_SHIFT      16  /* Adv ctxt MSS shift */

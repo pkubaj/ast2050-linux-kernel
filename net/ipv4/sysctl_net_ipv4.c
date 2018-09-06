@@ -22,7 +22,10 @@
 #include <net/inet_frag.h>
 
 static int zero;
+static int one = 1;
 static int tcp_retr1_max = 255;
+static int tcp_syn_retries_min = 1;
+static int tcp_syn_retries_max = MAX_TCP_SYNCNT;
 static int ip_local_port_range_min[] = { 1, 1 };
 static int ip_local_port_range_max[] = { 65535, 65535 };
 
@@ -36,7 +39,7 @@ static void set_local_port_range(int range[2])
 }
 
 /* Validate changes from /proc interface. */
-static int ipv4_local_port_range(ctl_table *table, int write, struct file *filp,
+static int ipv4_local_port_range(ctl_table *table, int write,
 				 void __user *buffer,
 				 size_t *lenp, loff_t *ppos)
 {
@@ -51,7 +54,7 @@ static int ipv4_local_port_range(ctl_table *table, int write, struct file *filp,
 	};
 
 	inet_get_local_port_range(range, range + 1);
-	ret = proc_dointvec_minmax(&tmp, write, filp, buffer, lenp, ppos);
+	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
 
 	if (write && ret == 0) {
 		if (range[1] < range[0])
@@ -91,7 +94,7 @@ static int ipv4_sysctl_local_port_range(ctl_table *table,
 }
 
 
-static int proc_tcp_congestion_control(ctl_table *ctl, int write, struct file * filp,
+static int proc_tcp_congestion_control(ctl_table *ctl, int write,
 				       void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	char val[TCP_CA_NAME_MAX];
@@ -103,7 +106,7 @@ static int proc_tcp_congestion_control(ctl_table *ctl, int write, struct file * 
 
 	tcp_get_default_congestion_control(val);
 
-	ret = proc_dostring(&tbl, write, filp, buffer, lenp, ppos);
+	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
 	if (write && ret == 0)
 		ret = tcp_set_default_congestion_control(val);
 	return ret;
@@ -129,7 +132,7 @@ static int sysctl_tcp_congestion_control(ctl_table *table,
 }
 
 static int proc_tcp_available_congestion_control(ctl_table *ctl,
-						 int write, struct file * filp,
+						 int write,
 						 void __user *buffer, size_t *lenp,
 						 loff_t *ppos)
 {
@@ -140,13 +143,13 @@ static int proc_tcp_available_congestion_control(ctl_table *ctl,
 	if (!tbl.data)
 		return -ENOMEM;
 	tcp_get_available_congestion_control(tbl.data, TCP_CA_BUF_MAX);
-	ret = proc_dostring(&tbl, write, filp, buffer, lenp, ppos);
+	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
 	kfree(tbl.data);
 	return ret;
 }
 
 static int proc_allowed_congestion_control(ctl_table *ctl,
-					   int write, struct file * filp,
+					   int write,
 					   void __user *buffer, size_t *lenp,
 					   loff_t *ppos)
 {
@@ -158,7 +161,7 @@ static int proc_allowed_congestion_control(ctl_table *ctl,
 		return -ENOMEM;
 
 	tcp_get_allowed_congestion_control(tbl.data, tbl.maxlen);
-	ret = proc_dostring(&tbl, write, filp, buffer, lenp, ppos);
+	ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
 	if (write && ret == 0)
 		ret = tcp_set_allowed_congestion_control(tbl.data);
 	kfree(tbl.data);
@@ -237,7 +240,10 @@ static struct ctl_table ipv4_table[] = {
 		.data		= &ipv4_config.no_pmtu_disc,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &tcp_syn_retries_min,
+		.extra2		= &tcp_syn_retries_max,
+		.strategy	= &sysctl_intvec
 	},
 	{
 		.ctl_name	= NET_IPV4_NONLOCAL_BIND,
@@ -516,7 +522,9 @@ static struct ctl_table ipv4_table[] = {
 		.data		= &sysctl_tcp_wmem,
 		.maxlen		= sizeof(sysctl_tcp_wmem),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= proc_dointvec_minmax,
+		.strategy	= sysctl_intvec,
+		.extra1		= &one,
 	},
 	{
 		.ctl_name	= NET_TCP_RMEM,
@@ -524,7 +532,9 @@ static struct ctl_table ipv4_table[] = {
 		.data		= &sysctl_tcp_rmem,
 		.maxlen		= sizeof(sysctl_tcp_rmem),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= proc_dointvec_minmax,
+		.strategy	= sysctl_intvec,
+		.extra1		= &one,
 	},
 	{
 		.ctl_name	= NET_TCP_APP_WIN,
@@ -730,7 +740,7 @@ static struct ctl_table ipv4_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.strategy	= sysctl_intvec,
-		.extra1		= &zero
+		.extra1		= &one
 	},
 	{
 		.ctl_name	= CTL_UNNUMBERED,
@@ -740,7 +750,7 @@ static struct ctl_table ipv4_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.strategy	= sysctl_intvec,
-		.extra1		= &zero
+		.extra1		= &one
 	},
 	{ .ctl_name = 0 }
 };

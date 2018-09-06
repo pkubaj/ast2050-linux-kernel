@@ -384,7 +384,7 @@ static void threads_stop(void)
 	dlm_astd_stop();
 }
 
-static int new_lockspace(char *name, int namelen, void **lockspace,
+static int new_lockspace(const char *name, int namelen, void **lockspace,
 			 uint32_t flags, int lvblen)
 {
 	struct dlm_ls *ls;
@@ -419,20 +419,18 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 			break;
 		}
 		ls->ls_create_count++;
-		module_put(THIS_MODULE);
-		error = 1; /* not an error, return 0 */
+		*lockspace = ls;
+		error = 1;
 		break;
 	}
 	spin_unlock(&lslist_lock);
 
-	if (error < 0)
-		goto out;
 	if (error)
-		goto ret_zero;
+		goto out;
 
 	error = -ENOMEM;
 
-	ls = kzalloc(sizeof(struct dlm_ls) + namelen, GFP_KERNEL);
+	ls = kzalloc(sizeof(struct dlm_ls) + namelen, GFP_NOFS);
 	if (!ls)
 		goto out;
 	memcpy(ls->ls_name, name, namelen);
@@ -445,11 +443,6 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	if (flags & DLM_LSFL_TIMEWARN)
 		set_bit(LSFL_TIMEWARN, &ls->ls_flags);
 
-	if (flags & DLM_LSFL_FS)
-		ls->ls_allocation = GFP_NOFS;
-	else
-		ls->ls_allocation = GFP_KERNEL;
-
 	/* ls_exflags are forced to match among nodes, and we don't
 	   need to require all nodes to have some flags set */
 	ls->ls_exflags = (flags & ~(DLM_LSFL_TIMEWARN | DLM_LSFL_FS |
@@ -458,7 +451,7 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	size = dlm_config.ci_rsbtbl_size;
 	ls->ls_rsbtbl_size = size;
 
-	ls->ls_rsbtbl = kmalloc(sizeof(struct dlm_rsbtable) * size, GFP_KERNEL);
+	ls->ls_rsbtbl = kmalloc(sizeof(struct dlm_rsbtable) * size, GFP_NOFS);
 	if (!ls->ls_rsbtbl)
 		goto out_lsfree;
 	for (i = 0; i < size; i++) {
@@ -470,7 +463,7 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	size = dlm_config.ci_lkbtbl_size;
 	ls->ls_lkbtbl_size = size;
 
-	ls->ls_lkbtbl = kmalloc(sizeof(struct dlm_lkbtable) * size, GFP_KERNEL);
+	ls->ls_lkbtbl = kmalloc(sizeof(struct dlm_lkbtable) * size, GFP_NOFS);
 	if (!ls->ls_lkbtbl)
 		goto out_rsbfree;
 	for (i = 0; i < size; i++) {
@@ -482,7 +475,7 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	size = dlm_config.ci_dirtbl_size;
 	ls->ls_dirtbl_size = size;
 
-	ls->ls_dirtbl = kmalloc(sizeof(struct dlm_dirtable) * size, GFP_KERNEL);
+	ls->ls_dirtbl = kmalloc(sizeof(struct dlm_dirtable) * size, GFP_NOFS);
 	if (!ls->ls_dirtbl)
 		goto out_lkbfree;
 	for (i = 0; i < size; i++) {
@@ -529,7 +522,7 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	mutex_init(&ls->ls_requestqueue_mutex);
 	mutex_init(&ls->ls_clear_proc_locks);
 
-	ls->ls_recover_buf = kmalloc(dlm_config.ci_buffer_size, GFP_KERNEL);
+	ls->ls_recover_buf = kmalloc(dlm_config.ci_buffer_size, GFP_NOFS);
 	if (!ls->ls_recover_buf)
 		goto out_dirfree;
 
@@ -583,7 +576,6 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	dlm_create_debug_file(ls);
 
 	log_debug(ls, "join complete");
- ret_zero:
 	*lockspace = ls;
 	return 0;
 
@@ -614,7 +606,7 @@ static int new_lockspace(char *name, int namelen, void **lockspace,
 	return error;
 }
 
-int dlm_new_lockspace(char *name, int namelen, void **lockspace,
+int dlm_new_lockspace(const char *name, int namelen, void **lockspace,
 		      uint32_t flags, int lvblen)
 {
 	int error = 0;
@@ -628,7 +620,9 @@ int dlm_new_lockspace(char *name, int namelen, void **lockspace,
 	error = new_lockspace(name, namelen, lockspace, flags, lvblen);
 	if (!error)
 		ls_count++;
-	else if (!ls_count)
+	if (error > 0)
+		error = 0;
+	if (!ls_count)
 		threads_stop();
  out:
 	mutex_unlock(&ls_lock);

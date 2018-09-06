@@ -67,6 +67,7 @@ static int ses_probe(struct device *dev)
 static int ses_recv_diag(struct scsi_device *sdev, int page_code,
 			 void *buf, int bufflen)
 {
+	int ret;
 	unsigned char cmd[] = {
 		RECEIVE_DIAGNOSTIC,
 		1,		/* Set PCV bit */
@@ -75,9 +76,26 @@ static int ses_recv_diag(struct scsi_device *sdev, int page_code,
 		bufflen & 0xff,
 		0
 	};
+	unsigned char recv_page_code;
 
-	return scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE, buf, bufflen,
+	ret =  scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE, buf, bufflen,
 				NULL, SES_TIMEOUT, SES_RETRIES, NULL);
+	if (unlikely(!ret))
+		return ret;
+
+	recv_page_code = ((unsigned char *)buf)[0];
+
+	if (likely(recv_page_code == page_code))
+		return ret;
+
+	/* successful diagnostic but wrong page code.  This happens to some
+	 * USB devices, just print a message and pretend there was an error */
+
+	sdev_printk(KERN_ERR, sdev,
+		    "Wrong diagnostic page; asked for %d got %u\n",
+		    page_code, recv_page_code);
+
+	return -EINVAL;
 }
 
 static int ses_send_diag(struct scsi_device *sdev, int page_code,
@@ -157,6 +175,10 @@ static unsigned char *ses_get_page2_descriptor(struct enclosure_device *edev,
 	return NULL;
 }
 
+/* For device slot and array device slot elements, byte 3 bit 6
+ * is "fault sensed" while byte 3 bit 5 is "fault reqstd". As this
+ * code stands these bits are shifted 4 positions right so in
+ * sysfs they will appear as bits 2 and 1 respectively. Strange. */
 static void ses_get_fault(struct enclosure_device *edev,
 			  struct enclosure_component *ecomp)
 {
@@ -178,7 +200,7 @@ static int ses_set_fault(struct enclosure_device *edev,
 		/* zero is disabled */
 		break;
 	case ENCLOSURE_SETTING_ENABLED:
-		desc[2] = 0x02;
+		desc[3] = 0x20;
 		break;
 	default:
 		/* SES doesn't do the SGPIO blink settings */
@@ -347,6 +369,105 @@ static int ses_enclosure_find_by_addr(struct enclosure_device *edev,
 	return 0;
 }
 
+#define INIT_ALLOC_SIZE 32
+
+static void ses_enclosure_data_process(struct enclosure_device *edev,
+				       struct scsi_device *sdev,
+				       int create)
+{
+	u32 result;
+	unsigned char *buf = NULL, *type_ptr, *desc_ptr, *addl_desc_ptr = NULL;
+	int i, j, page7_len, len, components;
+	struct ses_device *ses_dev = edev->scratch;
+	int types = ses_dev->page1[10];
+	unsigned char *hdr_buf = kzalloc(INIT_ALLOC_SIZE, GFP_KERNEL);
+
+	if (!hdr_buf)
+		goto simple_populate;
+
+	/* re-read page 10 */
+	if (ses_dev->page10)
+		ses_recv_diag(sdev, 10, ses_dev->page10, ses_dev->page10_len);
+	/* Page 7 for the descriptors is optional */
+	result = ses_recv_diag(sdev, 7, hdr_buf, INIT_ALLOC_SIZE);
+	if (result)
+		goto simple_populate;
+
+	page7_len = len = (hdr_buf[2] << 8) + hdr_buf[3] + 4;
+	/* add 1 for trailing '\0' we'll use */
+	buf = kzalloc(len + 1, GFP_KERNEL);
+	if (!buf)
+		goto simple_populate;
+	result = ses_recv_diag(sdev, 7, buf, len);
+	if (result) {
+ simple_populate:
+		kfree(buf);
+		buf = NULL;
+		desc_ptr = NULL;
+		len = 0;
+		page7_len = 0;
+	} else {
+		desc_ptr = buf + 8;
+		len = (desc_ptr[2] << 8) + desc_ptr[3];
+		/* skip past overall descriptor */
+		desc_ptr += len + 4;
+	}
+	if (ses_dev->page10)
+		addl_desc_ptr = ses_dev->page10 + 8;
+	type_ptr = ses_dev->page1 + 12 + ses_dev->page1[11];
+	components = 0;
+	for (i = 0; i < types; i++, type_ptr += 4) {
+		for (j = 0; j < type_ptr[1]; j++) {
+			char *name = NULL;
+			struct enclosure_component *ecomp;
+
+			if (desc_ptr) {
+				if (desc_ptr >= buf + page7_len) {
+					desc_ptr = NULL;
+				} else {
+					len = (desc_ptr[2] << 8) + desc_ptr[3];
+					desc_ptr += 4;
+					/* Add trailing zero - pushes into
+					 * reserved space */
+					desc_ptr[len] = '\0';
+					name = desc_ptr;
+				}
+			}
+			if (type_ptr[0] == ENCLOSURE_COMPONENT_DEVICE ||
+			    type_ptr[0] == ENCLOSURE_COMPONENT_ARRAY_DEVICE) {
+
+				if (create)
+					ecomp =	enclosure_component_register(edev,
+									     components++,
+									     type_ptr[0],
+									     name);
+				else
+					ecomp = &edev->component[components++];
+
+				if (!IS_ERR(ecomp) && addl_desc_ptr)
+					ses_process_descriptor(ecomp,
+							       addl_desc_ptr);
+			}
+			if (desc_ptr)
+				desc_ptr += len;
+
+			if (addl_desc_ptr &&
+			    /* only find additional descriptions for specific devices */
+			    (type_ptr[0] == ENCLOSURE_COMPONENT_DEVICE ||
+			     type_ptr[0] == ENCLOSURE_COMPONENT_ARRAY_DEVICE ||
+			     type_ptr[0] == ENCLOSURE_COMPONENT_SAS_EXPANDER ||
+			     /* these elements are optional */
+			     type_ptr[0] == ENCLOSURE_COMPONENT_SCSI_TARGET_PORT ||
+			     type_ptr[0] == ENCLOSURE_COMPONENT_SCSI_INITIATOR_PORT ||
+			     type_ptr[0] == ENCLOSURE_COMPONENT_CONTROLLER_ELECTRONICS))
+				addl_desc_ptr += addl_desc_ptr[1] + 2;
+
+		}
+	}
+	kfree(buf);
+	kfree(hdr_buf);
+}
+
 static void ses_match_to_enclosure(struct enclosure_device *edev,
 				   struct scsi_device *sdev)
 {
@@ -360,6 +481,8 @@ static void ses_match_to_enclosure(struct enclosure_device *edev,
 	buf = scsi_get_vpd_page(sdev, 0x83);
 	if (!buf)
 		return;
+
+	ses_enclosure_data_process(edev, to_scsi_device(edev->edev.parent), 0);
 
 	vpd_len = ((buf[2] << 8) | buf[3]) + 4;
 
@@ -395,28 +518,26 @@ static void ses_match_to_enclosure(struct enclosure_device *edev,
 	kfree(buf);
 }
 
-#define INIT_ALLOC_SIZE 32
-
 static int ses_intf_add(struct device *cdev,
 			struct class_interface *intf)
 {
 	struct scsi_device *sdev = to_scsi_device(cdev->parent);
 	struct scsi_device *tmp_sdev;
-	unsigned char *buf = NULL, *hdr_buf, *type_ptr, *desc_ptr = NULL,
-		*addl_desc_ptr = NULL;
+	unsigned char *buf = NULL, *hdr_buf, *type_ptr;
 	struct ses_device *ses_dev;
 	u32 result;
-	int i, j, types, len, page7_len = 0, components = 0;
+	int i, types, len, components = 0;
 	int err = -ENOMEM;
 	struct enclosure_device *edev;
 	struct ses_component *scomp = NULL;
 
 	if (!scsi_device_enclosure(sdev)) {
 		/* not an enclosure, but might be in one */
-		edev = enclosure_find(&sdev->host->shost_gendev);
-		if (edev) {
+		struct enclosure_device *prev = NULL;
+
+		while ((edev = enclosure_find(&sdev->host->shost_gendev, prev)) != NULL) {
 			ses_match_to_enclosure(edev, sdev);
-			put_device(&edev->edev);
+			prev = edev;
 		}
 		return -ENODEV;
 	}
@@ -500,7 +621,6 @@ static int ses_intf_add(struct device *cdev,
 		ses_dev->page10_len = len;
 		buf = NULL;
 	}
-
 	scomp = kzalloc(sizeof(struct ses_component) * components, GFP_KERNEL);
 	if (!scomp)
 		goto err_free;
@@ -512,76 +632,13 @@ static int ses_intf_add(struct device *cdev,
 		goto err_free;
 	}
 
+	kfree(hdr_buf);
+
 	edev->scratch = ses_dev;
 	for (i = 0; i < components; i++)
 		edev->component[i].scratch = scomp + i;
 
-	/* Page 7 for the descriptors is optional */
-	result = ses_recv_diag(sdev, 7, hdr_buf, INIT_ALLOC_SIZE);
-	if (result)
-		goto simple_populate;
-
-	page7_len = len = (hdr_buf[2] << 8) + hdr_buf[3] + 4;
-	/* add 1 for trailing '\0' we'll use */
-	buf = kzalloc(len + 1, GFP_KERNEL);
-	if (!buf)
-		goto simple_populate;
-	result = ses_recv_diag(sdev, 7, buf, len);
-	if (result) {
- simple_populate:
-		kfree(buf);
-		buf = NULL;
-		desc_ptr = NULL;
-		addl_desc_ptr = NULL;
-	} else {
-		desc_ptr = buf + 8;
-		len = (desc_ptr[2] << 8) + desc_ptr[3];
-		/* skip past overall descriptor */
-		desc_ptr += len + 4;
-		if (ses_dev->page10)
-			addl_desc_ptr = ses_dev->page10 + 8;
-	}
-	type_ptr = ses_dev->page1 + 12 + ses_dev->page1[11];
-	components = 0;
-	for (i = 0; i < types; i++, type_ptr += 4) {
-		for (j = 0; j < type_ptr[1]; j++) {
-			char *name = NULL;
-			struct enclosure_component *ecomp;
-
-			if (desc_ptr) {
-				if (desc_ptr >= buf + page7_len) {
-					desc_ptr = NULL;
-				} else {
-					len = (desc_ptr[2] << 8) + desc_ptr[3];
-					desc_ptr += 4;
-					/* Add trailing zero - pushes into
-					 * reserved space */
-					desc_ptr[len] = '\0';
-					name = desc_ptr;
-				}
-			}
-			if (type_ptr[0] == ENCLOSURE_COMPONENT_DEVICE ||
-			    type_ptr[0] == ENCLOSURE_COMPONENT_ARRAY_DEVICE) {
-
-				ecomp =	enclosure_component_register(edev,
-							     components++,
-							     type_ptr[0],
-							     name);
-
-				if (!IS_ERR(ecomp) && addl_desc_ptr)
-					ses_process_descriptor(ecomp,
-							       addl_desc_ptr);
-			}
-			if (desc_ptr)
-				desc_ptr += len;
-
-			if (addl_desc_ptr)
-				addl_desc_ptr += addl_desc_ptr[1] + 2;
-
-		}
-	}
-	kfree(buf);
-	kfree(hdr_buf);
+	ses_enclosure_data_process(edev, sdev, 1);
 
 	/* see if there are any devices matching before
 	 * we found the enclosure */
@@ -615,17 +672,26 @@ static int ses_remove(struct device *dev)
 	return 0;
 }
 
-static void ses_intf_remove(struct device *cdev,
-			    struct class_interface *intf)
+static void ses_intf_remove_component(struct scsi_device *sdev)
 {
-	struct scsi_device *sdev = to_scsi_device(cdev->parent);
+	struct enclosure_device *edev, *prev = NULL;
+
+	while ((edev = enclosure_find(&sdev->host->shost_gendev, prev)) != NULL) {
+		prev = edev;
+		if (!enclosure_remove_device(edev, &sdev->sdev_gendev))
+			break;
+	}
+	if (edev)
+		put_device(&edev->edev);
+}
+
+static void ses_intf_remove_enclosure(struct scsi_device *sdev)
+{
 	struct enclosure_device *edev;
 	struct ses_device *ses_dev;
 
-	if (!scsi_device_enclosure(sdev))
-		return;
-
-	edev = enclosure_find(cdev->parent);
+	/*  exact match to this enclosure */
+	edev = enclosure_find(&sdev->sdev_gendev, NULL);
 	if (!edev)
 		return;
 
@@ -641,6 +707,17 @@ static void ses_intf_remove(struct device *cdev,
 
 	put_device(&edev->edev);
 	enclosure_unregister(edev);
+}
+
+static void ses_intf_remove(struct device *cdev,
+			    struct class_interface *intf)
+{
+	struct scsi_device *sdev = to_scsi_device(cdev->parent);
+
+	if (!scsi_device_enclosure(sdev))
+		ses_intf_remove_component(sdev);
+	else
+		ses_intf_remove_enclosure(sdev);
 }
 
 static struct class_interface ses_interface = {

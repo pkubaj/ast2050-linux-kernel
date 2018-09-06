@@ -16,15 +16,17 @@
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/partitions.h>
 #include <linux/sm501.h>
+#include <linux/smsc911x.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <mach/csb726.h>
 #include <mach/mfp-pxa27x.h>
-#include <mach/i2c.h>
+#include <plat/i2c.h>
 #include <mach/mmc.h>
 #include <mach/ohci.h>
 #include <mach/pxa2xx-regs.h>
+#include <mach/audio.h>
 
 #include "generic.h"
 #include "devices.h"
@@ -128,61 +130,17 @@ static struct pxamci_platform_data csb726_mci_data;
 static int csb726_mci_init(struct device *dev,
 		irq_handler_t detect, void *data)
 {
-	int err;
-
 	csb726_mci_data.detect_delay = msecs_to_jiffies(500);
-
-	err = gpio_request(CSB726_GPIO_MMC_DETECT, "MMC detect");
-	if (err)
-		goto err_det_req;
-
-	err = gpio_direction_input(CSB726_GPIO_MMC_DETECT);
-	if (err)
-		goto err_det_dir;
-
-	err = gpio_request(CSB726_GPIO_MMC_RO, "MMC ro");
-	if (err)
-		goto err_ro_req;
-
-	err = gpio_direction_input(CSB726_GPIO_MMC_RO);
-	if (err)
-		goto err_ro_dir;
-
-	err = request_irq(gpio_to_irq(CSB726_GPIO_MMC_DETECT), detect,
-			IRQF_DISABLED, "MMC card detect", data);
-	if (err)
-		goto err_irq;
-
 	return 0;
-
-err_irq:
-err_ro_dir:
-	gpio_free(CSB726_GPIO_MMC_RO);
-err_ro_req:
-err_det_dir:
-	gpio_free(CSB726_GPIO_MMC_DETECT);
-err_det_req:
-	return err;
-}
-
-static int csb726_mci_get_ro(struct device *dev)
-{
-	return gpio_get_value(CSB726_GPIO_MMC_RO);
-}
-
-static void csb726_mci_exit(struct device *dev, void *data)
-{
-	free_irq(gpio_to_irq(CSB726_GPIO_MMC_DETECT), data);
-	gpio_free(CSB726_GPIO_MMC_RO);
-	gpio_free(CSB726_GPIO_MMC_DETECT);
 }
 
 static struct pxamci_platform_data csb726_mci = {
-	.ocr_mask	= MMC_VDD_32_33|MMC_VDD_33_34,
-	.init		= csb726_mci_init,
-	.get_ro		= csb726_mci_get_ro,
+	.ocr_mask		= MMC_VDD_32_33|MMC_VDD_33_34,
+	.init			= csb726_mci_init,
 	/* FIXME setpower */
-	.exit		= csb726_mci_exit,
+	.gpio_card_detect	= CSB726_GPIO_MMC_DETECT,
+	.gpio_card_ro		= CSB726_GPIO_MMC_RO,
+	.gpio_power		= -1,
 };
 
 static struct pxaohci_platform_data csb726_ohci_platform_data = {
@@ -275,15 +233,26 @@ static struct resource csb726_lan_resources[] = {
 	{
 		.start	= CSB726_IRQ_LAN,
 		.end	= CSB726_IRQ_LAN,
-		.flags	= IORESOURCE_IRQ,
+		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_LOWEDGE,
 	},
 };
 
+struct smsc911x_platform_config csb726_lan_config = {
+	.irq_polarity	= SMSC911X_IRQ_POLARITY_ACTIVE_LOW,
+	.irq_type	= SMSC911X_IRQ_TYPE_PUSH_PULL,
+	.flags		= SMSC911X_USE_32BIT,
+	.phy_interface	= PHY_INTERFACE_MODE_MII,
+};
+
+
 static struct platform_device csb726_lan = {
-	.name		= "smc911x",
+	.name		= "smsc911x",
 	.id		= -1,
 	.num_resources	= ARRAY_SIZE(csb726_lan_resources),
 	.resource	= csb726_lan_resources,
+	.dev		= {
+		.platform_data	= &csb726_lan_config,
+	},
 };
 
 static struct platform_device *devices[] __initdata = {
@@ -303,6 +272,7 @@ static void __init csb726_init(void)
 	pxa27x_set_i2c_power_info(NULL);
 	pxa_set_mci_info(&csb726_mci);
 	pxa_set_ohci_info(&csb726_ohci_platform_data);
+	pxa_set_ac97_info(NULL);
 
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 }

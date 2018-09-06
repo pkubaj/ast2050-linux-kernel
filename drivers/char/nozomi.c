@@ -48,6 +48,7 @@
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
+#include <linux/sched.h>
 #include <linux/serial.h>
 #include <linux/interrupt.h>
 #include <linux/kmod.h>
@@ -828,7 +829,7 @@ static int receive_data(enum port_type index, struct nozomi *dc)
 	struct port *port = &dc->port[index];
 	void __iomem *addr = port->dl_addr[port->toggle_dl];
 	struct tty_struct *tty = tty_port_tty_get(&port->port);
-	int i;
+	int i, ret;
 
 	if (unlikely(!tty)) {
 		DBG1("tty not open for port: %d?", index);
@@ -844,12 +845,14 @@ static int receive_data(enum port_type index, struct nozomi *dc)
 
 		/* disable interrupt in downlink... */
 		disable_transmit_dl(index, dc);
-		return 0;
+		ret = 0;
+		goto put;
 	}
 
 	if (unlikely(size == 0)) {
 		dev_err(&dc->pdev->dev, "size == 0?\n");
-		return 1;
+		ret = 1;
+		goto put;
 	}
 
 	tty_buffer_request_room(tty, size);
@@ -871,8 +874,10 @@ static int receive_data(enum port_type index, struct nozomi *dc)
 	}
 
 	set_bit(index, &dc->flip);
+	ret = 1;
+put:
 	tty_kref_put(tty);
-	return 1;
+	return ret;
 }
 
 /* Debug for interrupts */
@@ -1591,8 +1596,6 @@ static int ntty_open(struct tty_struct *tty, struct file *file)
 
 	/* Enable interrupt downlink for channel */
 	if (port->port.count == 1) {
-		/* FIXME: is this needed now ? */
-		tty->low_latency = 1;
 		tty->driver_data = port;
 		tty_port_tty_set(&port->port, tty);
 		DBG1("open: %d", port->token_dl);
@@ -1626,10 +1629,10 @@ static void ntty_close(struct tty_struct *tty, struct file *file)
 
 	dc->open_ttys--;
 	port->count--;
-	tty_port_tty_set(port, NULL);
 
 	if (port->count == 0) {
 		DBG1("close: %d", nport->token_dl);
+		tty_port_tty_set(port, NULL);
 		spin_lock_irqsave(&dc->spin_mutex, flags);
 		dc->last_ier &= ~(nport->token_dl);
 		writew(dc->last_ier, dc->reg_ier);
@@ -1780,24 +1783,24 @@ static int ntty_cflags_changed(struct port *port, unsigned long flags,
 	return ret;
 }
 
-static int ntty_ioctl_tiocgicount(struct port *port, void __user *argp)
+static int ntty_tiocgicount(struct tty_struct *tty,
+				struct serial_icounter_struct *icount)
 {
+	struct port *port = tty->driver_data;
 	const struct async_icount cnow = port->tty_icount;
-	struct serial_icounter_struct icount;
 
-	icount.cts = cnow.cts;
-	icount.dsr = cnow.dsr;
-	icount.rng = cnow.rng;
-	icount.dcd = cnow.dcd;
-	icount.rx = cnow.rx;
-	icount.tx = cnow.tx;
-	icount.frame = cnow.frame;
-	icount.overrun = cnow.overrun;
-	icount.parity = cnow.parity;
-	icount.brk = cnow.brk;
-	icount.buf_overrun = cnow.buf_overrun;
-
-	return copy_to_user(argp, &icount, sizeof(icount)) ? -EFAULT : 0;
+	icount->cts = cnow.cts;
+	icount->dsr = cnow.dsr;
+	icount->rng = cnow.rng;
+	icount->dcd = cnow.dcd;
+	icount->rx = cnow.rx;
+	icount->tx = cnow.tx;
+	icount->frame = cnow.frame;
+	icount->overrun = cnow.overrun;
+	icount->parity = cnow.parity;
+	icount->brk = cnow.brk;
+	icount->buf_overrun = cnow.buf_overrun;
+	return 0;
 }
 
 static int ntty_ioctl(struct tty_struct *tty, struct file *file,
@@ -1816,9 +1819,7 @@ static int ntty_ioctl(struct tty_struct *tty, struct file *file,
 		rval = wait_event_interruptible(port->tty_wait,
 				ntty_cflags_changed(port, arg, &cprev));
 		break;
-	} case TIOCGICOUNT:
-		rval = ntty_ioctl_tiocgicount(port, argp);
-		break;
+	}
 	default:
 		DBG1("ERR: 0x%08X, %d", cmd, cmd);
 		break;
@@ -1864,16 +1865,14 @@ static s32 ntty_chars_in_buffer(struct tty_struct *tty)
 {
 	struct port *port = tty->driver_data;
 	struct nozomi *dc = get_dc_by_tty(tty);
-	s32 rval;
+	s32 rval = 0;
 
 	if (unlikely(!dc || !port)) {
-		rval = -ENODEV;
 		goto exit_in_buffer;
 	}
 
 	if (unlikely(!port->port.count)) {
 		dev_err(&dc->pdev->dev, "No tty open?\n");
-		rval = -ENODEV;
 		goto exit_in_buffer;
 	}
 
@@ -1894,6 +1893,7 @@ static const struct tty_operations tty_ops = {
 	.chars_in_buffer = ntty_chars_in_buffer,
 	.tiocmget = ntty_tiocmget,
 	.tiocmset = ntty_tiocmset,
+	.get_icount = ntty_tiocgicount,
 };
 
 /* Module initialization */

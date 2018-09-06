@@ -34,7 +34,7 @@
 #include <asm/tlb.h>
 
 static struct {
-	unsigned long mask;	/* mask of supported purge page-sizes */
+	u64 mask;		/* mask of supported purge page-sizes */
 	unsigned long max_bits;	/* log2 of largest supported purge page-size */
 } purge;
 
@@ -100,24 +100,36 @@ wrap_mmu_context (struct mm_struct *mm)
  * this primitive it can be moved up to a spinaphore.h header.
  */
 struct spinaphore {
-	atomic_t	cur;
+	unsigned long	ticket;
+	unsigned long	serve;
 };
 
 static inline void spinaphore_init(struct spinaphore *ss, int val)
 {
-	atomic_set(&ss->cur, val);
+	ss->ticket = 0;
+	ss->serve = val;
 }
 
 static inline void down_spin(struct spinaphore *ss)
 {
-	while (unlikely(!atomic_add_unless(&ss->cur, -1, 0)))
-		while (atomic_read(&ss->cur) == 0)
-			cpu_relax();
+	unsigned long t = ia64_fetchadd(1, &ss->ticket, acq), serve;
+
+	if (time_before(t, ss->serve))
+		return;
+
+	ia64_invala();
+
+	for (;;) {
+		asm volatile ("ld8.c.nc %0=[%1]" : "=r"(serve) : "r"(&ss->serve) : "memory");
+		if (time_before(t, serve))
+			return;
+		cpu_relax();
+	}
 }
 
 static inline void up_spin(struct spinaphore *ss)
 {
-	atomic_add(1, &ss->cur);
+	ia64_fetchadd(1, &ss->serve, rel);
 }
 
 static struct spinaphore ptcg_sem;
@@ -328,7 +340,7 @@ void __devinit
 ia64_tlb_init (void)
 {
 	ia64_ptce_info_t uninitialized_var(ptce_info); /* GCC be quiet */
-	unsigned long tr_pgbits;
+	u64 tr_pgbits;
 	long status;
 	pal_vm_info_1_u_t vm_info_1;
 	pal_vm_info_2_u_t vm_info_2;

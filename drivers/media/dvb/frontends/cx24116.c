@@ -492,7 +492,7 @@ static int cx24116_firmware_ondemand(struct dvb_frontend *fe)
 		printk(KERN_INFO "%s: Waiting for firmware upload (%s)...\n",
 			__func__, CX24116_DEFAULT_FIRMWARE);
 		ret = request_firmware(&fw, CX24116_DEFAULT_FIRMWARE,
-			&state->i2c->dev);
+			state->i2c->dev.parent);
 		printk(KERN_INFO "%s: Waiting for firmware upload(2)...\n",
 			__func__);
 		if (ret) {
@@ -950,6 +950,10 @@ static int cx24116_send_diseqc_msg(struct dvb_frontend *fe,
 	struct cx24116_state *state = fe->demodulator_priv;
 	int i, ret;
 
+	/* Validate length */
+	if (d->msg_len > sizeof(d->msg))
+                return -EINVAL;
+
 	/* Dump DiSEqC message */
 	if (debug) {
 		printk(KERN_INFO "cx24116: %s(", __func__);
@@ -960,10 +964,6 @@ static int cx24116_send_diseqc_msg(struct dvb_frontend *fe,
 		}
 		printk(") toneburst=%d\n", toneburst);
 	}
-
-	/* Validate length */
-	if (d->msg_len > (CX24116_ARGLEN - CX24116_DISEQC_MSGOFS))
-		return -EINVAL;
 
 	/* DiSEqC message */
 	for (i = 0; i < d->msg_len; i++)

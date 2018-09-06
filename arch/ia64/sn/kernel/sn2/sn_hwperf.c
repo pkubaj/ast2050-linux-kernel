@@ -414,7 +414,7 @@ static int sn_topology_show(struct seq_file *s, void *d)
 		}
 		seq_printf(s, "partition %u %s local "
 			"shubtype %s, "
-			"nasid_mask 0x%016lx, "
+			"nasid_mask 0x%016llx, "
 			"nasid_bits %d:%d, "
 			"system_size %d, "
 			"sharing_size %d, "
@@ -683,7 +683,7 @@ static int sn_hwperf_map_err(int hwperf_err)
  * ioctl for "sn_hwperf" misc device
  */
 static int
-sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
+sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, unsigned long arg)
 {
 	struct sn_hwperf_ioctl_args a;
 	struct cpuinfo_ia64 *cdata;
@@ -786,17 +786,18 @@ sn_hwperf_ioctl(struct inode *in, struct file *fp, u32 op, u64 arg)
 		break;
 
 	case SN_HWPERF_GET_OBJ_NODE:
-		if (a.sz != sizeof(u64) || a.arg < 0) {
+		i = a.arg;
+		if (a.sz != sizeof(u64) || i < 0) {
 			r = -EINVAL;
 			goto error;
 		}
 		if ((r = sn_hwperf_enum_objects(&nobj, &objs)) == 0) {
-			if (a.arg >= nobj) {
+			if (i >= nobj) {
 				r = -EINVAL;
 				vfree(objs);
 				goto error;
 			}
-			if (objs[(i = a.arg)].id != a.arg) {
+			if (objs[i].id != a.arg) {
 				for (i = 0; i < nobj; i++) {
 					if (objs[i].id == a.arg)
 						break;

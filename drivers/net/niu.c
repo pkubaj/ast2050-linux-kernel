@@ -22,6 +22,7 @@
 #include <linux/log2.h>
 #include <linux/jiffies.h>
 #include <linux/crc32.h>
+#include <linux/list.h>
 
 #include <linux/io.h>
 
@@ -1317,7 +1318,7 @@ static int bcm8704_reset(struct niu *np)
 
 	err = mdio_read(np, np->phy_addr,
 			BCM8704_PHYXS_DEV_ADDR, MII_BMCR);
-	if (err < 0)
+	if (err < 0 || err == 0xffff)
 		return err;
 	err |= BMCR_RESET;
 	err = mdio_write(np, np->phy_addr, BCM8704_PHYXS_DEV_ADDR,
@@ -2042,7 +2043,7 @@ static int link_status_10g_bcm8706(struct niu *np, int *link_up_p)
 
 	err = mdio_read(np, np->phy_addr, BCM8704_PMA_PMD_DEV_ADDR,
 			BCM8704_PMD_RCV_SIGDET);
-	if (err < 0)
+	if (err < 0 || err == 0xffff)
 		goto out;
 	if (!(err & PMD_RCV_SIGDET_GLOBAL)) {
 		err = 0;
@@ -2083,8 +2084,6 @@ static int link_status_10g_bcm8706(struct niu *np, int *link_up_p)
 
 out:
 	*link_up_p = link_up;
-	if (np->flags & NIU_FLAGS_HOTPLUG_PHY)
-		err = 0;
 	return err;
 }
 
@@ -2220,10 +2219,17 @@ static int link_status_10g_hotplug(struct niu *np, int *link_up_p)
 		if (phy_present != phy_present_prev) {
 			/* state change */
 			if (phy_present) {
+				/* A NEM was just plugged in */
 				np->flags |= NIU_FLAGS_HOTPLUG_PHY_PRESENT;
 				if (np->phy_ops->xcvr_init)
 					err = np->phy_ops->xcvr_init(np);
 				if (err) {
+					err = mdio_read(np, np->phy_addr,
+						BCM8704_PHYXS_DEV_ADDR, MII_BMCR);
+					if (err == 0xffff) {
+						/* No mdio, back-to-back XAUI */
+						goto out;
+					}
 					/* debounce */
 					np->flags &= ~NIU_FLAGS_HOTPLUG_PHY_PRESENT;
 				}
@@ -2234,13 +2240,21 @@ static int link_status_10g_hotplug(struct niu *np, int *link_up_p)
 					np->dev->name);
 			}
 		}
-		if (np->flags & NIU_FLAGS_HOTPLUG_PHY_PRESENT)
+out:
+		if (np->flags & NIU_FLAGS_HOTPLUG_PHY_PRESENT) {
 			err = link_status_10g_bcm8706(np, link_up_p);
+			if (err == 0xffff) {
+				/* No mdio, back-to-back XAUI: it is C10NEM */
+				*link_up_p = 1;
+				np->link_config.active_speed = SPEED_10000;
+				np->link_config.active_duplex = DUPLEX_FULL;
+			}
+		}
 	}
 
 	spin_unlock_irqrestore(&np->lock, flags);
 
-	return err;
+	return 0;
 }
 
 static int niu_link_status(struct niu *np, int *link_up_p)
@@ -2312,6 +2326,12 @@ static const struct niu_phy_ops phy_ops_10g_fiber_hotplug = {
 	.link_status		= link_status_10g_hotplug,
 };
 
+static const struct niu_phy_ops phy_ops_niu_10g_hotplug = {
+	.serdes_init		= serdes_init_niu_10g_fiber,
+	.xcvr_init		= xcvr_init_10g_bcm8706,
+	.link_status		= link_status_10g_hotplug,
+};
+
 static const struct niu_phy_ops phy_ops_10g_copper = {
 	.serdes_init		= serdes_init_10g,
 	.link_status		= link_status_10g, /* XXX */
@@ -2355,6 +2375,11 @@ static const struct niu_phy_template phy_template_10g_fiber = {
 
 static const struct niu_phy_template phy_template_10g_fiber_hotplug = {
 	.ops		= &phy_ops_10g_fiber_hotplug,
+	.phy_addr_base	= 8,
+};
+
+static const struct niu_phy_template phy_template_niu_10g_hotplug = {
+	.ops		= &phy_ops_niu_10g_hotplug,
 	.phy_addr_base	= 8,
 };
 
@@ -2542,8 +2567,16 @@ static int niu_determine_phy_disposition(struct niu *np)
 		case NIU_FLAGS_10G | NIU_FLAGS_FIBER:
 			/* 10G Fiber */
 		default:
-			tp = &phy_template_niu_10g_fiber;
-			phy_addr_off += np->port;
+			if (np->flags & NIU_FLAGS_HOTPLUG_PHY) {
+				tp = &phy_template_niu_10g_hotplug;
+				if (np->port == 0)
+					phy_addr_off = 8;
+				if (np->port == 1)
+					phy_addr_off = 12;
+			} else {
+				tp = &phy_template_niu_10g_fiber;
+				phy_addr_off += np->port;
+			}
 			break;
 		}
 	} else {
@@ -2630,11 +2663,11 @@ static int niu_init_link(struct niu *np)
 		msleep(200);
 	}
 	err = niu_serdes_init(np);
-	if (err)
+	if (err && !(np->flags & NIU_FLAGS_HOTPLUG_PHY))
 		return err;
 	msleep(200);
 	err = niu_xcvr_init(np);
-	if (!err)
+	if (!err || (np->flags & NIU_FLAGS_HOTPLUG_PHY))
 		niu_link_status(np, &ignore);
 	return 0;
 }
@@ -3512,7 +3545,7 @@ static int niu_process_rx_pkt(struct napi_struct *napi, struct niu *np,
 	rp->rcr_index = index;
 
 	skb_reserve(skb, NET_IP_ALIGN);
-	__pskb_pull_tail(skb, min(len, NIU_RXPULL_MAX));
+	__pskb_pull_tail(skb, min(len, VLAN_ETH_HLEN));
 
 	rp->rx_packets++;
 	rp->rx_bytes += skb->len;
@@ -3982,7 +4015,7 @@ static void niu_xmac_interrupt(struct niu *np)
 		mp->rx_hist_cnt6 += RXMAC_HIST_CNT6_COUNT;
 	if (val & XRXMAC_STATUS_RXHIST7_CNT_EXP)
 		mp->rx_hist_cnt7 += RXMAC_HIST_CNT7_COUNT;
-	if (val & XRXMAC_STAT_MSK_RXOCTET_CNT_EXP)
+	if (val & XRXMAC_STATUS_RXOCTET_CNT_EXP)
 		mp->rx_octets += RXMAC_BT_CNT_COUNT;
 	if (val & XRXMAC_STATUS_CVIOLERR_CNT_EXP)
 		mp->rx_code_violations += RXMAC_CD_VIO_CNT_COUNT;
@@ -5582,7 +5615,7 @@ static void niu_init_tx_mac(struct niu *np)
 	/* The XMAC_MIN register only accepts values for TX min which
 	 * have the low 3 bits cleared.
 	 */
-	BUILD_BUG_ON(min & 0x7);
+	BUG_ON(min & 0x7);
 
 	if (np->flags & NIU_FLAGS_XMAC)
 		niu_init_tx_xmac(np, min, max);
@@ -6330,6 +6363,7 @@ static void niu_set_rx_mode(struct net_device *dev)
 	struct niu *np = netdev_priv(dev);
 	int i, alt_cnt, err;
 	struct dev_addr_list *addr;
+	struct netdev_hw_addr *ha;
 	unsigned long flags;
 	u16 hash[16] = { 0, };
 
@@ -6342,7 +6376,7 @@ static void niu_set_rx_mode(struct net_device *dev)
 	if ((dev->flags & IFF_ALLMULTI) || (dev->mc_count > 0))
 		np->flags |= NIU_FLAGS_MCAST;
 
-	alt_cnt = dev->uc_count;
+	alt_cnt = dev->uc.count;
 	if (alt_cnt > niu_num_alt_addr(np)) {
 		alt_cnt = 0;
 		np->flags |= NIU_FLAGS_PROMISC;
@@ -6351,9 +6385,8 @@ static void niu_set_rx_mode(struct net_device *dev)
 	if (alt_cnt) {
 		int index = 0;
 
-		for (addr = dev->uc_list; addr; addr = addr->next) {
-			err = niu_set_alt_mac(np, index,
-					      addr->da_addr);
+		list_for_each_entry(ha, &dev->uc.list, list) {
+			err = niu_set_alt_mac(np, index, ha->addr);
 			if (err)
 				printk(KERN_WARNING PFX "%s: Error %d "
 				       "adding alt mac %d\n",
@@ -6624,7 +6657,8 @@ static u64 niu_compute_tx_flags(struct sk_buff *skb, struct ethhdr *ehdr,
 	return ret;
 }
 
-static int niu_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t niu_start_xmit(struct sk_buff *skb,
+				  struct net_device *dev)
 {
 	struct niu *np = netdev_priv(dev);
 	unsigned long align, headroom;
@@ -6744,8 +6778,6 @@ static int niu_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		if (niu_tx_avail(rp) > NIU_TX_WAKEUP_THRESH(rp))
 			netif_tx_wake_queue(txq);
 	}
-
-	dev->trans_start = jiffies;
 
 out:
 	return NETDEV_TX_OK;
@@ -7283,33 +7315,28 @@ static int niu_get_ethtool_tcam_all(struct niu *np,
 	struct niu_parent *parent = np->parent;
 	struct niu_tcam_entry *tp;
 	int i, idx, cnt;
-	u16 n_entries;
 	unsigned long flags;
-
+	int ret = 0;
 
 	/* put the tcam size here */
 	nfc->data = tcam_get_size(np);
 
 	niu_lock_parent(np, flags);
-	n_entries = nfc->rule_cnt;
 	for (cnt = 0, i = 0; i < nfc->data; i++) {
 		idx = tcam_get_index(np, i);
 		tp = &parent->tcam[idx];
 		if (!tp->valid)
 			continue;
+		if (cnt == nfc->rule_cnt) {
+			ret = -EMSGSIZE;
+			break;
+		}
 		rule_locs[cnt] = i;
 		cnt++;
 	}
 	niu_unlock_parent(np, flags);
 
-	if (n_entries != cnt) {
-		/* print warning, this should not happen */
-		pr_info(PFX "niu%d: %s In niu_get_ethtool_tcam_all, "
-			"n_entries[%d] != cnt[%d]!!!\n\n",
-			np->parent->index, np->dev->name, n_entries, cnt);
-	}
-
-	return 0;
+	return ret;
 }
 
 static int niu_get_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
@@ -9346,6 +9373,11 @@ static int __devinit niu_get_of_props(struct niu *np)
 	if (model)
 		strcpy(np->vpd.model, model);
 
+	if (of_find_property(dp, "hot-swappable-phy", &prop_len)) {
+		np->flags |= (NIU_FLAGS_10G | NIU_FLAGS_FIBER |
+			NIU_FLAGS_HOTPLUG_PHY);
+	}
+
 	return 0;
 #else
 	return -EINVAL;
@@ -10108,11 +10140,6 @@ static const struct niu_ops niu_phys_ops = {
 	.unmap_single	= niu_phys_unmap_single,
 };
 
-static unsigned long res_size(struct resource *r)
-{
-	return r->end - r->start + 1UL;
-}
-
 static int __devinit niu_of_probe(struct of_device *op,
 				  const struct of_device_id *match)
 {
@@ -10152,7 +10179,7 @@ static int __devinit niu_of_probe(struct of_device *op,
 	dev->features |= (NETIF_F_SG | NETIF_F_HW_CSUM);
 
 	np->regs = of_ioremap(&op->resource[1], 0,
-			      res_size(&op->resource[1]),
+			      resource_size(&op->resource[1]),
 			      "niu regs");
 	if (!np->regs) {
 		dev_err(&op->dev, PFX "Cannot map device registers, "
@@ -10162,7 +10189,7 @@ static int __devinit niu_of_probe(struct of_device *op,
 	}
 
 	np->vir_regs_1 = of_ioremap(&op->resource[2], 0,
-				    res_size(&op->resource[2]),
+				    resource_size(&op->resource[2]),
 				    "niu vregs-1");
 	if (!np->vir_regs_1) {
 		dev_err(&op->dev, PFX "Cannot map device vir registers 1, "
@@ -10172,7 +10199,7 @@ static int __devinit niu_of_probe(struct of_device *op,
 	}
 
 	np->vir_regs_2 = of_ioremap(&op->resource[3], 0,
-				    res_size(&op->resource[3]),
+				    resource_size(&op->resource[3]),
 				    "niu vregs-2");
 	if (!np->vir_regs_2) {
 		dev_err(&op->dev, PFX "Cannot map device vir registers 2, "
@@ -10207,19 +10234,19 @@ static int __devinit niu_of_probe(struct of_device *op,
 err_out_iounmap:
 	if (np->vir_regs_1) {
 		of_iounmap(&op->resource[2], np->vir_regs_1,
-			   res_size(&op->resource[2]));
+			   resource_size(&op->resource[2]));
 		np->vir_regs_1 = NULL;
 	}
 
 	if (np->vir_regs_2) {
 		of_iounmap(&op->resource[3], np->vir_regs_2,
-			   res_size(&op->resource[3]));
+			   resource_size(&op->resource[3]));
 		np->vir_regs_2 = NULL;
 	}
 
 	if (np->regs) {
 		of_iounmap(&op->resource[1], np->regs,
-			   res_size(&op->resource[1]));
+			   resource_size(&op->resource[1]));
 		np->regs = NULL;
 	}
 
@@ -10244,19 +10271,19 @@ static int __devexit niu_of_remove(struct of_device *op)
 
 		if (np->vir_regs_1) {
 			of_iounmap(&op->resource[2], np->vir_regs_1,
-				   res_size(&op->resource[2]));
+				   resource_size(&op->resource[2]));
 			np->vir_regs_1 = NULL;
 		}
 
 		if (np->vir_regs_2) {
 			of_iounmap(&op->resource[3], np->vir_regs_2,
-				   res_size(&op->resource[3]));
+				   resource_size(&op->resource[3]));
 			np->vir_regs_2 = NULL;
 		}
 
 		if (np->regs) {
 			of_iounmap(&op->resource[1], np->regs,
-				   res_size(&op->resource[1]));
+				   resource_size(&op->resource[1]));
 			np->regs = NULL;
 		}
 

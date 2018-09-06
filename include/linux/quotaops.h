@@ -7,7 +7,6 @@
 #ifndef _LINUX_QUOTAOPS_
 #define _LINUX_QUOTAOPS_
 
-#include <linux/smp_lock.h>
 #include <linux/fs.h>
 
 static inline struct quota_info *sb_dqopt(struct super_block *sb)
@@ -20,7 +19,16 @@ static inline struct quota_info *sb_dqopt(struct super_block *sb)
 /*
  * declaration of quota_function calls in kernel.
  */
-void sync_dquots(struct super_block *sb, int type);
+void sync_quota_sb(struct super_block *sb, int type);
+static inline void writeout_quota_sb(struct super_block *sb, int type)
+{
+	if (sb->s_qcop->quota_sync)
+		sb->s_qcop->quota_sync(sb, type);
+}
+
+void inode_add_rsv_space(struct inode *inode, qsize_t number);
+void inode_claim_rsv_space(struct inode *inode, qsize_t number);
+void inode_sub_rsv_space(struct inode *inode, qsize_t number);
 
 int dquot_initialize(struct inode *inode, int type);
 int dquot_drop(struct inode *inode);
@@ -38,7 +46,6 @@ int dquot_alloc_inode(const struct inode *inode, qsize_t number);
 int dquot_reserve_space(struct inode *inode, qsize_t number, int prealloc);
 int dquot_claim_space(struct inode *inode, qsize_t number);
 void dquot_release_reserved_space(struct inode *inode, qsize_t number);
-qsize_t dquot_get_reserved_space(struct inode *inode);
 
 int dquot_free_space(struct inode *inode, qsize_t number);
 int dquot_free_inode(const struct inode *inode, qsize_t number);
@@ -131,8 +138,8 @@ static inline int sb_any_quota_active(struct super_block *sb)
 /*
  * Operations supported for diskquotas.
  */
-extern struct dquot_operations dquot_operations;
-extern struct quotactl_ops vfs_quotactl_ops;
+extern const struct dquot_operations dquot_operations;
+extern const struct quotactl_ops vfs_quotactl_ops;
 
 #define sb_dquot_ops (&dquot_operations)
 #define sb_quotactl_ops (&vfs_quotactl_ops)
@@ -195,6 +202,8 @@ static inline int vfs_dq_reserve_space(struct inode *inode, qsize_t nr)
 		if (inode->i_sb->dq_op->reserve_space(inode, nr, 0) == NO_QUOTA)
 			return 1;
 	}
+	else
+		inode_add_rsv_space(inode, nr);
 	return 0;
 }
 
@@ -217,7 +226,7 @@ static inline int vfs_dq_claim_space(struct inode *inode, qsize_t nr)
 		if (inode->i_sb->dq_op->claim_space(inode, nr) == NO_QUOTA)
 			return 1;
 	} else
-		inode_add_bytes(inode, nr);
+		inode_claim_rsv_space(inode, nr);
 
 	mark_inode_dirty(inode);
 	return 0;
@@ -231,6 +240,8 @@ void vfs_dq_release_reservation_space(struct inode *inode, qsize_t nr)
 {
 	if (sb_any_quota_active(inode->i_sb))
 		inode->i_sb->dq_op->release_rsv(inode, nr);
+	else
+		inode_sub_rsv_space(inode, nr);
 }
 
 static inline void vfs_dq_free_space_nodirty(struct inode *inode, qsize_t nr)
@@ -253,12 +264,7 @@ static inline void vfs_dq_free_inode(struct inode *inode)
 		inode->i_sb->dq_op->free_inode(inode, 1);
 }
 
-/* The following two functions cannot be called inside a transaction */
-static inline void vfs_dq_sync(struct super_block *sb)
-{
-	sync_dquots(sb, -1);
-}
-
+/* Cannot be called inside a transaction */
 static inline int vfs_dq_off(struct super_block *sb, int remount)
 {
 	int ret = -ENOSYS;
@@ -334,7 +340,11 @@ static inline void vfs_dq_free_inode(struct inode *inode)
 {
 }
 
-static inline void vfs_dq_sync(struct super_block *sb)
+static inline void sync_quota_sb(struct super_block *sb, int type)
+{
+}
+
+static inline void writeout_quota_sb(struct super_block *sb, int type)
 {
 }
 

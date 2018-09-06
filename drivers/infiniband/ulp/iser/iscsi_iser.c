@@ -257,11 +257,8 @@ static void iscsi_iser_cleanup_task(struct iscsi_task *task)
 {
 	struct iscsi_iser_task *iser_task = task->dd_data;
 
-	/*
-	 * mgmt tasks do not need special cleanup and we do not
-	 * allocate anything in the init task callout
-	 */
-	if (!task->sc || task->state == ISCSI_TASK_PENDING)
+	/* mgmt tasks do not need special cleanup */
+	if (!task->sc)
 		return;
 
 	if (iser_task->status == ISER_TASK_STATUS_STARTED) {
@@ -429,7 +426,7 @@ iscsi_iser_session_create(struct iscsi_endpoint *ep,
 	 * because we preallocate so many resources
 	 */
 	cls_session = iscsi_session_setup(&iscsi_iser_transport, shost,
-					  ISCSI_DEF_XMIT_CMDS_MAX,
+					  ISCSI_DEF_XMIT_CMDS_MAX, 0,
 					  sizeof(struct iscsi_iser_task),
 					  initial_cmdsn, 0);
 	if (!cls_session)
@@ -517,7 +514,8 @@ iscsi_iser_conn_get_stats(struct iscsi_cls_conn *cls_conn, struct iscsi_stats *s
 }
 
 static struct iscsi_endpoint *
-iscsi_iser_ep_connect(struct sockaddr *dst_addr, int non_blocking)
+iscsi_iser_ep_connect(struct Scsi_Host *shost, struct sockaddr *dst_addr,
+		      int non_blocking)
 {
 	int err;
 	struct iser_conn *ib_conn;

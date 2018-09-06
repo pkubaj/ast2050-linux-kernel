@@ -71,7 +71,7 @@ static int raw_open(struct inode *inode, struct file *filp)
 	err = bd_claim(bdev, raw_open);
 	if (err)
 		goto out1;
-	err = set_blocksize(bdev, bdev_hardsect_size(bdev));
+	err = set_blocksize(bdev, bdev_logical_block_size(bdev));
 	if (err)
 		goto out2;
 	filp->f_flags |= O_DIRECT;
@@ -246,7 +246,8 @@ static const struct file_operations raw_fops = {
 	.read	=	do_sync_read,
 	.aio_read = 	generic_file_aio_read,
 	.write	=	do_sync_write,
-	.aio_write = 	generic_file_aio_write_nolock,
+	.aio_write =	blkdev_aio_write,
+	.fsync	=	block_fsync,
 	.open	=	raw_open,
 	.release=	raw_release,
 	.ioctl	=	raw_ioctl,
@@ -260,6 +261,11 @@ static const struct file_operations raw_ctl_fops = {
 };
 
 static struct cdev raw_cdev;
+
+static char *raw_devnode(struct device *dev, mode_t *mode)
+{
+	return kasprintf(GFP_KERNEL, "raw/%s", dev_name(dev));
+}
 
 static int __init raw_init(void)
 {
@@ -284,6 +290,7 @@ static int __init raw_init(void)
 		ret = PTR_ERR(raw_class);
 		goto error_region;
 	}
+	raw_class->devnode = raw_devnode;
 	device_create(raw_class, NULL, MKDEV(RAW_MAJOR, 0), NULL, "rawctl");
 
 	return 0;

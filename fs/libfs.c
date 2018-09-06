@@ -9,6 +9,8 @@
 #include <linux/vfs.h>
 #include <linux/mutex.h>
 #include <linux/exportfs.h>
+#include <linux/writeback.h>
+#include <linux/buffer_head.h>
 
 #include <asm/uaccess.h>
 
@@ -215,7 +217,7 @@ int get_sb_pseudo(struct file_system_type *fs_type, char *name,
 		return PTR_ERR(s);
 
 	s->s_flags = MS_NOUSER;
-	s->s_maxbytes = ~0ULL;
+	s->s_maxbytes = MAX_LFS_FILESIZE;
 	s->s_blocksize = PAGE_SIZE;
 	s->s_blocksize_bits = PAGE_SHIFT;
 	s->s_magic = magic;
@@ -413,7 +415,8 @@ int simple_write_end(struct file *file, struct address_space *mapping,
  * unique inode values later for this filesystem, then you must take care
  * to pass it an appropriate max_reserved value to avoid collisions.
  */
-int simple_fill_super(struct super_block *s, int magic, struct tree_descr *files)
+int simple_fill_super(struct super_block *s, unsigned long magic,
+		      struct tree_descr *files)
 {
 	struct inode *inode;
 	struct dentry *root;
@@ -525,14 +528,18 @@ ssize_t simple_read_from_buffer(void __user *to, size_t count, loff_t *ppos,
 				const void *from, size_t available)
 {
 	loff_t pos = *ppos;
+	size_t ret;
+
 	if (pos < 0)
 		return -EINVAL;
-	if (pos >= available)
+	if (pos >= available || !count)
 		return 0;
 	if (count > available - pos)
 		count = available - pos;
-	if (copy_to_user(to, from + pos, count))
+	ret = copy_to_user(to, from + pos, count);
+	if (ret == count)
 		return -EFAULT;
+	count -= ret;
 	*ppos = pos + count;
 	return count;
 }
@@ -733,10 +740,11 @@ ssize_t simple_attr_write(struct file *file, const char __user *buf,
 	if (copy_from_user(attr->set_buf, buf, size))
 		goto out;
 
-	ret = len; /* claim we got the whole input */
 	attr->set_buf[size] = '\0';
 	val = simple_strtol(attr->set_buf, NULL, 0);
-	attr->set(attr->data, val);
+	ret = attr->set(attr->data, val);
+	if (ret == 0)
+		ret = len; /* on success, claim we got the whole input */
 out:
 	mutex_unlock(&attr->mutex);
 	return ret;
@@ -806,6 +814,29 @@ struct dentry *generic_fh_to_parent(struct super_block *sb, struct fid *fid,
 	return d_obtain_alias(inode);
 }
 EXPORT_SYMBOL_GPL(generic_fh_to_parent);
+
+int simple_fsync(struct file *file, struct dentry *dentry, int datasync)
+{
+	struct writeback_control wbc = {
+		.sync_mode = WB_SYNC_ALL,
+		.nr_to_write = 0, /* metadata-only; caller takes care of data */
+	};
+	struct inode *inode = dentry->d_inode;
+	int err;
+	int ret;
+
+	ret = sync_mapping_buffers(inode->i_mapping);
+	if (!(inode->i_state & I_DIRTY))
+		return ret;
+	if (datasync && !(inode->i_state & I_DIRTY_DATASYNC))
+		return ret;
+
+	err = sync_inode(inode, &wbc);
+	if (ret == 0)
+		ret = err;
+	return ret;
+}
+EXPORT_SYMBOL(simple_fsync);
 
 EXPORT_SYMBOL(dcache_dir_close);
 EXPORT_SYMBOL(dcache_dir_lseek);

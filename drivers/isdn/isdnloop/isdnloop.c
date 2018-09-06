@@ -15,7 +15,6 @@
 #include <linux/sched.h>
 #include "isdnloop.h"
 
-static char *revision = "$Revision: 1.11.6.7 $";
 static char *isdnloop_id = "loop0";
 
 MODULE_DESCRIPTION("ISDN4Linux: Pseudo Driver that simulates an ISDN card");
@@ -518,9 +517,9 @@ static isdnloop_stat isdnloop_cmd_table[] =
 static void
 isdnloop_fake_err(isdnloop_card * card)
 {
-	char buf[60];
+	char buf[64];
 
-	sprintf(buf, "E%s", card->omsg);
+	snprintf(buf, sizeof(buf), "E%s", card->omsg);
 	isdnloop_fake(card, buf, -1);
 	isdnloop_fake(card, "NAK", -1);
 }
@@ -903,6 +902,8 @@ isdnloop_parse_cmd(isdnloop_card * card)
 		case 7:
 			/* 0x;EAZ */
 			p += 3;
+			if (strlen(p) >= sizeof(card->eazlist[0]))
+				break;
 			strcpy(card->eazlist[ch - 1], p);
 			break;
 		case 8:
@@ -1070,6 +1071,12 @@ isdnloop_start(isdnloop_card * card, isdnloop_sdef * sdefp)
 		return -EBUSY;
 	if (copy_from_user((char *) &sdef, (char *) sdefp, sizeof(sdef)))
 		return -EFAULT;
+
+	for (i = 0; i < 3; i++) {
+		if (!memchr(sdef.num[i], 0, sizeof(sdef.num[i])))
+			return -EINVAL;
+	}
+
 	spin_lock_irqsave(&card->isdnloop_lock, flags);
 	switch (sdef.ptype) {
 		case ISDN_PTYPE_EURO:
@@ -1083,8 +1090,10 @@ isdnloop_start(isdnloop_card * card, isdnloop_sdef * sdefp)
 				spin_unlock_irqrestore(&card->isdnloop_lock, flags);
 				return -ENOMEM;
 			}
-			for (i = 0; i < 3; i++)
-				strcpy(card->s0num[i], sdef.num[i]);
+			for (i = 0; i < 3; i++) {
+				strlcpy(card->s0num[i], sdef.num[i],
+					sizeof(card->s0num[0]));
+			}
 			break;
 		case ISDN_PTYPE_1TR6:
 			if (isdnloop_fake(card, "DRV1.04TC-1TR6-CAPI-CNS-BASIS-29.11.95",
@@ -1097,7 +1106,7 @@ isdnloop_start(isdnloop_card * card, isdnloop_sdef * sdefp)
 				spin_unlock_irqrestore(&card->isdnloop_lock, flags);
 				return -ENOMEM;
 			}
-			strcpy(card->s0num[0], sdef.num[0]);
+			strlcpy(card->s0num[0], sdef.num[0], sizeof(card->s0num[0]));
 			card->s0num[1][0] = '\0';
 			card->s0num[2][0] = '\0';
 			break;
@@ -1125,7 +1134,7 @@ isdnloop_command(isdn_ctrl * c, isdnloop_card * card)
 {
 	ulong a;
 	int i;
-	char cbuf[60];
+	char cbuf[80];
 	isdn_ctrl cmd;
 	isdnloop_cdef cdef;
 
@@ -1190,7 +1199,6 @@ isdnloop_command(isdn_ctrl * c, isdnloop_card * card)
 				break;
 			if ((c->arg & 255) < ISDNLOOP_BCH) {
 				char *p;
-				char dial[50];
 				char dcode[4];
 
 				a = c->arg;
@@ -1202,10 +1210,10 @@ isdnloop_command(isdn_ctrl * c, isdnloop_card * card)
 				} else
 					/* Normal Dial */
 					strcpy(dcode, "CAL");
-				strcpy(dial, p);
-				sprintf(cbuf, "%02d;D%s_R%s,%02d,%02d,%s\n", (int) (a + 1),
-					dcode, dial, c->parm.setup.si1,
-				c->parm.setup.si2, c->parm.setup.eazmsn);
+				snprintf(cbuf, sizeof(cbuf),
+					 "%02d;D%s_R%s,%02d,%02d,%s\n", (int) (a + 1),
+					 dcode, p, c->parm.setup.si1,
+					 c->parm.setup.si2, c->parm.setup.eazmsn);
 				i = isdnloop_writecmd(cbuf, strlen(cbuf), 0, card);
 			}
 			break;
@@ -1493,17 +1501,6 @@ isdnloop_addcard(char *id1)
 static int __init
 isdnloop_init(void)
 {
-	char *p;
-	char rev[10];
-
-	if ((p = strchr(revision, ':'))) {
-		strcpy(rev, p + 1);
-		p = strchr(rev, '$');
-		*p = 0;
-	} else
-		strcpy(rev, " ??? ");
-	printk(KERN_NOTICE "isdnloop-ISDN-driver Rev%s\n", rev);
-
 	if (isdnloop_id)
 		return (isdnloop_addcard(isdnloop_id));
 

@@ -206,11 +206,18 @@ static struct miscdevice mtx1_wdt_misc = {
 };
 
 
-static int mtx1_wdt_probe(struct platform_device *pdev)
+static int __devinit mtx1_wdt_probe(struct platform_device *pdev)
 {
 	int ret;
 
 	mtx1_wdt_device.gpio = pdev->resource[0].start;
+	ret = gpio_request(mtx1_wdt_device.gpio, "mtx1-wdt");
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to request gpio");
+		return ret;
+	}
+
+	gpio_direction_output(mtx1_wdt_device.gpio, 1);
 
 	spin_lock_init(&mtx1_wdt_device.lock);
 	init_completion(&mtx1_wdt_device.stop);
@@ -229,20 +236,22 @@ static int mtx1_wdt_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int mtx1_wdt_remove(struct platform_device *pdev)
+static int __devexit mtx1_wdt_remove(struct platform_device *pdev)
 {
 	/* FIXME: do we need to lock this test ? */
 	if (mtx1_wdt_device.queue) {
 		mtx1_wdt_device.queue = 0;
 		wait_for_completion(&mtx1_wdt_device.stop);
 	}
+
+	gpio_free(mtx1_wdt_device.gpio);
 	misc_deregister(&mtx1_wdt_misc);
 	return 0;
 }
 
 static struct platform_driver mtx1_wdt = {
 	.probe = mtx1_wdt_probe,
-	.remove = mtx1_wdt_remove,
+	.remove = __devexit_p(mtx1_wdt_remove),
 	.driver.name = "mtx1-wdt",
 	.driver.owner = THIS_MODULE,
 };

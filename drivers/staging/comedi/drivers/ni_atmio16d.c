@@ -35,6 +35,7 @@ Devices: [National Instruments] AT-MIO-16 (atmio16), AT-MIO-16D (atmio16d)
  *
  */
 
+#include <linux/interrupt.h>
 #include "../comedidev.h"
 
 #include <linux/ioport.h>
@@ -111,66 +112,82 @@ struct atmio16_board_t {
 
 static const struct atmio16_board_t atmio16_boards[] = {
 	{
-	      name:	"atmio16",
-	      has_8255:0,
-		},
+	 .name = "atmio16",
+	 .has_8255 = 0,
+	 },
 	{
-	      name:	"atmio16d",
-	      has_8255:1,
-		},
+	 .name = "atmio16d",
+	 .has_8255 = 1,
+	 },
 };
 
-#define n_atmio16_boards sizeof(atmio16_boards)/sizeof(atmio16_boards[0])
+#define n_atmio16_boards ARRAY_SIZE(atmio16_boards)
 
 #define boardtype ((const struct atmio16_board_t *)dev->board_ptr)
 
 /* function prototypes */
-static int atmio16d_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int atmio16d_detach(struct comedi_device * dev);
-static irqreturn_t atmio16d_interrupt(int irq, void *d PT_REGS_ARG);
-static int atmio16d_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd);
-static int atmio16d_ai_cmd(struct comedi_device * dev, struct comedi_subdevice * s);
-static int atmio16d_ai_cancel(struct comedi_device * dev, struct comedi_subdevice * s);
-static void reset_counters(struct comedi_device * dev);
-static void reset_atmio16d(struct comedi_device * dev);
+static int atmio16d_attach(struct comedi_device *dev,
+			   struct comedi_devconfig *it);
+static int atmio16d_detach(struct comedi_device *dev);
+static irqreturn_t atmio16d_interrupt(int irq, void *d);
+static int atmio16d_ai_cmdtest(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_cmd *cmd);
+static int atmio16d_ai_cmd(struct comedi_device *dev,
+			   struct comedi_subdevice *s);
+static int atmio16d_ai_cancel(struct comedi_device *dev,
+			      struct comedi_subdevice *s);
+static void reset_counters(struct comedi_device *dev);
+static void reset_atmio16d(struct comedi_device *dev);
 
 /* main driver struct */
 static struct comedi_driver driver_atmio16d = {
-      driver_name:"atmio16",
-      module:THIS_MODULE,
-      attach:atmio16d_attach,
-      detach:atmio16d_detach,
-      board_name:&atmio16_boards[0].name,
-      num_names:n_atmio16_boards,
-      offset:sizeof(struct atmio16_board_t),
+	.driver_name = "atmio16",
+	.module = THIS_MODULE,
+	.attach = atmio16d_attach,
+	.detach = atmio16d_detach,
+	.board_name = &atmio16_boards[0].name,
+	.num_names = n_atmio16_boards,
+	.offset = sizeof(struct atmio16_board_t),
 };
 
 COMEDI_INITCLEANUP(driver_atmio16d);
 
 /* range structs */
 static const struct comedi_lrange range_atmio16d_ai_10_bipolar = { 4, {
-			BIP_RANGE(10),
-			BIP_RANGE(1),
-			BIP_RANGE(0.1),
-			BIP_RANGE(0.02)
-	}
+								       BIP_RANGE
+								       (10),
+								       BIP_RANGE
+								       (1),
+								       BIP_RANGE
+								       (0.1),
+								       BIP_RANGE
+								       (0.02)
+								       }
 };
 
 static const struct comedi_lrange range_atmio16d_ai_5_bipolar = { 4, {
-			BIP_RANGE(5),
-			BIP_RANGE(0.5),
-			BIP_RANGE(0.05),
-			BIP_RANGE(0.01)
-	}
+								      BIP_RANGE
+								      (5),
+								      BIP_RANGE
+								      (0.5),
+								      BIP_RANGE
+								      (0.05),
+								      BIP_RANGE
+								      (0.01)
+								      }
 };
 
 static const struct comedi_lrange range_atmio16d_ai_unipolar = { 4, {
-			UNI_RANGE(10),
-			UNI_RANGE(1),
-			UNI_RANGE(0.1),
-			UNI_RANGE(0.02)
-	}
+								     UNI_RANGE
+								     (10),
+								     UNI_RANGE
+								     (1),
+								     UNI_RANGE
+								     (0.1),
+								     UNI_RANGE
+								     (0.02)
+								     }
 };
 
 /* private data struct */
@@ -187,7 +204,7 @@ struct atmio16d_private {
 	unsigned int com_reg_2_state;	/* current state of command register 2 */
 };
 
-static void reset_counters(struct comedi_device * dev)
+static void reset_counters(struct comedi_device *dev)
 {
 	/* Counter 2 */
 	outw(0xFFC2, dev->iobase + AM9513A_COM_REG);
@@ -225,7 +242,7 @@ static void reset_counters(struct comedi_device * dev)
 	outw(0, dev->iobase + AD_CLEAR_REG);
 }
 
-static void reset_atmio16d(struct comedi_device * dev)
+static void reset_atmio16d(struct comedi_device *dev)
 {
 	int i;
 
@@ -257,12 +274,12 @@ static void reset_atmio16d(struct comedi_device * dev)
 	outw(2048, dev->iobase + DAC1_REG);
 }
 
-static irqreturn_t atmio16d_interrupt(int irq, void *d PT_REGS_ARG)
+static irqreturn_t atmio16d_interrupt(int irq, void *d)
 {
 	struct comedi_device *dev = d;
 	struct comedi_subdevice *s = dev->subdevices + 0;
 
-//      printk("atmio16d_interrupt!\n");
+/* printk("atmio16d_interrupt!\n"); */
 
 	comedi_buf_put(s->async, inw(dev->iobase + AD_FIFO_REG));
 
@@ -270,8 +287,9 @@ static irqreturn_t atmio16d_interrupt(int irq, void *d PT_REGS_ARG)
 	return IRQ_HANDLED;
 }
 
-static int atmio16d_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd)
+static int atmio16d_ai_cmdtest(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_cmd *cmd)
 {
 	int err = 0, tmp;
 #ifdef DEBUG1
@@ -309,8 +327,8 @@ static int atmio16d_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevi
 	/* step 2: make sure trigger sources are unique and mutually compatible */
 	/* note that mutual compatiblity is not an issue here */
 	if (cmd->scan_begin_src != TRIG_FOLLOW &&
-		cmd->scan_begin_src != TRIG_EXT &&
-		cmd->scan_begin_src != TRIG_TIMER)
+	    cmd->scan_begin_src != TRIG_EXT &&
+	    cmd->scan_begin_src != TRIG_TIMER)
 		err++;
 	if (cmd->stop_src != TRIG_COUNT && cmd->stop_src != TRIG_NONE)
 		err++;
@@ -371,7 +389,8 @@ static int atmio16d_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevi
 	return 0;
 }
 
-static int atmio16d_ai_cmd(struct comedi_device * dev, struct comedi_subdevice * s)
+static int atmio16d_ai_cmd(struct comedi_device *dev,
+			   struct comedi_subdevice *s)
 {
 	struct comedi_cmd *cmd = &s->async->cmd;
 	unsigned int timer, base_clock;
@@ -449,11 +468,13 @@ static int atmio16d_ai_cmd(struct comedi_device * dev, struct comedi_subdevice *
 		outw(devpriv->com_reg_1_state, dev->iobase + COM_REG_1);
 	} else {
 		/* Counter 4 and 5 are needed */
-		if ((tmp = sample_count & 0xFFFF)) {
+
+		tmp = sample_count & 0xFFFF;
+		if (tmp)
 			outw(tmp - 1, dev->iobase + AM9513A_DATA_REG);
-		} else {
+		else
 			outw(0xFFFF, dev->iobase + AM9513A_DATA_REG);
-		}
+
 		outw(0xFF48, dev->iobase + AM9513A_COM_REG);
 		outw(0, dev->iobase + AM9513A_DATA_REG);
 		outw(0xFF28, dev->iobase + AM9513A_COM_REG);
@@ -463,10 +484,10 @@ static int atmio16d_ai_cmd(struct comedi_device * dev, struct comedi_subdevice *
 		tmp = sample_count & 0xFFFF;
 		if ((tmp == 0) || (tmp == 1)) {
 			outw((sample_count >> 16) & 0xFFFF,
-				dev->iobase + AM9513A_DATA_REG);
+			     dev->iobase + AM9513A_DATA_REG);
 		} else {
 			outw(((sample_count >> 16) & 0xFFFF) + 1,
-				dev->iobase + AM9513A_DATA_REG);
+			     dev->iobase + AM9513A_DATA_REG);
 		}
 		outw(0xFF70, dev->iobase + AM9513A_COM_REG);
 		devpriv->com_reg_1_state |= COMREG1_1632CNT;
@@ -519,7 +540,8 @@ static int atmio16d_ai_cmd(struct comedi_device * dev, struct comedi_subdevice *
 }
 
 /* This will cancel a running acquisition operation */
-static int atmio16d_ai_cancel(struct comedi_device * dev, struct comedi_subdevice * s)
+static int atmio16d_ai_cancel(struct comedi_device *dev,
+			      struct comedi_subdevice *s)
 {
 	reset_atmio16d(dev);
 
@@ -527,8 +549,9 @@ static int atmio16d_ai_cancel(struct comedi_device * dev, struct comedi_subdevic
 }
 
 /* Mode 0 is used to get a single conversion on demand */
-static int atmio16d_ai_insn_read(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int atmio16d_ai_insn_read(struct comedi_device *dev,
+				 struct comedi_subdevice *s,
+				 struct comedi_insn *insn, unsigned int *data)
 {
 	int i, t;
 	int chan;
@@ -542,9 +565,9 @@ static int atmio16d_ai_insn_read(struct comedi_device * dev, struct comedi_subde
 	gain = CR_RANGE(insn->chanspec);
 
 	/* reset the Analog input circuitry */
-	//outw( 0, dev->iobase+AD_CLEAR_REG );
+	/* outw( 0, dev->iobase+AD_CLEAR_REG ); */
 	/* reset the Analog Input MUX Counter to 0 */
-	//outw( 0, dev->iobase+MUX_CNTR_REG );
+	/* outw( 0, dev->iobase+MUX_CNTR_REG ); */
 
 	/* set the Input MUX gain */
 	outw(chan | (gain << 6), dev->iobase + MUX_GAIN_REG);
@@ -577,7 +600,7 @@ static int atmio16d_ai_insn_read(struct comedi_device * dev, struct comedi_subde
 		}
 		/* end waiting, now check if it timed out */
 		if (t == ATMIO16D_TIMEOUT) {
-			rt_printk("atmio16d: timeout\n");
+			printk("atmio16d: timeout\n");
 
 			return -ETIME;
 		}
@@ -586,8 +609,9 @@ static int atmio16d_ai_insn_read(struct comedi_device * dev, struct comedi_subde
 	return i;
 }
 
-static int atmio16d_ao_insn_read(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int atmio16d_ao_insn_read(struct comedi_device *dev,
+				 struct comedi_subdevice *s,
+				 struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 #ifdef DEBUG1
@@ -601,8 +625,9 @@ static int atmio16d_ao_insn_read(struct comedi_device * dev, struct comedi_subde
 	return i;
 }
 
-static int atmio16d_ao_insn_write(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int atmio16d_ao_insn_write(struct comedi_device *dev,
+				  struct comedi_subdevice *s,
+				  struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan;
@@ -636,8 +661,9 @@ static int atmio16d_ao_insn_write(struct comedi_device * dev, struct comedi_subd
 	return i;
 }
 
-static int atmio16d_dio_insn_bits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int atmio16d_dio_insn_bits(struct comedi_device *dev,
+				  struct comedi_subdevice *s,
+				  struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -652,8 +678,10 @@ static int atmio16d_dio_insn_bits(struct comedi_device * dev, struct comedi_subd
 	return 2;
 }
 
-static int atmio16d_dio_insn_config(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int atmio16d_dio_insn_config(struct comedi_device *dev,
+				    struct comedi_subdevice *s,
+				    struct comedi_insn *insn,
+				    unsigned int *data)
 {
 	int i;
 	int mask;
@@ -706,7 +734,8 @@ static int atmio16d_dio_insn_config(struct comedi_device * dev, struct comedi_su
    options[12] - dac1 coding
  */
 
-static int atmio16d_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int atmio16d_attach(struct comedi_device *dev,
+			   struct comedi_devconfig *it)
 {
 	unsigned int irq;
 	unsigned long iobase;
@@ -726,9 +755,12 @@ static int atmio16d_attach(struct comedi_device * dev, struct comedi_devconfig *
 	/* board name */
 	dev->board_name = boardtype->name;
 
-	if ((ret = alloc_subdevices(dev, 4)) < 0)
+	ret = alloc_subdevices(dev, 4);
+	if (ret < 0)
 		return ret;
-	if ((ret = alloc_private(dev, sizeof(struct atmio16d_private))) < 0)
+
+	ret = alloc_private(dev, sizeof(struct atmio16d_private));
+	if (ret < 0)
 		return ret;
 
 	/* reset the atmio16d hardware */
@@ -737,8 +769,9 @@ static int atmio16d_attach(struct comedi_device * dev, struct comedi_devconfig *
 	/* check if our interrupt is available and get it */
 	irq = it->options[1];
 	if (irq) {
-		if ((ret = comedi_request_irq(irq, atmio16d_interrupt,
-					0, "atmio16d", dev)) < 0) {
+
+		ret = request_irq(irq, atmio16d_interrupt, 0, "atmio16d", dev);
+		if (ret < 0) {
 			printk("failed to allocate irq %u\n", irq);
 			return ret;
 		}
@@ -836,12 +869,12 @@ static int atmio16d_attach(struct comedi_device * dev, struct comedi_devconfig *
 	s->n_chan = 0;
 	s->maxdata = 0
 #endif
-		printk("\n");
+	    printk("\n");
 
 	return 0;
 }
 
-static int atmio16d_detach(struct comedi_device * dev)
+static int atmio16d_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: atmio16d: remove\n", dev->minor);
 
@@ -849,7 +882,7 @@ static int atmio16d_detach(struct comedi_device * dev)
 		subdev_8255_cleanup(dev, dev->subdevices + 3);
 
 	if (dev->irq)
-		comedi_free_irq(dev->irq, dev);
+		free_irq(dev->irq, dev);
 
 	reset_atmio16d(dev);
 

@@ -128,11 +128,11 @@ enum sony_nc_rfkill {
 	SONY_BLUETOOTH,
 	SONY_WWAN,
 	SONY_WIMAX,
-	SONY_RFKILL_MAX,
+	N_SONY_RFKILL,
 };
 
-static struct rfkill *sony_rfkill_devices[SONY_RFKILL_MAX];
-static int sony_rfkill_address[SONY_RFKILL_MAX] = {0x300, 0x500, 0x700, 0x900};
+static struct rfkill *sony_rfkill_devices[N_SONY_RFKILL];
+static int sony_rfkill_address[N_SONY_RFKILL] = {0x300, 0x500, 0x700, 0x900};
 static void sony_nc_rfkill_update(void);
 
 /*********** Input Devices ***********/
@@ -976,15 +976,12 @@ static acpi_status sony_walk_callback(acpi_handle handle, u32 level,
 				      void *context, void **return_value)
 {
 	struct acpi_device_info *info;
-	struct acpi_buffer buffer = {ACPI_ALLOCATE_BUFFER, NULL};
 
-	if (ACPI_SUCCESS(acpi_get_object_info(handle, &buffer))) {
-		info = buffer.pointer;
-
+	if (ACPI_SUCCESS(acpi_get_object_info(handle, &info))) {
 		printk(KERN_WARNING DRV_PFX "method: name: %4.4s, args %X\n",
 			(char *)&info->name, info->param_count);
 
-		kfree(buffer.pointer);
+		kfree(info);
 	}
 
 	return AE_OK;
@@ -1044,6 +1041,9 @@ static int sony_nc_resume(struct acpi_device *device)
 			sony_backlight_update_status(sony_backlight_device) < 0)
 		printk(KERN_WARNING DRV_PFX "unable to restore brightness level\n");
 
+	/* re-read rfkill state */
+	sony_nc_rfkill_update();
+
 	return 0;
 }
 
@@ -1051,151 +1051,103 @@ static void sony_nc_rfkill_cleanup(void)
 {
 	int i;
 
-	for (i = 0; i < SONY_RFKILL_MAX; i++) {
-		if (sony_rfkill_devices[i])
+	for (i = 0; i < N_SONY_RFKILL; i++) {
+		if (sony_rfkill_devices[i]) {
 			rfkill_unregister(sony_rfkill_devices[i]);
+			rfkill_destroy(sony_rfkill_devices[i]);
+		}
 	}
 }
 
-static int sony_nc_rfkill_get(void *data, enum rfkill_state *state)
-{
-	int result;
-	int argument = sony_rfkill_address[(long) data];
-
-	sony_call_snc_handle(0x124, 0x200, &result);
-	if (result & 0x1) {
-		sony_call_snc_handle(0x124, argument, &result);
-		if (result & 0xf)
-			*state = RFKILL_STATE_UNBLOCKED;
-		else
-			*state = RFKILL_STATE_SOFT_BLOCKED;
-	} else {
-		*state = RFKILL_STATE_HARD_BLOCKED;
-	}
-
-	return 0;
-}
-
-static int sony_nc_rfkill_set(void *data, enum rfkill_state state)
+static int sony_nc_rfkill_set(void *data, bool blocked)
 {
 	int result;
 	int argument = sony_rfkill_address[(long) data] + 0x100;
 
-	if (state == RFKILL_STATE_UNBLOCKED)
+	if (!blocked)
 		argument |= 0xff0000;
 
 	return sony_call_snc_handle(0x124, argument, &result);
 }
 
-static int sony_nc_setup_wifi_rfkill(struct acpi_device *device)
+static const struct rfkill_ops sony_rfkill_ops = {
+	.set_block = sony_nc_rfkill_set,
+};
+
+static int sony_nc_setup_rfkill(struct acpi_device *device,
+				enum sony_nc_rfkill nc_type)
 {
 	int err = 0;
-	struct rfkill *sony_wifi_rfkill;
+	struct rfkill *rfk;
+	enum rfkill_type type;
+	const char *name;
+	int result;
+	bool hwblock;
 
-	sony_wifi_rfkill = rfkill_allocate(&device->dev, RFKILL_TYPE_WLAN);
-	if (!sony_wifi_rfkill)
-		return -1;
-	sony_wifi_rfkill->name = "sony-wifi";
-	sony_wifi_rfkill->toggle_radio = sony_nc_rfkill_set;
-	sony_wifi_rfkill->get_state = sony_nc_rfkill_get;
-	sony_wifi_rfkill->user_claim_unsupported = 1;
-	sony_wifi_rfkill->data = (void *)SONY_WIFI;
-	err = rfkill_register(sony_wifi_rfkill);
-	if (err)
-		rfkill_free(sony_wifi_rfkill);
-	else {
-		sony_rfkill_devices[SONY_WIFI] = sony_wifi_rfkill;
-		sony_nc_rfkill_set(sony_wifi_rfkill->data,
-				RFKILL_STATE_UNBLOCKED);
+	switch (nc_type) {
+	case SONY_WIFI:
+		type = RFKILL_TYPE_WLAN;
+		name = "sony-wifi";
+		break;
+	case SONY_BLUETOOTH:
+		type = RFKILL_TYPE_BLUETOOTH;
+		name = "sony-bluetooth";
+		break;
+	case SONY_WWAN:
+		type = RFKILL_TYPE_WWAN;
+		name = "sony-wwan";
+		break;
+	case SONY_WIMAX:
+		type = RFKILL_TYPE_WIMAX;
+		name = "sony-wimax";
+		break;
+	default:
+		return -EINVAL;
 	}
-	return err;
-}
 
-static int sony_nc_setup_bluetooth_rfkill(struct acpi_device *device)
-{
-	int err = 0;
-	struct rfkill *sony_bluetooth_rfkill;
+	rfk = rfkill_alloc(name, &device->dev, type,
+			   &sony_rfkill_ops, (void *)nc_type);
+	if (!rfk)
+		return -ENOMEM;
 
-	sony_bluetooth_rfkill = rfkill_allocate(&device->dev,
-						RFKILL_TYPE_BLUETOOTH);
-	if (!sony_bluetooth_rfkill)
-		return -1;
-	sony_bluetooth_rfkill->name = "sony-bluetooth";
-	sony_bluetooth_rfkill->toggle_radio = sony_nc_rfkill_set;
-	sony_bluetooth_rfkill->get_state = sony_nc_rfkill_get;
-	sony_bluetooth_rfkill->user_claim_unsupported = 1;
-	sony_bluetooth_rfkill->data = (void *)SONY_BLUETOOTH;
-	err = rfkill_register(sony_bluetooth_rfkill);
-	if (err)
-		rfkill_free(sony_bluetooth_rfkill);
-	else {
-		sony_rfkill_devices[SONY_BLUETOOTH] = sony_bluetooth_rfkill;
-		sony_nc_rfkill_set(sony_bluetooth_rfkill->data,
-				RFKILL_STATE_UNBLOCKED);
+	sony_call_snc_handle(0x124, 0x200, &result);
+	hwblock = !(result & 0x1);
+	rfkill_set_hw_state(rfk, hwblock);
+
+	err = rfkill_register(rfk);
+	if (err) {
+		rfkill_destroy(rfk);
+		return err;
 	}
-	return err;
-}
-
-static int sony_nc_setup_wwan_rfkill(struct acpi_device *device)
-{
-	int err = 0;
-	struct rfkill *sony_wwan_rfkill;
-
-	sony_wwan_rfkill = rfkill_allocate(&device->dev, RFKILL_TYPE_WWAN);
-	if (!sony_wwan_rfkill)
-		return -1;
-	sony_wwan_rfkill->name = "sony-wwan";
-	sony_wwan_rfkill->toggle_radio = sony_nc_rfkill_set;
-	sony_wwan_rfkill->get_state = sony_nc_rfkill_get;
-	sony_wwan_rfkill->user_claim_unsupported = 1;
-	sony_wwan_rfkill->data = (void *)SONY_WWAN;
-	err = rfkill_register(sony_wwan_rfkill);
-	if (err)
-		rfkill_free(sony_wwan_rfkill);
-	else {
-		sony_rfkill_devices[SONY_WWAN] = sony_wwan_rfkill;
-		sony_nc_rfkill_set(sony_wwan_rfkill->data,
-				RFKILL_STATE_UNBLOCKED);
-	}
-	return err;
-}
-
-static int sony_nc_setup_wimax_rfkill(struct acpi_device *device)
-{
-	int err = 0;
-	struct rfkill *sony_wimax_rfkill;
-
-	sony_wimax_rfkill = rfkill_allocate(&device->dev, RFKILL_TYPE_WIMAX);
-	if (!sony_wimax_rfkill)
-		return -1;
-	sony_wimax_rfkill->name = "sony-wimax";
-	sony_wimax_rfkill->toggle_radio = sony_nc_rfkill_set;
-	sony_wimax_rfkill->get_state = sony_nc_rfkill_get;
-	sony_wimax_rfkill->user_claim_unsupported = 1;
-	sony_wimax_rfkill->data = (void *)SONY_WIMAX;
-	err = rfkill_register(sony_wimax_rfkill);
-	if (err)
-		rfkill_free(sony_wimax_rfkill);
-	else {
-		sony_rfkill_devices[SONY_WIMAX] = sony_wimax_rfkill;
-		sony_nc_rfkill_set(sony_wimax_rfkill->data,
-				RFKILL_STATE_UNBLOCKED);
-	}
+	sony_rfkill_devices[nc_type] = rfk;
 	return err;
 }
 
 static void sony_nc_rfkill_update()
 {
-	int i;
-	enum rfkill_state state;
+	enum sony_nc_rfkill i;
+	int result;
+	bool hwblock;
 
-	for (i = 0; i < SONY_RFKILL_MAX; i++) {
-		if (sony_rfkill_devices[i]) {
-			sony_rfkill_devices[i]->
-				get_state(sony_rfkill_devices[i]->data,
-					  &state);
-			rfkill_force_state(sony_rfkill_devices[i], state);
+	sony_call_snc_handle(0x124, 0x200, &result);
+	hwblock = !(result & 0x1);
+
+	for (i = 0; i < N_SONY_RFKILL; i++) {
+		int argument = sony_rfkill_address[i];
+
+		if (!sony_rfkill_devices[i])
+			continue;
+
+		if (hwblock) {
+			if (rfkill_set_hw_state(sony_rfkill_devices[i], true)) {
+				/* we already know we're blocked */
+			}
+			continue;
 		}
+
+		sony_call_snc_handle(0x124, argument, &result);
+		rfkill_set_states(sony_rfkill_devices[i],
+				  !(result & 0xf), false);
 	}
 }
 
@@ -1214,13 +1166,13 @@ static int sony_nc_rfkill_setup(struct acpi_device *device)
 	}
 
 	if (result & 0x1)
-		sony_nc_setup_wifi_rfkill(device);
+		sony_nc_setup_rfkill(device, SONY_WIFI);
 	if (result & 0x2)
-		sony_nc_setup_bluetooth_rfkill(device);
+		sony_nc_setup_rfkill(device, SONY_BLUETOOTH);
 	if (result & 0x1c)
-		sony_nc_setup_wwan_rfkill(device);
+		sony_nc_setup_rfkill(device, SONY_WWAN);
 	if (result & 0x20)
-		sony_nc_setup_wimax_rfkill(device);
+		sony_nc_setup_rfkill(device, SONY_WIMAX);
 
 	return 0;
 }
@@ -1257,15 +1209,6 @@ static int sony_nc_add(struct acpi_device *device)
 			result = -ENODEV;
 			goto outwalk;
 		}
-	}
-
-	/* try to _INI the device if such method exists (ACPI spec 3.0-6.5.1
-	 * should be respected as we already checked for the device presence above */
-	if (ACPI_SUCCESS(acpi_get_handle(sony_nc_acpi_handle, METHOD_NAME__INI, &handle))) {
-		dprintk("Invoking _INI\n");
-		if (ACPI_FAILURE(acpi_evaluate_object(sony_nc_acpi_handle, METHOD_NAME__INI,
-						NULL, NULL)))
-			dprintk("_INI Method failed\n");
 	}
 
 	if (ACPI_SUCCESS(acpi_get_handle(sony_nc_acpi_handle, "ECON",
@@ -1447,33 +1390,28 @@ struct sonypi_eventtypes {
 	struct sonypi_event	*events;
 };
 
-struct device_ctrl {
-	int				model;
-	int				(*handle_irq)(const u8, const u8);
-	u16				evport_offset;
-	u8				has_camera;
-	u8				has_bluetooth;
-	u8				has_wwan;
-	struct sonypi_eventtypes	*event_types;
-};
-
 struct sony_pic_dev {
-	struct device_ctrl	*control;
-	struct acpi_device	*acpi_dev;
-	struct sony_pic_irq	*cur_irq;
-	struct sony_pic_ioport	*cur_ioport;
-	struct list_head	interrupts;
-	struct list_head	ioports;
-	struct mutex		lock;
-	u8			camera_power;
-	u8			bluetooth_power;
-	u8			wwan_power;
+	struct acpi_device		*acpi_dev;
+	struct sony_pic_irq		*cur_irq;
+	struct sony_pic_ioport		*cur_ioport;
+	struct list_head		interrupts;
+	struct list_head		ioports;
+	struct mutex			lock;
+	struct sonypi_eventtypes	*event_types;
+	int                             (*handle_irq)(const u8, const u8);
+	int				model;
+	u16				evport_offset;
+	u8				camera_power;
+	u8				bluetooth_power;
+	u8				wwan_power;
 };
 
 static struct sony_pic_dev spic_dev = {
 	.interrupts	= LIST_HEAD_INIT(spic_dev.interrupts),
 	.ioports	= LIST_HEAD_INIT(spic_dev.ioports),
 };
+
+static int spic_drv_registered;
 
 /* Event masks */
 #define SONYPI_JOGGER_MASK			0x00000001
@@ -1772,27 +1710,6 @@ static int type3_handle_irq(const u8 data_mask, const u8 ev)
 	return 1;
 }
 
-static struct device_ctrl spic_types[] = {
-	{
-		.model = SONYPI_DEVICE_TYPE1,
-		.handle_irq = NULL,
-		.evport_offset = SONYPI_TYPE1_OFFSET,
-		.event_types = type1_events,
-	},
-	{
-		.model = SONYPI_DEVICE_TYPE2,
-		.handle_irq = NULL,
-		.evport_offset = SONYPI_TYPE2_OFFSET,
-		.event_types = type2_events,
-	},
-	{
-		.model = SONYPI_DEVICE_TYPE3,
-		.handle_irq = type3_handle_irq,
-		.evport_offset = SONYPI_TYPE3_OFFSET,
-		.event_types = type3_events,
-	},
-};
-
 static void sony_pic_detect_device_type(struct sony_pic_dev *dev)
 {
 	struct pci_dev *pcidev;
@@ -1800,48 +1717,63 @@ static void sony_pic_detect_device_type(struct sony_pic_dev *dev)
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_82371AB_3, NULL);
 	if (pcidev) {
-		dev->control = &spic_types[0];
+		dev->model = SONYPI_DEVICE_TYPE1;
+		dev->evport_offset = SONYPI_TYPE1_OFFSET;
+		dev->event_types = type1_events;
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH6_1, NULL);
 	if (pcidev) {
-		dev->control = &spic_types[2];
+		dev->model = SONYPI_DEVICE_TYPE2;
+		dev->evport_offset = SONYPI_TYPE2_OFFSET;
+		dev->event_types = type2_events;
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH7_1, NULL);
 	if (pcidev) {
-		dev->control = &spic_types[2];
+		dev->model = SONYPI_DEVICE_TYPE3;
+		dev->handle_irq = type3_handle_irq;
+		dev->evport_offset = SONYPI_TYPE3_OFFSET;
+		dev->event_types = type3_events;
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH8_4, NULL);
 	if (pcidev) {
-		dev->control = &spic_types[2];
+		dev->model = SONYPI_DEVICE_TYPE3;
+		dev->handle_irq = type3_handle_irq;
+		dev->evport_offset = SONYPI_TYPE3_OFFSET;
+		dev->event_types = type3_events;
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH9_1, NULL);
 	if (pcidev) {
-		dev->control = &spic_types[2];
+		dev->model = SONYPI_DEVICE_TYPE3;
+		dev->handle_irq = type3_handle_irq;
+		dev->evport_offset = SONYPI_TYPE3_OFFSET;
+		dev->event_types = type3_events;
 		goto out;
 	}
 
 	/* default */
-	dev->control = &spic_types[1];
+	dev->model = SONYPI_DEVICE_TYPE2;
+	dev->evport_offset = SONYPI_TYPE2_OFFSET;
+	dev->event_types = type2_events;
 
 out:
 	if (pcidev)
 		pci_dev_put(pcidev);
 
 	printk(KERN_INFO DRV_PFX "detected Type%d model\n",
-			dev->control->model == SONYPI_DEVICE_TYPE1 ? 1 :
-			dev->control->model == SONYPI_DEVICE_TYPE2 ? 2 : 3);
+			dev->model == SONYPI_DEVICE_TYPE1 ? 1 :
+			dev->model == SONYPI_DEVICE_TYPE2 ? 2 : 3);
 }
 
 /* camera tests and poweron/poweroff */
@@ -2614,7 +2546,7 @@ static int sony_pic_enable(struct acpi_device *device,
 	buffer.pointer = resource;
 
 	/* setup Type 1 resources */
-	if (spic_dev.control->model == SONYPI_DEVICE_TYPE1) {
+	if (spic_dev.model == SONYPI_DEVICE_TYPE1) {
 
 		/* setup io resources */
 		resource->res1.type = ACPI_RESOURCE_TYPE_IO;
@@ -2697,29 +2629,28 @@ static irqreturn_t sony_pic_irq(int irq, void *dev_id)
 		data_mask = inb_p(dev->cur_ioport->io2.minimum);
 	else
 		data_mask = inb_p(dev->cur_ioport->io1.minimum +
-				dev->control->evport_offset);
+				dev->evport_offset);
 
 	dprintk("event ([%.2x] [%.2x]) at port 0x%.4x(+0x%.2x)\n",
 			ev, data_mask, dev->cur_ioport->io1.minimum,
-			dev->control->evport_offset);
+			dev->evport_offset);
 
 	if (ev == 0x00 || ev == 0xff)
 		return IRQ_HANDLED;
 
-	for (i = 0; dev->control->event_types[i].mask; i++) {
+	for (i = 0; dev->event_types[i].mask; i++) {
 
-		if ((data_mask & dev->control->event_types[i].data) !=
-		    dev->control->event_types[i].data)
+		if ((data_mask & dev->event_types[i].data) !=
+		    dev->event_types[i].data)
 			continue;
 
-		if (!(mask & dev->control->event_types[i].mask))
+		if (!(mask & dev->event_types[i].mask))
 			continue;
 
-		for (j = 0; dev->control->event_types[i].events[j].event; j++) {
-			if (ev == dev->control->event_types[i].events[j].data) {
+		for (j = 0; dev->event_types[i].events[j].event; j++) {
+			if (ev == dev->event_types[i].events[j].data) {
 				device_event =
-					dev->control->
-						event_types[i].events[j].event;
+					dev->event_types[i].events[j].event;
 				goto found;
 			}
 		}
@@ -2727,13 +2658,12 @@ static irqreturn_t sony_pic_irq(int irq, void *dev_id)
 	/* Still not able to decode the event try to pass
 	 * it over to the minidriver
 	 */
-	if (dev->control->handle_irq &&
-			dev->control->handle_irq(data_mask, ev) == 0)
+	if (dev->handle_irq && dev->handle_irq(data_mask, ev) == 0)
 		return IRQ_HANDLED;
 
 	dprintk("unknown event ([%.2x] [%.2x]) at port 0x%.4x(+0x%.2x)\n",
 			ev, data_mask, dev->cur_ioport->io1.minimum,
-			dev->control->evport_offset);
+			dev->evport_offset);
 	return IRQ_HANDLED;
 
 found:
@@ -2864,7 +2794,7 @@ static int sony_pic_add(struct acpi_device *device)
 	/* request IRQ */
 	list_for_each_entry_reverse(irq, &spic_dev.interrupts, list) {
 		if (!request_irq(irq->irq.interrupts[0], sony_pic_irq,
-					IRQF_SHARED, "sony-laptop", &spic_dev)) {
+					IRQF_DISABLED, "sony-laptop", &spic_dev)) {
 			dprintk("IRQ: %d - triggering: %d - "
 					"polarity: %d - shr: %d\n",
 					irq->irq.interrupts[0],
@@ -2997,6 +2927,7 @@ static int __init sony_laptop_init(void)
 					"Unable to register SPIC driver.");
 			goto out;
 		}
+		spic_drv_registered = 1;
 	}
 
 	result = acpi_bus_register_driver(&sony_nc_driver);
@@ -3008,7 +2939,7 @@ static int __init sony_laptop_init(void)
 	return 0;
 
 out_unregister_pic:
-	if (!no_spic)
+	if (spic_drv_registered)
 		acpi_bus_unregister_driver(&sony_pic_driver);
 out:
 	return result;
@@ -3017,7 +2948,7 @@ out:
 static void __exit sony_laptop_exit(void)
 {
 	acpi_bus_unregister_driver(&sony_nc_driver);
-	if (!no_spic)
+	if (spic_drv_registered)
 		acpi_bus_unregister_driver(&sony_pic_driver);
 }
 

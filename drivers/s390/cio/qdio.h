@@ -1,7 +1,7 @@
 /*
  * linux/drivers/s390/cio/qdio.h
  *
- * Copyright 2000,2008 IBM Corp.
+ * Copyright 2000,2009 IBM Corp.
  * Author(s): Utz Bacher <utz.bacher@de.ibm.com>
  *	      Jan Glauber <jang@linux.vnet.ibm.com>
  */
@@ -246,6 +246,7 @@ struct qdio_q {
 	atomic_t nr_buf_used;
 
 	struct qdio_irq *irq_ptr;
+	struct dentry *debugfs_q;
 	struct tasklet_struct tasklet;
 
 	/* error condition during a data transfer */
@@ -267,6 +268,7 @@ struct qdio_irq {
 	struct qib qib;
 	u32 *dsci;		/* address of device state change indicator */
 	struct ccw_device *cdev;
+	struct dentry *debugfs_dev;
 
 	unsigned long int_parm;
 	struct subchannel_id schid;
@@ -351,15 +353,6 @@ static inline unsigned long long get_usecs(void)
 	((bufnr - dec) & QDIO_MAX_BUFFERS_MASK)
 
 /* prototypes for thin interrupt */
-void qdio_sync_after_thinint(struct qdio_q *q);
-int get_buf_state(struct qdio_q *q, unsigned int bufnr, unsigned char *state,
-		  int auto_ack);
-void qdio_check_outbound_after_thinint(struct qdio_q *q);
-int qdio_inbound_q_moved(struct qdio_q *q);
-void qdio_kick_handler(struct qdio_q *q);
-void qdio_stop_polling(struct qdio_q *q);
-int qdio_siga_sync_q(struct qdio_q *q);
-
 void qdio_setup_thinint(struct qdio_irq *irq_ptr);
 int qdio_establish_thinint(struct qdio_irq *irq_ptr);
 void qdio_shutdown_thinint(struct qdio_irq *irq_ptr);
@@ -392,4 +385,6 @@ void qdio_setup_destroy_sysfs(struct ccw_device *cdev);
 int qdio_setup_init(void);
 void qdio_setup_exit(void);
 
+int debug_get_buf_state(struct qdio_q *q, unsigned int bufnr,
+			unsigned char *state);
 #endif /* _CIO_QDIO_H */

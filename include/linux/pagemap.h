@@ -22,9 +22,7 @@ enum mapping_flags {
 	AS_EIO		= __GFP_BITS_SHIFT + 0,	/* IO error on async write */
 	AS_ENOSPC	= __GFP_BITS_SHIFT + 1,	/* ENOSPC on async write */
 	AS_MM_ALL_LOCKS	= __GFP_BITS_SHIFT + 2,	/* under mm_take_all_locks() */
-#ifdef CONFIG_UNEVICTABLE_LRU
 	AS_UNEVICTABLE	= __GFP_BITS_SHIFT + 3,	/* e.g., ramdisk, SHM_LOCK */
-#endif
 };
 
 static inline void mapping_set_error(struct address_space *mapping, int error)
@@ -36,8 +34,6 @@ static inline void mapping_set_error(struct address_space *mapping, int error)
 			set_bit(AS_EIO, &mapping->flags);
 	}
 }
-
-#ifdef CONFIG_UNEVICTABLE_LRU
 
 static inline void mapping_set_unevictable(struct address_space *mapping)
 {
@@ -55,14 +51,6 @@ static inline int mapping_unevictable(struct address_space *mapping)
 		return test_bit(AS_UNEVICTABLE, &mapping->flags);
 	return !!mapping;
 }
-#else
-static inline void mapping_set_unevictable(struct address_space *mapping) { }
-static inline void mapping_clear_unevictable(struct address_space *mapping) { }
-static inline int mapping_unevictable(struct address_space *mapping)
-{
-	return 0;
-}
-#endif
 
 static inline gfp_t mapping_gfp_mask(struct address_space * mapping)
 {
@@ -144,7 +132,7 @@ static inline int page_cache_get_speculative(struct page *page)
 {
 	VM_BUG_ON(in_interrupt());
 
-#if !defined(CONFIG_SMP) && defined(CONFIG_CLASSIC_RCU)
+#if !defined(CONFIG_SMP) && defined(CONFIG_TREE_RCU)
 # ifdef CONFIG_PREEMPT
 	VM_BUG_ON(!in_atomic());
 # endif
@@ -182,7 +170,7 @@ static inline int page_cache_add_speculative(struct page *page, int count)
 {
 	VM_BUG_ON(in_interrupt());
 
-#if !defined(CONFIG_SMP) && defined(CONFIG_CLASSIC_RCU)
+#if !defined(CONFIG_SMP) && defined(CONFIG_TREE_RCU)
 # ifdef CONFIG_PREEMPT
 	VM_BUG_ON(!in_atomic());
 # endif
@@ -265,6 +253,8 @@ extern struct page * read_cache_page_async(struct address_space *mapping,
 extern struct page * read_cache_page(struct address_space *mapping,
 				pgoff_t index, filler_t *filler,
 				void *data);
+extern struct page * read_cache_page_gfp(struct address_space *mapping,
+				pgoff_t index, gfp_t gfp_mask);
 extern int read_cache_pages(struct address_space *mapping,
 		struct list_head *pages, filler_t *filler, void *data);
 

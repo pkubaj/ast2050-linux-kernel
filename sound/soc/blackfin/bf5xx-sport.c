@@ -190,7 +190,7 @@ static inline int sport_hook_rx_dummy(struct sport_device *sport)
 	desc = get_dma_next_desc_ptr(sport->dma_rx_chan);
 	/* Copy the descriptor which will be damaged to backup */
 	temp_desc = *desc;
-	desc->x_count = 0xa;
+	desc->x_count = sport->dummy_count / 2;
 	desc->y_count = 0;
 	desc->next_desc_addr = sport->dummy_rx_desc;
 	local_irq_restore(flags);
@@ -309,7 +309,7 @@ static inline int sport_hook_tx_dummy(struct sport_device *sport)
 	desc = get_dma_next_desc_ptr(sport->dma_tx_chan);
 	/* Store the descriptor which will be damaged */
 	temp_desc = *desc;
-	desc->x_count = 0xa;
+	desc->x_count = sport->dummy_count / 2;
 	desc->y_count = 0;
 	desc->next_desc_addr = sport->dummy_tx_desc;
 	local_irq_restore(flags);
@@ -326,7 +326,7 @@ static inline int sport_hook_tx_dummy(struct sport_device *sport)
 
 int sport_tx_start(struct sport_device *sport)
 {
-	unsigned flags;
+	unsigned long flags;
 	pr_debug("%s: tx_run:%d, rx_run:%d\n", __func__,
 			sport->tx_run, sport->rx_run);
 	if (sport->tx_run)

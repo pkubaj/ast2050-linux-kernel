@@ -205,10 +205,8 @@ static void edge_bulk_out_data_callback(struct urb *urb);
 static void edge_bulk_out_cmd_callback(struct urb *urb);
 
 /* function prototypes for the usbserial callbacks */
-static int edge_open(struct tty_struct *tty, struct usb_serial_port *port,
-					struct file *filp);
-static void edge_close(struct tty_struct *tty, struct usb_serial_port *port,
-					struct file *filp);
+static int edge_open(struct tty_struct *tty, struct usb_serial_port *port);
+static void edge_close(struct usb_serial_port *port);
 static int edge_write(struct tty_struct *tty, struct usb_serial_port *port,
 					const unsigned char *buf, int count);
 static int edge_write_room(struct tty_struct *tty);
@@ -853,8 +851,7 @@ static void edge_bulk_out_cmd_callback(struct urb *urb)
  *	If successful, we return 0
  *	Otherwise we return a negative error number.
  *****************************************************************************/
-static int edge_open(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static int edge_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	struct edgeport_port *edge_port = usb_get_serial_port_data(port);
 	struct usb_serial *serial;
@@ -966,7 +963,7 @@ static int edge_open(struct tty_struct *tty,
 
 	if (!edge_port->txfifo.fifo) {
 		dbg("%s - no memory", __func__);
-		edge_close(tty, port, filp);
+		edge_close(port);
 		return -ENOMEM;
 	}
 
@@ -976,7 +973,7 @@ static int edge_open(struct tty_struct *tty,
 
 	if (!edge_port->write_urb) {
 		dbg("%s - no memory", __func__);
-		edge_close(tty, port, filp);
+		edge_close(port);
 		return -ENOMEM;
 	}
 
@@ -1100,8 +1097,7 @@ static void block_until_tx_empty(struct edgeport_port *edge_port)
  * edge_close
  *	this function is called by the tty driver when a port is closed
  *****************************************************************************/
-static void edge_close(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static void edge_close(struct usb_serial_port *port)
 {
 	struct edgeport_serial *edge_serial;
 	struct edgeport_port *edge_port;
@@ -2544,7 +2540,7 @@ static int calc_baud_rate_divisor(int baudrate, int *divisor)
 
 /*****************************************************************************
  * send_cmd_write_uart_register
- *  this function builds up a uart register message and sends to to the device.
+ *  this function builds up a uart register message and sends to the device.
  *****************************************************************************/
 static int send_cmd_write_uart_register(struct edgeport_port *edge_port,
 						__u8 regNum, __u8 regValue)
@@ -2939,8 +2935,8 @@ static void load_application_firmware(struct edgeport_serial *edge_serial)
 
 	dbg("%s %d.%d.%d", fw_info, rec->data[0], rec->data[1], build);
 
-	edge_serial->product_info.FirmwareMajorVersion = fw->data[0];
-	edge_serial->product_info.FirmwareMinorVersion = fw->data[1];
+	edge_serial->product_info.FirmwareMajorVersion = rec->data[0];
+	edge_serial->product_info.FirmwareMinorVersion = rec->data[1];
 	edge_serial->product_info.FirmwareBuildNumber = cpu_to_le16(build);
 
 	for (rec = ihex_next_binrec(rec); rec;

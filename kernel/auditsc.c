@@ -168,12 +168,12 @@ struct audit_context {
 	int		    in_syscall;	/* 1 if task is in a syscall */
 	enum audit_state    state, current_state;
 	unsigned int	    serial;     /* serial number for record */
-	struct timespec	    ctime;      /* time of syscall entry */
 	int		    major;      /* syscall number */
+	struct timespec	    ctime;      /* time of syscall entry */
 	unsigned long	    argv[4];    /* syscall arguments */
-	int		    return_valid; /* return code is valid */
 	long		    return_code;/* syscall return code */
 	u64		    prio;
+	int		    return_valid; /* return code is valid */
 	int		    name_count;
 	struct audit_names  names[AUDIT_NAMES];
 	char *		    filterkey;	/* key for rule that triggered record */
@@ -198,6 +198,7 @@ struct audit_context {
 	char		    target_comm[TASK_COMM_LEN];
 
 	struct audit_tree_refs *trees, *first_trees;
+	struct list_head killed_trees;
 	int tree_count;
 
 	int type;
@@ -548,9 +549,9 @@ static int audit_filter_rules(struct task_struct *tsk,
 			}
 			break;
 		case AUDIT_WATCH:
-			if (name && rule->watch->ino != (unsigned long)-1)
-				result = (name->dev == rule->watch->dev &&
-					  name->ino == rule->watch->ino);
+			if (name && audit_watch_inode(rule->watch) != (unsigned long)-1)
+				result = (name->dev == audit_watch_dev(rule->watch) &&
+					  name->ino == audit_watch_inode(rule->watch));
 			break;
 		case AUDIT_DIR:
 			if (ctx)
@@ -679,6 +680,22 @@ static enum audit_state audit_filter_task(struct task_struct *tsk, char **key)
 	return AUDIT_BUILD_CONTEXT;
 }
 
+static int audit_in_mask(const struct audit_krule *rule, unsigned long val)
+{
+	int word, bit;
+
+	if (val > 0xffffffff)
+		return false;
+
+	word = AUDIT_WORD(val);
+	if (word >= AUDIT_BITMASK_SIZE)
+		return false;
+
+	bit = AUDIT_BIT(val);
+
+	return rule->mask[word] & bit;
+}
+
 /* At syscall entry and exit time, this filter is called if the
  * audit_state is not low enough that auditing cannot take place, but is
  * also not high enough that we already know we have to write an audit
@@ -696,11 +713,8 @@ static enum audit_state audit_filter_syscall(struct task_struct *tsk,
 
 	rcu_read_lock();
 	if (!list_empty(list)) {
-		int word = AUDIT_WORD(ctx->major);
-		int bit  = AUDIT_BIT(ctx->major);
-
 		list_for_each_entry_rcu(e, list, list) {
-			if ((e->rule.mask[word] & bit) == bit &&
+			if (audit_in_mask(&e->rule, ctx->major) &&
 			    audit_filter_rules(tsk, &e->rule, ctx, NULL,
 					       &state)) {
 				rcu_read_unlock();
@@ -729,8 +743,6 @@ void audit_filter_inodes(struct task_struct *tsk, struct audit_context *ctx)
 
 	rcu_read_lock();
 	for (i = 0; i < ctx->name_count; i++) {
-		int word = AUDIT_WORD(ctx->major);
-		int bit  = AUDIT_BIT(ctx->major);
 		struct audit_names *n = &ctx->names[i];
 		int h = audit_hash_ino((u32)n->ino);
 		struct list_head *list = &audit_inode_hash[h];
@@ -739,7 +751,7 @@ void audit_filter_inodes(struct task_struct *tsk, struct audit_context *ctx)
 			continue;
 
 		list_for_each_entry_rcu(e, list, list) {
-			if ((e->rule.mask[word] & bit) == bit &&
+			if (audit_in_mask(&e->rule, ctx->major) &&
 			    audit_filter_rules(tsk, &e->rule, ctx, n, &state)) {
 				rcu_read_unlock();
 				ctx->current_state = state;
@@ -853,6 +865,7 @@ static inline struct audit_context *audit_alloc_context(enum audit_state state)
 	if (!(context = kmalloc(sizeof(*context), GFP_KERNEL)))
 		return NULL;
 	audit_zero_context(context, state);
+	INIT_LIST_HEAD(&context->killed_trees);
 	return context;
 }
 
@@ -1024,8 +1037,8 @@ static int audit_log_single_execve_arg(struct audit_context *context,
 {
 	char arg_num_len_buf[12];
 	const char __user *tmp_p = p;
-	/* how many digits are in arg_num? 3 is the length of " a=" */
-	size_t arg_num_len = snprintf(arg_num_len_buf, 12, "%d", arg_num) + 3;
+	/* how many digits are in arg_num? 5 is the length of ' a=""' */
+	size_t arg_num_len = snprintf(arg_num_len_buf, 12, "%d", arg_num) + 5;
 	size_t len, len_left, to_send;
 	size_t max_execve_audit_len = MAX_EXECVE_AUDIT_LEN;
 	unsigned int i, has_cntl = 0, too_long = 0;
@@ -1137,7 +1150,7 @@ static int audit_log_single_execve_arg(struct audit_context *context,
 		if (has_cntl)
 			audit_log_n_hex(*ab, buf, to_send);
 		else
-			audit_log_format(*ab, "\"%s\"", buf);
+			audit_log_string(*ab, buf);
 
 		p += to_send;
 		len_left -= to_send;
@@ -1372,11 +1385,7 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 
 
 	audit_log_task_info(ab, tsk);
-	if (context->filterkey) {
-		audit_log_format(ab, " key=");
-		audit_log_untrustedstring(ab, context->filterkey);
-	} else
-		audit_log_format(ab, " key=(null)");
+	audit_log_key(ab, context->filterkey);
 	audit_log_end(ab);
 
 	for (aux = context->aux; aux; aux = aux->next) {
@@ -1549,6 +1558,8 @@ void audit_free(struct task_struct *tsk)
 	/* that can happen only if we are called from do_exit() */
 	if (context->in_syscall && context->current_state == AUDIT_RECORD_CONTEXT)
 		audit_log_exit(context, tsk);
+	if (!list_empty(&context->killed_trees))
+		audit_kill_trees(&context->killed_trees);
 
 	audit_free_context(context);
 }
@@ -1691,6 +1702,9 @@ void audit_syscall_exit(int valid, long return_code)
 
 	context->in_syscall = 0;
 	context->prio = context->state == AUDIT_RECORD_CONTEXT ? ~0ULL : 0;
+
+	if (!list_empty(&context->killed_trees))
+		audit_kill_trees(&context->killed_trees);
 
 	if (context->previous) {
 		struct audit_context *new_context = context->previous;
@@ -2524,4 +2538,12 @@ void audit_core_dumps(long signr)
 	audit_log_untrustedstring(ab, current->comm);
 	audit_log_format(ab, " sig=%ld", signr);
 	audit_log_end(ab);
+}
+
+struct list_head *audit_killed_trees(void)
+{
+	struct audit_context *ctx = current->audit_context;
+	if (likely(!ctx || !ctx->in_syscall))
+		return NULL;
+	return &ctx->killed_trees;
 }

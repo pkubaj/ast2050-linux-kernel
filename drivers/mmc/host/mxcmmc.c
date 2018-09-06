@@ -512,7 +512,7 @@ static void mxcmci_cmd_done(struct mxcmci_host *host, unsigned int stat)
 	}
 
 	/* For the DMA case the DMA engine handles the data transfer
-	 * automatically. For non DMA we have to to it ourselves.
+	 * automatically. For non DMA we have to do it ourselves.
 	 * Don't do it in interrupt context though.
 	 */
 	if (!mxcmci_use_dma(host) && host->data)
@@ -746,8 +746,6 @@ static int mxcmci_probe(struct platform_device *pdev)
 	}
 
 	mmc->f_min = clk_get_rate(host->clk) >> 16;
-	if (mmc->f_min < 400000)
-		mmc->f_min = 400000;
 	mmc->f_max = clk_get_rate(host->clk) >> 1;
 
 	/* recommended in data sheet */

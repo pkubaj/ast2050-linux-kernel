@@ -39,8 +39,6 @@
 
 static int numdummies = 1;
 
-static int dummy_xmit(struct sk_buff *skb, struct net_device *dev);
-
 static int dummy_set_address(struct net_device *dev, void *p)
 {
 	struct sockaddr *sa = p;
@@ -55,6 +53,16 @@ static int dummy_set_address(struct net_device *dev, void *p)
 /* fake multicast ability */
 static void set_multicast_list(struct net_device *dev)
 {
+}
+
+
+static netdev_tx_t dummy_xmit(struct sk_buff *skb, struct net_device *dev)
+{
+	dev->stats.tx_packets++;
+	dev->stats.tx_bytes += skb->len;
+
+	dev_kfree_skb(skb);
+	return NETDEV_TX_OK;
 }
 
 static const struct net_device_ops dummy_netdev_ops = {
@@ -78,16 +86,6 @@ static void dummy_setup(struct net_device *dev)
 	dev->flags &= ~IFF_MULTICAST;
 	random_ether_addr(dev->dev_addr);
 }
-
-static int dummy_xmit(struct sk_buff *skb, struct net_device *dev)
-{
-	dev->stats.tx_packets++;
-	dev->stats.tx_bytes += skb->len;
-
-	dev_kfree_skb(skb);
-	return 0;
-}
-
 static int dummy_validate(struct nlattr *tb[], struct nlattr *data[])
 {
 	if (tb[IFLA_ADDRESS]) {
@@ -139,11 +137,15 @@ static int __init dummy_init_module(void)
 
 	rtnl_lock();
 	err = __rtnl_link_register(&dummy_link_ops);
+	if (err < 0)
+		goto out;
 
 	for (i = 0; i < numdummies && !err; i++)
 		err = dummy_init_one();
 	if (err < 0)
 		__rtnl_link_unregister(&dummy_link_ops);
+
+out:
 	rtnl_unlock();
 
 	return err;

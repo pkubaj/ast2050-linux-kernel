@@ -10,6 +10,7 @@
  *    Copyright (C) 1995  Linus Torvalds
  */
 
+#include <linux/perf_event.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -19,9 +20,9 @@
 #include <linux/ptrace.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
+#include <linux/compat.h>
 #include <linux/smp.h>
 #include <linux/kdebug.h>
-#include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <linux/console.h>
 #include <linux/module.h>
@@ -239,7 +240,7 @@ static int signal_return(struct mm_struct *mm, struct pt_regs *regs,
 	up_read(&mm->mmap_sem);
 	clear_tsk_thread_flag(current, TIF_SINGLE_STEP);
 #ifdef CONFIG_COMPAT
-	compat = test_tsk_thread_flag(current, TIF_31BIT);
+	compat = is_compat_task();
 	if (compat && instruction == 0x0a77)
 		sys32_sigreturn();
 	else if (compat && instruction == 0x0aad)
@@ -305,7 +306,7 @@ do_exception(struct pt_regs *regs, unsigned long error_code, int write)
 	 * interrupts again and then search the VMAs
 	 */
 	local_irq_enable();
-
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, 0, regs, address);
 	down_read(&mm->mmap_sem);
 
 	si_code = SEGV_MAPERR;
@@ -351,7 +352,7 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
-	fault = handle_mm_fault(mm, vma, address, write);
+	fault = handle_mm_fault(mm, vma, address, write ? FAULT_FLAG_WRITE : 0);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM) {
 			up_read(&mm->mmap_sem);
@@ -363,11 +364,15 @@ good_area:
 		}
 		BUG();
 	}
-	if (fault & VM_FAULT_MAJOR)
+	if (fault & VM_FAULT_MAJOR) {
 		tsk->maj_flt++;
-	else
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, 0,
+				     regs, address);
+	} else {
 		tsk->min_flt++;
-
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, 0,
+				     regs, address);
+	}
         up_read(&mm->mmap_sem);
 	/*
 	 * The instruction that caused the program check will

@@ -469,17 +469,22 @@ befs_follow_link(struct dentry *dentry, struct nameidata *nd)
 		befs_data_stream *data = &befs_ino->i_data.ds;
 		befs_off_t len = data->size;
 
-		befs_debug(sb, "Follow long symlink");
-
-		link = kmalloc(len, GFP_NOFS);
-		if (!link) {
-			link = ERR_PTR(-ENOMEM);
-		} else if (befs_read_lsymlink(sb, data, link, len) != len) {
-			kfree(link);
-			befs_error(sb, "Failed to read entire long symlink");
+		if (len == 0) {
+			befs_error(sb, "Long symlink with illegal length");
 			link = ERR_PTR(-EIO);
 		} else {
-			link[len - 1] = '\0';
+			befs_debug(sb, "Follow long symlink");
+
+			link = kmalloc(len, GFP_NOFS);
+			if (!link) {
+				link = ERR_PTR(-ENOMEM);
+			} else if (befs_read_lsymlink(sb, data, link, len) != len) {
+				kfree(link);
+				befs_error(sb, "Failed to read entire long symlink");
+				link = ERR_PTR(-EIO);
+			} else {
+				link[len - 1] = '\0';
+			}
 		}
 	} else {
 		link = befs_ino->i_data.symlink;
@@ -513,7 +518,7 @@ befs_utf2nls(struct super_block *sb, const char *in,
 {
 	struct nls_table *nls = BEFS_SB(sb)->nls;
 	int i, o;
-	wchar_t uni;
+	unicode_t uni;
 	int unilen, utflen;
 	char *result;
 	/* The utf8->nls conversion won't make the final nls string bigger
@@ -539,16 +544,16 @@ befs_utf2nls(struct super_block *sb, const char *in,
 	for (i = o = 0; i < in_len; i += utflen, o += unilen) {
 
 		/* convert from UTF-8 to Unicode */
-		utflen = utf8_mbtowc(&uni, &in[i], in_len - i);
-		if (utflen < 0) {
+		utflen = utf8_to_utf32(&in[i], in_len - i, &uni);
+		if (utflen < 0)
 			goto conv_err;
-		}
 
 		/* convert from Unicode to nls */
-		unilen = nls->uni2char(uni, &result[o], in_len - o);
-		if (unilen < 0) {
+		if (uni > MAX_WCHAR_T)
 			goto conv_err;
-		}
+		unilen = nls->uni2char(uni, &result[o], in_len - o);
+		if (unilen < 0)
+			goto conv_err;
 	}
 	result[o] = '\0';
 	*out_len = o;
@@ -619,15 +624,13 @@ befs_nls2utf(struct super_block *sb, const char *in,
 
 		/* convert from nls to unicode */
 		unilen = nls->char2uni(&in[i], in_len - i, &uni);
-		if (unilen < 0) {
+		if (unilen < 0)
 			goto conv_err;
-		}
 
 		/* convert from unicode to UTF-8 */
-		utflen = utf8_wctomb(&result[o], uni, 3);
-		if (utflen <= 0) {
+		utflen = utf32_to_utf8(uni, &result[o], 3);
+		if (utflen <= 0)
 			goto conv_err;
-		}
 	}
 
 	result[o] = '\0';
@@ -739,15 +742,9 @@ befs_put_super(struct super_block *sb)
 {
 	kfree(BEFS_SB(sb)->mount_opts.iocharset);
 	BEFS_SB(sb)->mount_opts.iocharset = NULL;
-
-	if (BEFS_SB(sb)->nls) {
-		unload_nls(BEFS_SB(sb)->nls);
-		BEFS_SB(sb)->nls = NULL;
-	}
-
+	unload_nls(BEFS_SB(sb)->nls);
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
-	return;
 }
 
 /* Allocate private field of the superblock, fill it.
@@ -845,7 +842,7 @@ befs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_magic = BEFS_SUPER_MAGIC;
 	/* Set real blocksize of fs */
 	sb_set_blocksize(sb, (ulong) befs_sb->block_size);
-	sb->s_op = (struct super_operations *) &befs_sops;
+	sb->s_op = &befs_sops;
 	root = befs_iget(sb, iaddr2blockno(sb, &(befs_sb->root_dir)));
 	if (IS_ERR(root)) {
 		ret = PTR_ERR(root);
@@ -881,6 +878,7 @@ befs_fill_super(struct super_block *sb, void *data, int silent)
 	brelse(bh);
 
       unacquire_priv_sbp:
+	kfree(befs_sb->mount_opts.iocharset);
 	kfree(sb->s_fs_info);
 
       unacquire_none:

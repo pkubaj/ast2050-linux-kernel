@@ -24,6 +24,7 @@ static int debug;
 
 static struct usb_device_id id_table [] = {
 	{ USB_DEVICE(0x0a99, 0x0001) },	/* Talon Technology device */
+	{ USB_DEVICE(0x0df7, 0x0900) },	/* Mobile Action i-gotU */
 	{ },
 };
 MODULE_DEVICE_TABLE(usb, id_table);
@@ -80,8 +81,7 @@ exit:
 			__func__, result);
 }
 
-static int navman_open(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static int navman_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	int result = 0;
 
@@ -98,8 +98,7 @@ static int navman_open(struct tty_struct *tty,
 	return result;
 }
 
-static void navman_close(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static void navman_close(struct usb_serial_port *port)
 {
 	dbg("%s - port %d", __func__, port->number);
 

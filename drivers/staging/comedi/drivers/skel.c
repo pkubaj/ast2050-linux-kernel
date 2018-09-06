@@ -97,17 +97,17 @@ struct skel_board {
 
 static const struct skel_board skel_boards[] = {
 	{
-	      name:	"skel-100",
-	      ai_chans:16,
-	      ai_bits:	12,
-	      have_dio:1,
-		},
+	 .name = "skel-100",
+	 .ai_chans = 16,
+	 .ai_bits = 12,
+	 .have_dio = 1,
+	 },
 	{
-	      name:	"skel-200",
-	      ai_chans:8,
-	      ai_bits:	16,
-	      have_dio:0,
-		},
+	 .name = "skel-200",
+	 .ai_chans = 8,
+	 .ai_bits = 16,
+	 .have_dio = 0,
+	 },
 };
 
 /* This is used by modprobe to translate PCI IDs to drivers.  Should
@@ -116,9 +116,10 @@ static const struct skel_board skel_boards[] = {
  * upstream. */
 #define PCI_VENDOR_ID_SKEL 0xdafe
 static DEFINE_PCI_DEVICE_TABLE(skel_pci_table) = {
-	{PCI_VENDOR_ID_SKEL, 0x0100, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_SKEL, 0x0200, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{0}
+	{
+	PCI_VENDOR_ID_SKEL, 0x0100, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0}, {
+	PCI_VENDOR_ID_SKEL, 0x0200, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0}, {
+	0}
 };
 
 MODULE_DEVICE_TABLE(pci, skel_pci_table);
@@ -154,13 +155,13 @@ struct skel_private {
  * the board, and also about the kernel module that contains
  * the device code.
  */
-static int skel_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int skel_detach(struct comedi_device * dev);
+static int skel_attach(struct comedi_device *dev, struct comedi_devconfig *it);
+static int skel_detach(struct comedi_device *dev);
 static struct comedi_driver driver_skel = {
-      driver_name:"dummy",
-      module:THIS_MODULE,
-      attach:skel_attach,
-      detach:skel_detach,
+	.driver_name = "dummy",
+	.module = THIS_MODULE,
+	.attach = skel_attach,
+	.detach = skel_detach,
 /* It is not necessary to implement the following members if you are
  * writing a driver for a ISA PnP or PCI card */
 	/* Most drivers will support multiple types of boards by
@@ -179,23 +180,25 @@ static struct comedi_driver driver_skel = {
 	 * the type of board in software.  ISA PnP, PCI, and PCMCIA
 	 * devices are such boards.
 	 */
-      board_name:&skel_boards[0].name,
-      offset:sizeof(struct skel_board),
-      num_names:sizeof(skel_boards) / sizeof(struct skel_board),
+	.board_name = &skel_boards[0].name,
+	.offset = sizeof(struct skel_board),
+	.num_names = ARRAY_SIZE(skel_boards),
 };
 
-static int skel_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int skel_ao_winsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int skel_ao_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int skel_dio_insn_bits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int skel_dio_insn_config(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int skel_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd);
+static int skel_ai_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+			 struct comedi_insn *insn, unsigned int *data);
+static int skel_ao_winsn(struct comedi_device *dev, struct comedi_subdevice *s,
+			 struct comedi_insn *insn, unsigned int *data);
+static int skel_ao_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+			 struct comedi_insn *insn, unsigned int *data);
+static int skel_dio_insn_bits(struct comedi_device *dev,
+			      struct comedi_subdevice *s,
+			      struct comedi_insn *insn, unsigned int *data);
+static int skel_dio_insn_config(struct comedi_device *dev,
+				struct comedi_subdevice *s,
+				struct comedi_insn *insn, unsigned int *data);
+static int skel_ai_cmdtest(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_cmd *cmd);
 static int skel_ns_to_timer(unsigned int *ns, int round);
 
 /*
@@ -204,7 +207,7 @@ static int skel_ns_to_timer(unsigned int *ns, int round);
  * in the driver structure, dev->board_ptr contains that
  * address.
  */
-static int skel_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int skel_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 
@@ -292,7 +295,7 @@ static int skel_attach(struct comedi_device * dev, struct comedi_devconfig * it)
  * allocated by _attach().  dev->private and dev->subdevices are
  * deallocated automatically by the core.
  */
-static int skel_detach(struct comedi_device * dev)
+static int skel_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: skel: remove\n", dev->minor);
 
@@ -303,8 +306,8 @@ static int skel_detach(struct comedi_device * dev)
  * "instructions" read/write data in "one-shot" or "software-triggered"
  * mode.
  */
-static int skel_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int skel_ai_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+			 struct comedi_insn *insn, unsigned int *data)
 {
 	int n, i;
 	unsigned int d;
@@ -331,9 +334,9 @@ static int skel_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice * s
 				break;
 		}
 		if (i == TIMEOUT) {
-			/* rt_printk() should be used instead of printk()
+			/* printk() should be used instead of printk()
 			 * whenever the code can be called from real-time. */
-			rt_printk("timeout\n");
+			printk("timeout\n");
 			return -ETIMEDOUT;
 		}
 
@@ -351,8 +354,8 @@ static int skel_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice * s
 	return n;
 }
 
-static int skel_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd)
+static int skel_ai_cmdtest(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_cmd *cmd)
 {
 	int err = 0;
 	int tmp;
@@ -398,7 +401,7 @@ static int skel_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevice *
 
 	/* note that mutual compatiblity is not an issue here */
 	if (cmd->scan_begin_src != TRIG_TIMER &&
-		cmd->scan_begin_src != TRIG_EXT)
+	    cmd->scan_begin_src != TRIG_EXT)
 		err++;
 	if (cmd->convert_src != TRIG_TIMER && cmd->convert_src != TRIG_EXT)
 		err++;
@@ -478,21 +481,21 @@ static int skel_ai_cmdtest(struct comedi_device * dev, struct comedi_subdevice *
 	if (cmd->scan_begin_src == TRIG_TIMER) {
 		tmp = cmd->scan_begin_arg;
 		skel_ns_to_timer(&cmd->scan_begin_arg,
-			cmd->flags & TRIG_ROUND_MASK);
+				 cmd->flags & TRIG_ROUND_MASK);
 		if (tmp != cmd->scan_begin_arg)
 			err++;
 	}
 	if (cmd->convert_src == TRIG_TIMER) {
 		tmp = cmd->convert_arg;
 		skel_ns_to_timer(&cmd->convert_arg,
-			cmd->flags & TRIG_ROUND_MASK);
+				 cmd->flags & TRIG_ROUND_MASK);
 		if (tmp != cmd->convert_arg)
 			err++;
 		if (cmd->scan_begin_src == TRIG_TIMER &&
-			cmd->scan_begin_arg <
-			cmd->convert_arg * cmd->scan_end_arg) {
+		    cmd->scan_begin_arg <
+		    cmd->convert_arg * cmd->scan_end_arg) {
 			cmd->scan_begin_arg =
-				cmd->convert_arg * cmd->scan_end_arg;
+			    cmd->convert_arg * cmd->scan_end_arg;
 			err++;
 		}
 	}
@@ -520,8 +523,8 @@ static int skel_ns_to_timer(unsigned int *ns, int round)
 	return *ns;
 }
 
-static int skel_ao_winsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int skel_ao_winsn(struct comedi_device *dev, struct comedi_subdevice *s,
+			 struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -541,8 +544,8 @@ static int skel_ao_winsn(struct comedi_device * dev, struct comedi_subdevice * s
 
 /* AO subdevices should have a read insn as well as a write insn.
  * Usually this means copying a value stored in devpriv. */
-static int skel_ao_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int skel_ao_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+			 struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -558,8 +561,9 @@ static int skel_ao_rinsn(struct comedi_device * dev, struct comedi_subdevice * s
  * useful to applications if you implement the insn_bits interface.
  * This allows packed reading/writing of the DIO channels.  The
  * comedi core can convert between insn_bits and insn_read/write */
-static int skel_dio_insn_bits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int skel_dio_insn_bits(struct comedi_device *dev,
+			      struct comedi_subdevice *s,
+			      struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -583,8 +587,9 @@ static int skel_dio_insn_bits(struct comedi_device * dev, struct comedi_subdevic
 	return 2;
 }
 
-static int skel_dio_insn_config(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int skel_dio_insn_config(struct comedi_device *dev,
+				struct comedi_subdevice *s,
+				struct comedi_insn *insn, unsigned int *data)
 {
 	int chan = CR_CHAN(insn->chanspec);
 
@@ -601,8 +606,7 @@ static int skel_dio_insn_config(struct comedi_device * dev, struct comedi_subdev
 		break;
 	case INSN_CONFIG_DIO_QUERY:
 		data[1] =
-			(s->
-			io_bits & (1 << chan)) ? COMEDI_OUTPUT : COMEDI_INPUT;
+		    (s->io_bits & (1 << chan)) ? COMEDI_OUTPUT : COMEDI_INPUT;
 		return insn->n;
 		break;
 	default:

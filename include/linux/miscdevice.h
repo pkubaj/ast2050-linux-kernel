@@ -41,6 +41,8 @@ struct miscdevice  {
 	struct list_head list;
 	struct device *parent;
 	struct device *this_device;
+	const char *nodename;
+	mode_t mode;
 };
 
 extern int misc_register(struct miscdevice * misc);

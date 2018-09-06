@@ -34,7 +34,6 @@
 
 /* Proxy LEC knows about bridging */
 #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
-#include <linux/if_bridge.h>
 #include "../bridge/br_private.h"
 
 static unsigned char bridge_ula_lec[] = { 0x01, 0x80, 0xc2, 0x00, 0x00 };
@@ -60,7 +59,8 @@ static unsigned char bridge_ula_lec[] = { 0x01, 0x80, 0xc2, 0x00, 0x00 };
 				 */
 
 static int lec_open(struct net_device *dev);
-static int lec_start_xmit(struct sk_buff *skb, struct net_device *dev);
+static netdev_tx_t lec_start_xmit(struct sk_buff *skb,
+				  struct net_device *dev);
 static int lec_close(struct net_device *dev);
 static void lec_init(struct net_device *dev);
 static struct lec_arp_table *lec_arp_find(struct lec_priv *priv,
@@ -248,7 +248,8 @@ static void lec_tx_timeout(struct net_device *dev)
 	netif_wake_queue(dev);
 }
 
-static int lec_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t lec_start_xmit(struct sk_buff *skb,
+				  struct net_device *dev)
 {
 	struct sk_buff *skb2;
 	struct lec_priv *priv = netdev_priv(dev);
@@ -271,7 +272,8 @@ static int lec_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		printk("%s:No lecd attached\n", dev->name);
 		dev->stats.tx_errors++;
 		netif_stop_queue(dev);
-		return -EUNATCH;
+		kfree_skb(skb);
+		return NETDEV_TX_OK;
 	}
 
 	pr_debug("skbuff head:%lx data:%lx tail:%lx end:%lx\n",
@@ -289,7 +291,7 @@ static int lec_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb2 = skb_realloc_headroom(skb, LEC_HEADER_LEN);
 		kfree_skb(skb);
 		if (skb2 == NULL)
-			return 0;
+			return NETDEV_TX_OK;
 		skb = skb2;
 	}
 	skb_push(skb, 2);
@@ -307,7 +309,7 @@ static int lec_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb2 = skb_realloc_headroom(skb, LEC_HEADER_LEN);
 		kfree_skb(skb);
 		if (skb2 == NULL)
-			return 0;
+			return NETDEV_TX_OK;
 		skb = skb2;
 	}
 #endif
@@ -345,7 +347,7 @@ static int lec_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			dev_kfree_skb(skb);
 			if (skb2 == NULL) {
 				dev->stats.tx_dropped++;
-				return 0;
+				return NETDEV_TX_OK;
 			}
 			skb = skb2;
 		}
@@ -416,7 +418,7 @@ out:
 	if (entry)
 		lec_arp_put(entry);
 	dev->trans_start = jiffies;
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 /* The inverse routine to net_open(). */
@@ -518,18 +520,14 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 	case l_should_bridge:
 #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 		{
-			struct net_bridge_fdb_entry *f;
-
 			pr_debug("%s: bridge zeppelin asks about %pM\n",
 				 dev->name, mesg->content.proxy.mac_addr);
 
-			if (br_fdb_get_hook == NULL || dev->br_port == NULL)
+			if (br_fdb_test_addr_hook == NULL)
 				break;
 
-			f = br_fdb_get_hook(dev->br_port->br,
-					    mesg->content.proxy.mac_addr);
-			if (f != NULL && f->dst->dev != dev
-			    && f->dst->state == BR_STATE_FORWARDING) {
+			if (br_fdb_test_addr_hook(dev,
+					mesg->content.proxy.mac_addr)) {
 				/* hit from bridge table, send LE_ARP_RESPONSE */
 				struct sk_buff *skb2;
 				struct sock *sk;
@@ -540,10 +538,8 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 				skb2 =
 				    alloc_skb(sizeof(struct atmlec_msg),
 					      GFP_ATOMIC);
-				if (skb2 == NULL) {
-					br_fdb_put_hook(f);
+				if (skb2 == NULL)
 					break;
-				}
 				skb2->len = sizeof(struct atmlec_msg);
 				skb_copy_to_linear_data(skb2, mesg,
 							sizeof(*mesg));
@@ -552,8 +548,6 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 				skb_queue_tail(&sk->sk_receive_queue, skb2);
 				sk->sk_data_ready(sk, skb2->len);
 			}
-			if (f != NULL)
-				br_fdb_put_hook(f);
 		}
 #endif /* defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE) */
 		break;
@@ -943,9 +937,9 @@ static int lecd_attach(struct atm_vcc *vcc, int arg)
 }
 
 #ifdef CONFIG_PROC_FS
-static char *lec_arp_get_status_string(unsigned char status)
+static const char *lec_arp_get_status_string(unsigned char status)
 {
-	static char *lec_arp_status_string[] = {
+	static const char *const lec_arp_status_string[] = {
 		"ESI_UNKNOWN       ",
 		"ESI_ARP_PENDING   ",
 		"ESI_VC_PENDING    ",
@@ -1129,7 +1123,8 @@ static void *lec_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 
 static int lec_seq_show(struct seq_file *seq, void *v)
 {
-	static char lec_banner[] = "Itf  MAC          ATM destination"
+	static const char lec_banner[] =
+	    "Itf  MAC          ATM destination"
 	    "                          Status            Flags "
 	    "VPI/VCI Recv VPI/VCI\n";
 
@@ -1513,7 +1508,7 @@ lec_arp_remove(struct lec_priv *priv, struct lec_arp_table *to_remove)
 }
 
 #if DEBUG_ARP_TABLE
-static char *get_status_string(unsigned char st)
+static const char *get_status_string(unsigned char st)
 {
 	switch (st) {
 	case ESI_UNKNOWN:

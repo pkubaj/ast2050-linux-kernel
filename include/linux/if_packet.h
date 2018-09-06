@@ -46,6 +46,8 @@ struct sockaddr_ll
 #define PACKET_VERSION			10
 #define PACKET_HDRLEN			11
 #define PACKET_RESERVE			12
+#define PACKET_TX_RING			13
+#define PACKET_LOSS			14
 
 struct tpacket_stats
 {
@@ -61,16 +63,25 @@ struct tpacket_auxdata
 	__u16		tp_mac;
 	__u16		tp_net;
 	__u16		tp_vlan_tci;
+	__u16		tp_padding;
 };
+
+/* Rx ring - header status */
+#define TP_STATUS_KERNEL	0x0
+#define TP_STATUS_USER		0x1
+#define TP_STATUS_COPY		0x2
+#define TP_STATUS_LOSING	0x4
+#define TP_STATUS_CSUMNOTREADY	0x8
+
+/* Tx ring - header status */
+#define TP_STATUS_AVAILABLE	0x0
+#define TP_STATUS_SEND_REQUEST	0x1
+#define TP_STATUS_SENDING	0x2
+#define TP_STATUS_WRONG_FORMAT	0x4
 
 struct tpacket_hdr
 {
 	unsigned long	tp_status;
-#define TP_STATUS_KERNEL	0
-#define TP_STATUS_USER		1
-#define TP_STATUS_COPY		2
-#define TP_STATUS_LOSING	4
-#define TP_STATUS_CSUMNOTREADY	8
 	unsigned int	tp_len;
 	unsigned int	tp_snaplen;
 	unsigned short	tp_mac;
@@ -93,6 +104,7 @@ struct tpacket2_hdr
 	__u32		tp_sec;
 	__u32		tp_nsec;
 	__u16		tp_vlan_tci;
+	__u16		tp_padding;
 };
 
 #define TPACKET2_HDRLEN		(TPACKET_ALIGN(sizeof(struct tpacket2_hdr)) + sizeof(struct sockaddr_ll))
@@ -135,5 +147,6 @@ struct packet_mreq
 #define PACKET_MR_MULTICAST	0
 #define PACKET_MR_PROMISC	1
 #define PACKET_MR_ALLMULTI	2
+#define PACKET_MR_UNICAST	3
 
 #endif

@@ -13,6 +13,7 @@
 #define EVDEV_BUFFER_SIZE	64
 
 #include <linux/poll.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -25,7 +26,6 @@ struct evdev {
 	int exist;
 	int open;
 	int minor;
-	char name[16];
 	struct input_handle handle;
 	wait_queue_head_t wait;
 	struct evdev_client *grab;
@@ -102,19 +102,14 @@ static int evdev_flush(struct file *file, fl_owner_t id)
 {
 	struct evdev_client *client = file->private_data;
 	struct evdev *evdev = client->evdev;
-	int retval;
 
-	retval = mutex_lock_interruptible(&evdev->mutex);
-	if (retval)
-		return retval;
+	mutex_lock(&evdev->mutex);
 
-	if (!evdev->exist)
-		retval = -ENODEV;
-	else
-		retval = input_flush_device(&evdev->handle, file);
+	if (evdev->exist)
+		input_flush_device(&evdev->handle, file);
 
 	mutex_unlock(&evdev->mutex);
-	return retval;
+	return 0;
 }
 
 static void evdev_free(struct device *dev)
@@ -626,8 +621,11 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 				abs.maximum = dev->absmax[t];
 				abs.fuzz = dev->absfuzz[t];
 				abs.flat = dev->absflat[t];
+				abs.resolution = dev->absres[t];
 
-				if (copy_to_user(p, &abs, sizeof(struct input_absinfo)))
+				if (copy_to_user(p, &abs, min_t(size_t,
+								_IOC_SIZE(cmd),
+								sizeof(struct input_absinfo))))
 					return -EFAULT;
 
 				return 0;
@@ -654,8 +652,9 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 
 				t = _IOC_NR(cmd) & ABS_MAX;
 
-				if (copy_from_user(&abs, p,
-						sizeof(struct input_absinfo)))
+				if (copy_from_user(&abs, p, min_t(size_t,
+								  _IOC_SIZE(cmd),
+								  sizeof(struct input_absinfo))))
 					return -EFAULT;
 
 				/*
@@ -670,6 +669,8 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 				dev->absmax[t] = abs.maximum;
 				dev->absfuzz[t] = abs.fuzz;
 				dev->absflat[t] = abs.flat;
+				dev->absres[t] = _IOC_SIZE(cmd) < sizeof(struct input_absinfo) ?
+							0 : abs.resolution;
 
 				spin_unlock_irq(&dev->event_lock);
 
@@ -807,16 +808,15 @@ static int evdev_connect(struct input_handler *handler, struct input_dev *dev,
 	mutex_init(&evdev->mutex);
 	init_waitqueue_head(&evdev->wait);
 
-	snprintf(evdev->name, sizeof(evdev->name), "event%d", minor);
+	dev_set_name(&evdev->dev, "event%d", minor);
 	evdev->exist = 1;
 	evdev->minor = minor;
 
 	evdev->handle.dev = input_get_device(dev);
-	evdev->handle.name = evdev->name;
+	evdev->handle.name = dev_name(&evdev->dev);
 	evdev->handle.handler = handler;
 	evdev->handle.private = evdev;
 
-	dev_set_name(&evdev->dev, evdev->name);
 	evdev->dev.devt = MKDEV(INPUT_MAJOR, EVDEV_MINOR_BASE + minor);
 	evdev->dev.class = &input_class;
 	evdev->dev.parent = &dev->dev;

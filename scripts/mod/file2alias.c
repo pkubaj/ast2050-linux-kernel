@@ -641,7 +641,7 @@ static int do_virtio_entry(const char *filename, struct virtio_device_id *id,
 	id->vendor = TO_NATIVE(id->vendor);
 
 	strcpy(alias, "virtio:");
-	ADD(alias, "d", 1, id->device);
+	ADD(alias, "d", id->device != VIRTIO_DEV_ANY_ID, id->device);
 	ADD(alias, "v", id->vendor != VIRTIO_DEV_ANY_ID, id->vendor);
 
 	add_wildcard(alias);
@@ -653,6 +653,15 @@ static int do_i2c_entry(const char *filename, struct i2c_device_id *id,
 			char *alias)
 {
 	sprintf(alias, I2C_MODULE_PREFIX "%s", id->name);
+
+	return 1;
+}
+
+/* Looks like: spi:S */
+static int do_spi_entry(const char *filename, struct spi_device_id *id,
+			char *alias)
+{
+	sprintf(alias, SPI_MODULE_PREFIX "%s", id->name);
 
 	return 1;
 }
@@ -853,6 +862,10 @@ void handle_moddevtable(struct module *mod, struct elf_info *info,
 		do_table(symval, sym->st_size,
 			 sizeof(struct i2c_device_id), "i2c",
 			 do_i2c_entry, mod);
+	else if (sym_is(symname, "__mod_spi_device_table"))
+		do_table(symval, sym->st_size,
+			 sizeof(struct spi_device_id), "spi",
+			 do_spi_entry, mod);
 	else if (sym_is(symname, "__mod_dmi_device_table"))
 		do_table(symval, sym->st_size,
 			 sizeof(struct dmi_system_id), "dmi",

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2003 - 2009 NetXen, Inc.
+ * Copyright (C) 2009 - QLogic Corporation.
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -20,17 +21,10 @@
  * The full GNU General Public License is included in this distribution
  * in the file called LICENSE.
  *
- * Contact Information:
- *    info@netxen.com
- * NetXen Inc,
- * 18922 Forge Drive
- * Cupertino, CA 95014-0701
- *
  */
 
 #include <linux/types.h>
 #include <linux/delay.h>
-#include <asm/uaccess.h>
 #include <linux/pci.h>
 #include <asm/io.h>
 #include <linux/netdevice.h>
@@ -38,7 +32,6 @@
 
 #include "netxen_nic.h"
 #include "netxen_nic_hw.h"
-#include "netxen_nic_phan_reg.h"
 
 struct netxen_nic_stats {
 	char stat_string[ETH_GSTRING_LEN];
@@ -53,16 +46,13 @@ struct netxen_nic_stats {
 #define NETXEN_NIC_INVALID_DATA 0xDEADBEEF
 
 static const struct netxen_nic_stats netxen_nic_gstrings_stats[] = {
-	{"rcvd_bad_skb", NETXEN_NIC_STAT(stats.rcvdbadskb)},
 	{"xmit_called", NETXEN_NIC_STAT(stats.xmitcalled)},
-	{"xmited_frames", NETXEN_NIC_STAT(stats.xmitedframes)},
 	{"xmit_finished", NETXEN_NIC_STAT(stats.xmitfinished)},
-	{"bad_skb_len", NETXEN_NIC_STAT(stats.badskblen)},
-	{"no_cmd_desc", NETXEN_NIC_STAT(stats.nocmddescriptor)},
-	{"polled", NETXEN_NIC_STAT(stats.polled)},
+	{"rx_dropped", NETXEN_NIC_STAT(stats.rxdropped)},
 	{"tx_dropped", NETXEN_NIC_STAT(stats.txdropped)},
 	{"csummed", NETXEN_NIC_STAT(stats.csummed)},
-	{"no_rcv", NETXEN_NIC_STAT(stats.no_rcv)},
+	{"rx_pkts", NETXEN_NIC_STAT(stats.rx_pkts)},
+	{"lro_pkts", NETXEN_NIC_STAT(stats.lro_pkts)},
 	{"rx_bytes", NETXEN_NIC_STAT(stats.rxbytes)},
 	{"tx_bytes", NETXEN_NIC_STAT(stats.txbytes)},
 };
@@ -89,21 +79,17 @@ static void
 netxen_nic_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *drvinfo)
 {
 	struct netxen_adapter *adapter = netdev_priv(dev);
-	unsigned long flags;
 	u32 fw_major = 0;
 	u32 fw_minor = 0;
 	u32 fw_build = 0;
 
 	strncpy(drvinfo->driver, netxen_nic_driver_name, 32);
 	strncpy(drvinfo->version, NETXEN_NIC_LINUX_VERSIONID, 32);
-	write_lock_irqsave(&adapter->adapter_lock, flags);
-	fw_major = adapter->pci_read_normalize(adapter,
-					NETXEN_FW_VERSION_MAJOR);
-	fw_minor = adapter->pci_read_normalize(adapter,
-					NETXEN_FW_VERSION_MINOR);
-	fw_build = adapter->pci_read_normalize(adapter,
-					NETXEN_FW_VERSION_SUB);
-	write_unlock_irqrestore(&adapter->adapter_lock, flags);
+	read_lock(&adapter->adapter_lock);
+	fw_major = NXRD32(adapter, NETXEN_FW_VERSION_MAJOR);
+	fw_minor = NXRD32(adapter, NETXEN_FW_VERSION_MINOR);
+	fw_build = NXRD32(adapter, NETXEN_FW_VERSION_SUB);
+	read_unlock(&adapter->adapter_lock);
 	sprintf(drvinfo->fw_version, "%d.%d.%d", fw_major, fw_minor, fw_build);
 
 	strncpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
@@ -115,6 +101,7 @@ static int
 netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 {
 	struct netxen_adapter *adapter = netdev_priv(dev);
+	int check_sfp_module = 0;
 
 	/* read which mode */
 	if (adapter->ahw.port_type == NETXEN_NIC_GBE) {
@@ -139,7 +126,7 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 	} else if (adapter->ahw.port_type == NETXEN_NIC_XGBE) {
 		u32 val;
 
-		adapter->hw_read_wx(adapter, NETXEN_PORT_MODE_ADDR, &val, 4);
+		val = NXRD32(adapter, NETXEN_PORT_MODE_ADDR);
 		if (val == NETXEN_PORT_MODE_802_3_AP) {
 			ecmd->supported = SUPPORTED_1000baseT_Full;
 			ecmd->advertising = ADVERTISED_1000baseT_Full;
@@ -148,13 +135,19 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 			ecmd->advertising = ADVERTISED_10000baseT_Full;
 		}
 
+		if (netif_running(dev) && adapter->has_link_events) {
+			ecmd->speed = adapter->link_speed;
+			ecmd->autoneg = adapter->link_autoneg;
+			ecmd->duplex = adapter->link_duplex;
+			goto skip;
+		}
+
 		ecmd->port = PORT_TP;
 
 		if (NX_IS_REVISION_P3(adapter->ahw.revision_id)) {
 			u16 pcifn = adapter->ahw.pci_func;
 
-			adapter->hw_read_wx(adapter,
-				P3_LINK_SPEED_REG(pcifn), &val, 4);
+			val = NXRD32(adapter, P3_LINK_SPEED_REG(pcifn));
 			ecmd->speed = P3_LINK_SPEED_MHZ *
 					P3_LINK_SPEED_VAL(pcifn, val);
 		} else
@@ -165,10 +158,11 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 	} else
 		return -EIO;
 
+skip:
 	ecmd->phy_address = adapter->physical_port;
 	ecmd->transceiver = XCVR_EXTERNAL;
 
-	switch ((netxen_brdtype_t)adapter->ahw.board_type) {
+	switch (adapter->ahw.board_type) {
 	case NETXEN_BRDTYPE_P2_SB35_4G:
 	case NETXEN_BRDTYPE_P2_SB31_2G:
 	case NETXEN_BRDTYPE_P3_REF_QG:
@@ -195,7 +189,7 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 	case NETXEN_BRDTYPE_P3_HMEZ:
 		ecmd->supported |= SUPPORTED_MII;
 		ecmd->advertising |= ADVERTISED_MII;
-		ecmd->port = PORT_FIBRE;
+		ecmd->port = PORT_MII;
 		ecmd->autoneg = AUTONEG_DISABLE;
 		break;
 	case NETXEN_BRDTYPE_P3_10G_SFP_PLUS:
@@ -203,6 +197,8 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 	case NETXEN_BRDTYPE_P3_10G_SFP_QT:
 		ecmd->advertising |= ADVERTISED_TP;
 		ecmd->supported |= SUPPORTED_TP;
+		check_sfp_module = netif_running(dev) &&
+			adapter->has_link_events;
 	case NETXEN_BRDTYPE_P2_SB31_10G:
 	case NETXEN_BRDTYPE_P3_10G_XFP:
 		ecmd->supported |= SUPPORTED_FIBRE;
@@ -217,8 +213,9 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 			ecmd->advertising |=
 				(ADVERTISED_FIBRE | ADVERTISED_TP);
 			ecmd->port = PORT_FIBRE;
+			check_sfp_module = netif_running(dev) &&
+				adapter->has_link_events;
 		} else {
-			ecmd->autoneg = AUTONEG_ENABLE;
 			ecmd->supported |= (SUPPORTED_TP |SUPPORTED_Autoneg);
 			ecmd->advertising |=
 				(ADVERTISED_TP | ADVERTISED_Autoneg);
@@ -227,8 +224,26 @@ netxen_nic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 		break;
 	default:
 		printk(KERN_ERR "netxen-nic: Unsupported board model %d\n",
-		       (netxen_brdtype_t)adapter->ahw.board_type);
+				adapter->ahw.board_type);
 		return -EIO;
+	}
+
+	if (check_sfp_module) {
+		switch (adapter->module_type) {
+		case LINKEVENT_MODULE_OPTICAL_UNKNOWN:
+		case LINKEVENT_MODULE_OPTICAL_SRLR:
+		case LINKEVENT_MODULE_OPTICAL_LRM:
+		case LINKEVENT_MODULE_OPTICAL_SFP_1G:
+			ecmd->port = PORT_FIBRE;
+			break;
+		case LINKEVENT_MODULE_TWINAX_UNSUPPORTED_CABLE:
+		case LINKEVENT_MODULE_TWINAX_UNSUPPORTED_CABLELEN:
+		case LINKEVENT_MODULE_TWINAX:
+			ecmd->port = PORT_TP;
+			break;
+		default:
+			ecmd->port = -1;
+		}
 	}
 
 	return 0;
@@ -238,53 +253,24 @@ static int
 netxen_nic_set_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 {
 	struct netxen_adapter *adapter = netdev_priv(dev);
-	__u32 status;
+	int ret;
 
-	/* read which mode */
-	if (adapter->ahw.port_type == NETXEN_NIC_GBE) {
-		/* autonegotiation */
-		if (adapter->phy_write
-		    && adapter->phy_write(adapter,
-					  NETXEN_NIU_GB_MII_MGMT_ADDR_AUTONEG,
-					  ecmd->autoneg) != 0)
-			return -EIO;
-		else
-			adapter->link_autoneg = ecmd->autoneg;
-
-		if (adapter->phy_read
-		    && adapter->phy_read(adapter,
-					 NETXEN_NIU_GB_MII_MGMT_ADDR_PHY_STATUS,
-					 &status) != 0)
-			return -EIO;
-
-		/* speed */
-		switch (ecmd->speed) {
-		case SPEED_10:
-			netxen_set_phy_speed(status, 0);
-			break;
-		case SPEED_100:
-			netxen_set_phy_speed(status, 1);
-			break;
-		case SPEED_1000:
-			netxen_set_phy_speed(status, 2);
-			break;
-		}
-		/* set duplex mode */
-		if (ecmd->duplex == DUPLEX_HALF)
-			netxen_clear_phy_duplex(status);
-		if (ecmd->duplex == DUPLEX_FULL)
-			netxen_set_phy_duplex(status);
-		if (adapter->phy_write
-		    && adapter->phy_write(adapter,
-					  NETXEN_NIU_GB_MII_MGMT_ADDR_PHY_STATUS,
-					  *((int *)&status)) != 0)
-			return -EIO;
-		else {
-			adapter->link_speed = ecmd->speed;
-			adapter->link_duplex = ecmd->duplex;
-		}
-	} else
+	if (adapter->ahw.port_type != NETXEN_NIC_GBE)
 		return -EOPNOTSUPP;
+
+	if (!(adapter->capabilities & NX_FW_CAPABILITY_GBE_LINK_CFG))
+		return -EOPNOTSUPP;
+
+	ret = nx_fw_cmd_set_gbe_port(adapter, ecmd->speed, ecmd->duplex,
+				     ecmd->autoneg);
+	if (ret == NX_RCODE_NOT_SUPPORTED)
+		return -EOPNOTSUPP;
+	else if (ret)
+		return -EIO;
+
+	adapter->link_speed = ecmd->speed;
+	adapter->link_duplex = ecmd->duplex;
+	adapter->link_autoneg = ecmd->autoneg;
 
 	if (!netif_running(dev))
 		return 0;
@@ -398,12 +384,11 @@ netxen_nic_get_regs(struct net_device *dev, struct ethtool_regs *regs, void *p)
 	regs->version = (1 << 24) | (adapter->ahw.revision_id << 16) |
 	    (adapter->pdev)->device;
 	/* which mode */
-	adapter->hw_read_wx(adapter, NETXEN_NIU_MODE, &regs_buff[0], 4);
+	regs_buff[0] = NXRD32(adapter, NETXEN_NIU_MODE);
 	mode = regs_buff[0];
 
 	/* Common registers to all the modes */
-	adapter->hw_read_wx(adapter,
-			NETXEN_NIU_STRAP_VALUE_SAVE_HIGHER, &regs_buff[2], 4);
+	regs_buff[2] = NXRD32(adapter, NETXEN_NIU_STRAP_VALUE_SAVE_HIGHER);
 	/* GB/XGB Mode */
 	mode = (mode / 2) - 1;
 	window = 0;
@@ -414,9 +399,8 @@ netxen_nic_get_regs(struct net_device *dev, struct ethtool_regs *regs, void *p)
 				window = adapter->physical_port *
 					NETXEN_NIC_PORT_WINDOW;
 
-			adapter->hw_read_wx(adapter,
-				niu_registers[mode].reg[i - 3] + window,
-				&regs_buff[i], 4);
+			regs_buff[i] = NXRD32(adapter,
+				niu_registers[mode].reg[i - 3] + window);
 		}
 
 	}
@@ -440,7 +424,7 @@ static u32 netxen_nic_test_link(struct net_device *dev)
 			return !val;
 		}
 	} else if (adapter->ahw.port_type == NETXEN_NIC_XGBE) {
-		val = adapter->pci_read_normalize(adapter, CRB_XG_STATE);
+		val = NXRD32(adapter, CRB_XG_STATE);
 		return (val == XG_LINK_UP) ? 0 : 1;
 	}
 	return -EIO;
@@ -470,26 +454,84 @@ netxen_nic_get_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 }
 
 static void
-netxen_nic_get_ringparam(struct net_device *dev, struct ethtool_ringparam *ring)
+netxen_nic_get_ringparam(struct net_device *dev,
+		struct ethtool_ringparam *ring)
 {
 	struct netxen_adapter *adapter = netdev_priv(dev);
 
-	ring->rx_pending = 0;
-	ring->rx_jumbo_pending = 0;
-	ring->rx_pending += adapter->recv_ctx.
-		rds_rings[RCV_RING_NORMAL].num_desc;
-	ring->rx_jumbo_pending += adapter->recv_ctx.
-		rds_rings[RCV_RING_JUMBO].num_desc;
+	ring->rx_pending = adapter->num_rxd;
+	ring->rx_jumbo_pending = adapter->num_jumbo_rxd;
+	ring->rx_jumbo_pending += adapter->num_lro_rxd;
 	ring->tx_pending = adapter->num_txd;
 
-	if (adapter->ahw.port_type == NETXEN_NIC_GBE)
+	if (adapter->ahw.port_type == NETXEN_NIC_GBE) {
 		ring->rx_max_pending = MAX_RCV_DESCRIPTORS_1G;
-	else
+		ring->rx_jumbo_max_pending = MAX_JUMBO_RCV_DESCRIPTORS_1G;
+	} else {
 		ring->rx_max_pending = MAX_RCV_DESCRIPTORS_10G;
-	ring->tx_max_pending = MAX_CMD_DESCRIPTORS_HOST;
-	ring->rx_jumbo_max_pending = MAX_JUMBO_RCV_DESCRIPTORS;
+		ring->rx_jumbo_max_pending = MAX_JUMBO_RCV_DESCRIPTORS_10G;
+	}
+
+	ring->tx_max_pending = MAX_CMD_DESCRIPTORS;
+
 	ring->rx_mini_max_pending = 0;
 	ring->rx_mini_pending = 0;
+}
+
+static u32
+netxen_validate_ringparam(u32 val, u32 min, u32 max, char *r_name)
+{
+	u32 num_desc;
+	num_desc = max(val, min);
+	num_desc = min(num_desc, max);
+	num_desc = roundup_pow_of_two(num_desc);
+
+	if (val != num_desc) {
+		printk(KERN_INFO "%s: setting %s ring size %d instead of %d\n",
+		       netxen_nic_driver_name, r_name, num_desc, val);
+	}
+
+	return num_desc;
+}
+
+static int
+netxen_nic_set_ringparam(struct net_device *dev,
+		struct ethtool_ringparam *ring)
+{
+	struct netxen_adapter *adapter = netdev_priv(dev);
+	u16 max_rcv_desc = MAX_RCV_DESCRIPTORS_10G;
+	u16 max_jumbo_desc = MAX_JUMBO_RCV_DESCRIPTORS_10G;
+	u16 num_rxd, num_jumbo_rxd, num_txd;
+
+	if (NX_IS_REVISION_P2(adapter->ahw.revision_id))
+		return -EOPNOTSUPP;
+
+	if (ring->rx_mini_pending)
+		return -EOPNOTSUPP;
+
+	if (adapter->ahw.port_type == NETXEN_NIC_GBE) {
+		max_rcv_desc = MAX_RCV_DESCRIPTORS_1G;
+		max_jumbo_desc = MAX_JUMBO_RCV_DESCRIPTORS_10G;
+	}
+
+	num_rxd = netxen_validate_ringparam(ring->rx_pending,
+			MIN_RCV_DESCRIPTORS, max_rcv_desc, "rx");
+
+	num_jumbo_rxd = netxen_validate_ringparam(ring->rx_jumbo_pending,
+			MIN_JUMBO_DESCRIPTORS, max_jumbo_desc, "rx jumbo");
+
+	num_txd = netxen_validate_ringparam(ring->tx_pending,
+			MIN_CMD_DESCRIPTORS, MAX_CMD_DESCRIPTORS, "tx");
+
+	if (num_rxd == adapter->num_rxd && num_txd == adapter->num_txd &&
+			num_jumbo_rxd == adapter->num_jumbo_rxd)
+		return 0;
+
+	adapter->num_rxd = num_rxd;
+	adapter->num_jumbo_rxd = num_jumbo_rxd;
+	adapter->num_txd = num_txd;
+
+	return netxen_nic_reset_context(adapter);
 }
 
 static void
@@ -504,10 +546,9 @@ netxen_nic_get_pauseparam(struct net_device *dev,
 		if ((port < 0) || (port > NETXEN_NIU_MAX_GBE_PORTS))
 			return;
 		/* get flow control settings */
-		netxen_nic_read_w0(adapter,NETXEN_NIU_GB_MAC_CONFIG_0(port),
-				&val);
+		val = NXRD32(adapter, NETXEN_NIU_GB_MAC_CONFIG_0(port));
 		pause->rx_pause = netxen_gb_get_rx_flowctl(val);
-		netxen_nic_read_w0(adapter, NETXEN_NIU_GB_PAUSE_CTL, &val);
+		val = NXRD32(adapter, NETXEN_NIU_GB_PAUSE_CTL);
 		switch (port) {
 			case 0:
 				pause->tx_pause = !(netxen_gb_get_gb0_mask(val));
@@ -527,7 +568,7 @@ netxen_nic_get_pauseparam(struct net_device *dev,
 		if ((port < 0) || (port > NETXEN_NIU_MAX_XG_PORTS))
 			return;
 		pause->rx_pause = 1;
-		netxen_nic_read_w0(adapter, NETXEN_NIU_XG_PAUSE_CTL, &val);
+		val = NXRD32(adapter, NETXEN_NIU_XG_PAUSE_CTL);
 		if (port == 0)
 			pause->tx_pause = !(netxen_xg_get_xg0_mask(val));
 		else
@@ -550,18 +591,17 @@ netxen_nic_set_pauseparam(struct net_device *dev,
 		if ((port < 0) || (port > NETXEN_NIU_MAX_GBE_PORTS))
 			return -EIO;
 		/* set flow control */
-		netxen_nic_read_w0(adapter,
-					NETXEN_NIU_GB_MAC_CONFIG_0(port), &val);
+		val = NXRD32(adapter, NETXEN_NIU_GB_MAC_CONFIG_0(port));
 
 		if (pause->rx_pause)
 			netxen_gb_rx_flowctl(val);
 		else
 			netxen_gb_unset_rx_flowctl(val);
 
-		netxen_nic_write_w0(adapter, NETXEN_NIU_GB_MAC_CONFIG_0(port),
+		NXWR32(adapter, NETXEN_NIU_GB_MAC_CONFIG_0(port),
 				val);
 		/* set autoneg */
-		netxen_nic_read_w0(adapter, NETXEN_NIU_GB_PAUSE_CTL, &val);
+		val = NXRD32(adapter, NETXEN_NIU_GB_PAUSE_CTL);
 		switch (port) {
 			case 0:
 				if (pause->tx_pause)
@@ -589,11 +629,11 @@ netxen_nic_set_pauseparam(struct net_device *dev,
 					netxen_gb_set_gb3_mask(val);
 				break;
 		}
-		netxen_nic_write_w0(adapter, NETXEN_NIU_GB_PAUSE_CTL, val);
+		NXWR32(adapter, NETXEN_NIU_GB_PAUSE_CTL, val);
 	} else if (adapter->ahw.port_type == NETXEN_NIC_XGBE) {
 		if ((port < 0) || (port > NETXEN_NIU_MAX_XG_PORTS))
 			return -EIO;
-		netxen_nic_read_w0(adapter, NETXEN_NIU_XG_PAUSE_CTL, &val);
+		val = NXRD32(adapter, NETXEN_NIU_XG_PAUSE_CTL);
 		if (port == 0) {
 			if (pause->tx_pause)
 				netxen_xg_unset_xg0_mask(val);
@@ -605,7 +645,7 @@ netxen_nic_set_pauseparam(struct net_device *dev,
 			else
 				netxen_xg_set_xg1_mask(val);
 		}
-		netxen_nic_write_w0(adapter, NETXEN_NIU_XG_PAUSE_CTL, val);
+		NXWR32(adapter, NETXEN_NIU_XG_PAUSE_CTL, val);
 	} else {
 		printk(KERN_ERR "%s: Unknown board type: %x\n",
 				netxen_nic_driver_name,
@@ -619,14 +659,14 @@ static int netxen_nic_reg_test(struct net_device *dev)
 	struct netxen_adapter *adapter = netdev_priv(dev);
 	u32 data_read, data_written;
 
-	netxen_nic_read_w0(adapter, NETXEN_PCIX_PH_REG(0), &data_read);
+	data_read = NXRD32(adapter, NETXEN_PCIX_PH_REG(0));
 	if ((data_read & 0xffff) != PHAN_VENDOR_ID)
 	return 1;
 
 	data_written = (u32)0xa5a5a5a5;
 
-	netxen_nic_reg_write(adapter, CRB_SCRATCHPAD_TEST, data_written);
-	data_read = adapter->pci_read_normalize(adapter, CRB_SCRATCHPAD_TEST);
+	NXWR32(adapter, CRB_SCRATCHPAD_TEST, data_written);
+	data_read = NXRD32(adapter, CRB_SCRATCHPAD_TEST);
 	if (data_written != data_read)
 		return 1;
 
@@ -743,11 +783,11 @@ netxen_nic_get_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
 	if (NX_IS_REVISION_P2(adapter->ahw.revision_id))
 		return;
 
-	wol_cfg = netxen_nic_reg_read(adapter, NETXEN_WOL_CONFIG_NV);
+	wol_cfg = NXRD32(adapter, NETXEN_WOL_CONFIG_NV);
 	if (wol_cfg & (1UL << adapter->portnum))
 		wol->supported |= WAKE_MAGIC;
 
-	wol_cfg = netxen_nic_reg_read(adapter, NETXEN_WOL_CONFIG);
+	wol_cfg = NXRD32(adapter, NETXEN_WOL_CONFIG);
 	if (wol_cfg & (1UL << adapter->portnum))
 		wol->wolopts |= WAKE_MAGIC;
 }
@@ -764,16 +804,16 @@ netxen_nic_set_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
 	if (wol->wolopts & ~WAKE_MAGIC)
 		return -EOPNOTSUPP;
 
-	wol_cfg = netxen_nic_reg_read(adapter, NETXEN_WOL_CONFIG_NV);
+	wol_cfg = NXRD32(adapter, NETXEN_WOL_CONFIG_NV);
 	if (!(wol_cfg & (1 << adapter->portnum)))
 		return -EOPNOTSUPP;
 
-	wol_cfg = netxen_nic_reg_read(adapter, NETXEN_WOL_CONFIG);
+	wol_cfg = NXRD32(adapter, NETXEN_WOL_CONFIG);
 	if (wol->wolopts & WAKE_MAGIC)
 		wol_cfg |= 1UL << adapter->portnum;
 	else
 		wol_cfg &= ~(1UL << adapter->portnum);
-	netxen_nic_reg_write(adapter, NETXEN_WOL_CONFIG, wol_cfg);
+	NXWR32(adapter, NETXEN_WOL_CONFIG, wol_cfg);
 
 	return 0;
 }
@@ -865,7 +905,29 @@ static int netxen_get_intr_coalesce(struct net_device *netdev,
 	return 0;
 }
 
-struct ethtool_ops netxen_nic_ethtool_ops = {
+static int netxen_nic_set_flags(struct net_device *netdev, u32 data)
+{
+	struct netxen_adapter *adapter = netdev_priv(netdev);
+	int hw_lro;
+
+	if (!(adapter->capabilities & NX_FW_CAPABILITY_HW_LRO))
+		return -EINVAL;
+
+	ethtool_op_set_flags(netdev, data);
+
+	hw_lro = (data & ETH_FLAG_LRO) ? NETXEN_NIC_LRO_ENABLED : 0;
+
+	if (netxen_config_hw_lro(adapter, hw_lro))
+		return -EIO;
+
+	if ((hw_lro == 0) && netxen_send_lro_cleanup(adapter))
+		return -EIO;
+
+
+	return 0;
+}
+
+const struct ethtool_ops netxen_nic_ethtool_ops = {
 	.get_settings = netxen_nic_get_settings,
 	.set_settings = netxen_nic_set_settings,
 	.get_drvinfo = netxen_nic_get_drvinfo,
@@ -875,6 +937,7 @@ struct ethtool_ops netxen_nic_ethtool_ops = {
 	.get_eeprom_len = netxen_nic_get_eeprom_len,
 	.get_eeprom = netxen_nic_get_eeprom,
 	.get_ringparam = netxen_nic_get_ringparam,
+	.set_ringparam = netxen_nic_set_ringparam,
 	.get_pauseparam = netxen_nic_get_pauseparam,
 	.set_pauseparam = netxen_nic_set_pauseparam,
 	.set_tx_csum = ethtool_op_set_tx_csum,
@@ -891,4 +954,6 @@ struct ethtool_ops netxen_nic_ethtool_ops = {
 	.set_rx_csum = netxen_nic_set_rx_csum,
 	.get_coalesce = netxen_get_intr_coalesce,
 	.set_coalesce = netxen_set_intr_coalesce,
+	.get_flags = ethtool_op_get_flags,
+	.set_flags = netxen_nic_set_flags,
 };

@@ -39,7 +39,7 @@ module_param(io_speed, int, 0444);
 #ifdef CONFIG_PCMCIA_PROBE
 #include <asm/irq.h>
 /* mask of IRQs already reserved by other cards, we should avoid using them */
-static u8 pcmcia_used_irq[NR_IRQS];
+static u8 pcmcia_used_irq[32];
 #endif
 
 
@@ -489,7 +489,7 @@ int pcmcia_request_configuration(struct pcmcia_device *p_dev,
 	pccard_io_map iomap;
 
 	if (!(s->state & SOCKET_PRESENT))
-		return -ENODEV;;
+		return -ENODEV;
 
 	if (req->IntType & INT_CARDBUS) {
 		ds_dbg(p_dev->socket, 0, "IntType may not be INT_CARDBUS\n");
@@ -719,6 +719,9 @@ int pcmcia_request_irq(struct pcmcia_device *p_dev, irq_req_t *req)
 		for (try = 0; try < 64; try++) {
 			irq = try % 32;
 
+			if (irq > NR_IRQS)
+				continue;
+
 			/* marked as available by driver, and not blocked by userspace? */
 			if (!((mask >> irq) & 1))
 				continue;
@@ -902,7 +905,7 @@ struct pcmcia_cfg_mem {
  *
  * pcmcia_loop_config() loops over all configuration options, and calls
  * the driver-specific conf_check() for each one, checking whether
- * it is a valid one.
+ * it is a valid one. Returns 0 on success or errorcode otherwise.
  */
 int pcmcia_loop_config(struct pcmcia_device *p_dev,
 		       int	(*conf_check)	(struct pcmcia_device *p_dev,
@@ -915,7 +918,7 @@ int pcmcia_loop_config(struct pcmcia_device *p_dev,
 	struct pcmcia_cfg_mem *cfg_mem;
 
 	tuple_t *tuple;
-	int ret = -ENODEV;
+	int ret;
 	unsigned int vcc;
 
 	cfg_mem = kzalloc(sizeof(struct pcmcia_cfg_mem), GFP_KERNEL);

@@ -715,7 +715,7 @@ static int meth_tx(struct sk_buff *skb, struct net_device *dev)
 
 	spin_unlock_irqrestore(&priv->meth_lock, flags);
 
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 /*
@@ -770,13 +770,21 @@ static int meth_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	}
 }
 
-/*
- * Return statistics to the caller
- */
+static const struct net_device_ops meth_netdev_ops = {
+	.ndo_open		= meth_open,
+	.ndo_stop		= meth_release,
+	.ndo_start_xmit		= meth_tx,
+	.ndo_do_ioctl		= meth_ioctl,
+	.ndo_tx_timeout		= meth_tx_timeout,
+	.ndo_change_mtu		= eth_change_mtu,
+	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_set_mac_address	= eth_mac_addr,
+};
+
 /*
  * The init function.
  */
-static int __init meth_probe(struct platform_device *pdev)
+static int __devinit meth_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
 	struct meth_private *priv;
@@ -786,16 +794,10 @@ static int __init meth_probe(struct platform_device *pdev)
 	if (!dev)
 		return -ENOMEM;
 
-	dev->open            = meth_open;
-	dev->stop            = meth_release;
-	dev->hard_start_xmit = meth_tx;
-	dev->do_ioctl        = meth_ioctl;
-#ifdef HAVE_TX_TIMEOUT
-	dev->tx_timeout      = meth_tx_timeout;
-	dev->watchdog_timeo  = timeout;
-#endif
-	dev->irq	     = MACE_ETHERNET_IRQ;
-	dev->base_addr	     = (unsigned long)&mace->eth;
+	dev->netdev_ops		= &meth_netdev_ops;
+	dev->watchdog_timeo	= timeout;
+	dev->irq		= MACE_ETHERNET_IRQ;
+	dev->base_addr		= (unsigned long)&mace->eth;
 	memcpy(dev->dev_addr, o2meth_eaddr, 6);
 
 	priv = netdev_priv(dev);
@@ -826,7 +828,7 @@ static int __exit meth_remove(struct platform_device *pdev)
 
 static struct platform_driver meth_driver = {
 	.probe	= meth_probe,
-	.remove	= __devexit_p(meth_remove),
+	.remove	= __exit_p(meth_remove),
 	.driver = {
 		.name	= "meth",
 		.owner	= THIS_MODULE,

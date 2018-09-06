@@ -17,6 +17,7 @@
 #define MMU_FTR_TYPE_40x		ASM_CONST(0x00000004)
 #define MMU_FTR_TYPE_44x		ASM_CONST(0x00000008)
 #define MMU_FTR_TYPE_FSL_E		ASM_CONST(0x00000010)
+#define MMU_FTR_TYPE_3E			ASM_CONST(0x00000020)
 
 /*
  * This is individual features
@@ -52,6 +53,20 @@
  */
 #define MMU_FTR_NEED_DTLB_SW_LRU	ASM_CONST(0x00200000)
 
+/* This indicates that the processor uses the ISA 2.06 server tlbie
+ * mnemonics
+ */
+#define MMU_FTR_TLBIE_206		ASM_CONST(0x00400000)
+
+/* Enable use of TLB reservation.  Processor should support tlbsrx.
+ * instruction and MAS0[WQ].
+ */
+#define MMU_FTR_USE_TLBRSRV		ASM_CONST(0x00800000)
+
+/* Use paired MAS registers (MAS7||MAS3, etc.)
+ */
+#define MMU_FTR_USE_PAIRED_MAS		ASM_CONST(0x01000000)
+
 #ifndef __ASSEMBLY__
 #include <asm/cputable.h>
 
@@ -68,11 +83,46 @@ extern void early_init_mmu_secondary(void);
 
 #endif /* !__ASSEMBLY__ */
 
+/* The kernel use the constants below to index in the page sizes array.
+ * The use of fixed constants for this purpose is better for performances
+ * of the low level hash refill handlers.
+ *
+ * A non supported page size has a "shift" field set to 0
+ *
+ * Any new page size being implemented can get a new entry in here. Whether
+ * the kernel will use it or not is a different matter though. The actual page
+ * size used by hugetlbfs is not defined here and may be made variable
+ *
+ * Note: This array ended up being a false good idea as it's growing to the
+ * point where I wonder if we should replace it with something different,
+ * to think about, feedback welcome. --BenH.
+ */
 
-#ifdef CONFIG_PPC64
+/* There are #define as they have to be used in assembly
+ *
+ * WARNING: If you change this list, make sure to update the array of
+ * names currently in arch/powerpc/mm/hugetlbpage.c or bad things will
+ * happen
+ */
+#define MMU_PAGE_4K	0
+#define MMU_PAGE_16K	1
+#define MMU_PAGE_64K	2
+#define MMU_PAGE_64K_AP	3	/* "Admixed pages" (hash64 only) */
+#define MMU_PAGE_256K	4
+#define MMU_PAGE_1M	5
+#define MMU_PAGE_8M	6
+#define MMU_PAGE_16M	7
+#define MMU_PAGE_256M	8
+#define MMU_PAGE_1G	9
+#define MMU_PAGE_16G	10
+#define MMU_PAGE_64G	11
+#define MMU_PAGE_COUNT	12
+
+
+#if defined(CONFIG_PPC_STD_MMU_64)
 /* 64-bit classic hash table MMU */
 #  include <asm/mmu-hash64.h>
-#elif defined(CONFIG_PPC_STD_MMU)
+#elif defined(CONFIG_PPC_STD_MMU_32)
 /* 32-bit classic hash table MMU */
 #  include <asm/mmu-hash32.h>
 #elif defined(CONFIG_40x)
@@ -88,6 +138,7 @@ extern void early_init_mmu_secondary(void);
 /* Motorola/Freescale 8xx software loaded TLB */
 #  include <asm/mmu-8xx.h>
 #endif
+
 
 #endif /* __KERNEL__ */
 #endif /* _ASM_POWERPC_MMU_H_ */

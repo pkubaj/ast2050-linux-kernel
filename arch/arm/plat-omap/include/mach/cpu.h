@@ -5,7 +5,11 @@
  *
  * Copyright (C) 2004, 2008 Nokia Corporation
  *
+ * Copyright (C) 2009 Texas Instruments.
+ *
  * Written by Tony Lindgren <tony.lindgren@nokia.com>
+ *
+ * Added OMAP4 specific defines - Santosh Shilimkar<santosh.shilimkar@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,6 +29,17 @@
 
 #ifndef __ASM_ARCH_OMAP_CPU_H
 #define __ASM_ARCH_OMAP_CPU_H
+
+/*
+ * Omap device type i.e. EMU/HS/TST/GP/BAD
+ */
+#define OMAP2_DEVICE_TYPE_TEST		0
+#define OMAP2_DEVICE_TYPE_EMU		1
+#define OMAP2_DEVICE_TYPE_SEC		2
+#define OMAP2_DEVICE_TYPE_GP		3
+#define OMAP2_DEVICE_TYPE_BAD		4
+
+int omap_type(void);
 
 struct omap_chip_id {
 	u8 oc;
@@ -155,6 +170,8 @@ IS_OMAP_SUBCLASS(343x, 0x343)
 #define cpu_is_omap243x()		0
 #define cpu_is_omap34xx()		0
 #define cpu_is_omap343x()		0
+#define cpu_is_omap44xx()		0
+#define cpu_is_omap443x()		0
 
 #if defined(MULTI_OMAP1)
 # if defined(CONFIG_ARCH_OMAP730)
@@ -286,32 +303,21 @@ IS_OMAP_TYPE(3430, 0x3430)
 #define cpu_is_omap2430()		0
 #define cpu_is_omap3430()		0
 
-#if defined(MULTI_OMAP1)
-# if defined(CONFIG_ARCH_OMAP730)
-#  undef  cpu_is_omap730
-#  define cpu_is_omap730()		is_omap730()
-# endif
-# if defined(CONFIG_ARCH_OMAP850)
-#  undef  cpu_is_omap850
-#  define cpu_is_omap850()		is_omap850()
-# endif
-#else
-# if defined(CONFIG_ARCH_OMAP730)
-#  undef  cpu_is_omap730
-#  define cpu_is_omap730()		1
-# endif
-#endif
-#else
-# if defined(CONFIG_ARCH_OMAP850)
-#  undef  cpu_is_omap850
-#  define cpu_is_omap850()		1
-# endif
-#endif
-
 /*
  * Whether we have MULTI_OMAP1 or not, we still need to distinguish
- * between 330 vs. 1510 and 1611B/5912 vs. 1710.
+ * between 730 vs 850, 330 vs. 1510 and 1611B/5912 vs. 1710.
  */
+
+#if defined(CONFIG_ARCH_OMAP730)
+# undef  cpu_is_omap730
+# define cpu_is_omap730()		is_omap730()
+#endif
+
+#if defined(CONFIG_ARCH_OMAP850)
+# undef  cpu_is_omap850
+# define cpu_is_omap850()		is_omap850()
+#endif
+
 #if defined(CONFIG_ARCH_OMAP15XX)
 # undef  cpu_is_omap310
 # undef  cpu_is_omap1510
@@ -348,12 +354,18 @@ IS_OMAP_TYPE(3430, 0x3430)
 # define cpu_is_omap3430()		is_omap3430()
 #endif
 
+# if defined(CONFIG_ARCH_OMAP4)
+# undef cpu_is_omap44xx
+# undef cpu_is_omap443x
+# define cpu_is_omap44xx()		1
+# define cpu_is_omap443x()		1
+# endif
+
 /* Macros to detect if we have OMAP1 or OMAP2 */
 #define cpu_class_is_omap1()	(cpu_is_omap7xx() || cpu_is_omap15xx() || \
 				cpu_is_omap16xx())
-#define cpu_class_is_omap2()	(cpu_is_omap24xx() || cpu_is_omap34xx())
-
-#if defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3)
+#define cpu_class_is_omap2()	(cpu_is_omap24xx() || cpu_is_omap34xx() || \
+				cpu_is_omap44xx())
 
 /* Various silicon revisions for omap2 */
 #define OMAP242X_CLASS		0x24200024
@@ -369,6 +381,8 @@ IS_OMAP_TYPE(3430, 0x3430)
 #define OMAP3430_REV_ES2_1	0x34302034
 #define OMAP3430_REV_ES3_0	0x34303034
 #define OMAP3430_REV_ES3_1	0x34304034
+
+#define OMAP443X_CLASS		0x44300034
 
 /*
  * omap_chip bits
@@ -407,17 +421,6 @@ IS_OMAP_TYPE(3430, 0x3430)
 
 
 int omap_chip_is(struct omap_chip_id oci);
-int omap_type(void);
-
-/*
- * Macro to detect device type i.e. EMU/HS/TST/GP/BAD
- */
-#define OMAP2_DEVICE_TYPE_TEST		0
-#define OMAP2_DEVICE_TYPE_EMU		1
-#define OMAP2_DEVICE_TYPE_SEC		2
-#define OMAP2_DEVICE_TYPE_GP		3
-#define OMAP2_DEVICE_TYPE_BAD		4
-
 void omap2_check_revision(void);
 
-#endif    /* defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3) */
+#endif

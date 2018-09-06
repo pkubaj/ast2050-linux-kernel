@@ -117,13 +117,15 @@ typedef unsigned long sigset_t;
 #define MINSIGSTKSZ	2048
 #define SIGSTKSZ	8192
 
-#include <asm-generic/signal.h>
+#include <asm-generic/signal-defs.h>
 
 #ifndef __ASSEMBLY__
 
 # ifdef __KERNEL__
 extern void do_notify_resume(struct pt_regs *, void *, __u32);
 # endif /* __KERNEL__ */
+
+#define __ARCH_HAS_SA_RESTORER
 
 #ifdef __i386__
 # ifdef __KERNEL__

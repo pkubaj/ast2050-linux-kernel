@@ -41,6 +41,7 @@ Configuration options:
           1 = two's complement
 */
 
+#include <linux/interrupt.h>
 #include "../comedidev.h"
 
 #include <linux/ioport.h>
@@ -58,17 +59,17 @@ struct pcmad_board_struct {
 };
 static const struct pcmad_board_struct pcmad_boards[] = {
 	{
-	      name:	"pcmad12",
-	      n_ai_bits:12,
-		},
+	 .name = "pcmad12",
+	 .n_ai_bits = 12,
+	 },
 	{
-	      name:	"pcmad16",
-	      n_ai_bits:16,
-		},
+	 .name = "pcmad16",
+	 .n_ai_bits = 16,
+	 },
 };
 
 #define this_board ((const struct pcmad_board_struct *)(dev->board_ptr))
-#define n_pcmad_boards (sizeof(pcmad_boards)/sizeof(pcmad_boards[0]))
+#define n_pcmad_boards ARRAY_SIZE(pcmad_boards)
 
 struct pcmad_priv_struct {
 	int differential;
@@ -76,24 +77,25 @@ struct pcmad_priv_struct {
 };
 #define devpriv ((struct pcmad_priv_struct *)dev->private)
 
-static int pcmad_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int pcmad_detach(struct comedi_device * dev);
+static int pcmad_attach(struct comedi_device *dev, struct comedi_devconfig *it);
+static int pcmad_detach(struct comedi_device *dev);
 static struct comedi_driver driver_pcmad = {
-      driver_name:"pcmad",
-      module:THIS_MODULE,
-      attach:pcmad_attach,
-      detach:pcmad_detach,
-      board_name:&pcmad_boards[0].name,
-      num_names:n_pcmad_boards,
-      offset:sizeof(pcmad_boards[0]),
+	.driver_name = "pcmad",
+	.module = THIS_MODULE,
+	.attach = pcmad_attach,
+	.detach = pcmad_detach,
+	.board_name = &pcmad_boards[0].name,
+	.num_names = n_pcmad_boards,
+	.offset = sizeof(pcmad_boards[0]),
 };
 
 COMEDI_INITCLEANUP(driver_pcmad);
 
 #define TIMEOUT	100
 
-static int pcmad_ai_insn_read(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int pcmad_ai_insn_read(struct comedi_device *dev,
+			      struct comedi_subdevice *s,
+			      struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan;
@@ -126,7 +128,7 @@ static int pcmad_ai_insn_read(struct comedi_device * dev, struct comedi_subdevic
  * 2	0=single ended 1=differential
  * 3	0=straight binary 1=two's comp
  */
-static int pcmad_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int pcmad_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	int ret;
 	struct comedi_subdevice *s;
@@ -140,9 +142,12 @@ static int pcmad_attach(struct comedi_device * dev, struct comedi_devconfig * it
 	}
 	dev->iobase = iobase;
 
-	if ((ret = alloc_subdevices(dev, 1)) < 0)
+	ret = alloc_subdevices(dev, 1);
+	if (ret < 0)
 		return ret;
-	if ((ret = alloc_private(dev, sizeof(struct pcmad_priv_struct))) < 0)
+
+	ret = alloc_private(dev, sizeof(struct pcmad_priv_struct));
+	if (ret < 0)
 		return ret;
 
 	dev->board_name = this_board->name;
@@ -159,7 +164,7 @@ static int pcmad_attach(struct comedi_device * dev, struct comedi_devconfig * it
 	return 0;
 }
 
-static int pcmad_detach(struct comedi_device * dev)
+static int pcmad_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: pcmad: remove\n", dev->minor);
 

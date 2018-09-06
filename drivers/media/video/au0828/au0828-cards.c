@@ -136,9 +136,9 @@ int au0828_tuner_callback(void *priv, int component, int command, int arg)
 			/* Tuner Reset Command from xc5000 */
 			/* Drive the tuner into reset and out */
 			au0828_clear(dev, REG_001, 2);
-			mdelay(200);
+			mdelay(10);
 			au0828_set(dev, REG_001, 2);
-			mdelay(50);
+			mdelay(10);
 			return 0;
 		} else {
 			printk(KERN_ERR
@@ -212,7 +212,7 @@ void au0828_card_setup(struct au0828_dev *dev)
 		   be abstracted out if we ever need to support a different
 		   demod) */
 		sd = v4l2_i2c_new_subdev(&dev->v4l2_dev, &dev->i2c_adap,
-				"au8522", "au8522", 0x8e >> 1);
+				"au8522", "au8522", 0x8e >> 1, NULL);
 		if (sd == NULL)
 			printk(KERN_ERR "analog subdev registration failed\n");
 	}
@@ -221,7 +221,7 @@ void au0828_card_setup(struct au0828_dev *dev)
 	if (dev->board.tuner_type != TUNER_ABSENT) {
 		/* Load the tuner module, which does the attach */
 		sd = v4l2_i2c_new_subdev(&dev->v4l2_dev, &dev->i2c_adap,
-				"tuner", "tuner", dev->board.tuner_addr);
+				"tuner", "tuner", dev->board.tuner_addr, NULL);
 		if (sd == NULL)
 			printk(KERN_ERR "tuner subdev registration fail\n");
 

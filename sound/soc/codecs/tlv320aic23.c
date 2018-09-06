@@ -86,7 +86,7 @@ static int tlv320aic23_write(struct snd_soc_codec *codec, unsigned int reg,
 	 */
 
 	if ((reg < 0 || reg > 9) && (reg != 15)) {
-		printk(KERN_WARNING "%s Invalid register R%d\n", __func__, reg);
+		printk(KERN_WARNING "%s Invalid register R%u\n", __func__, reg);
 		return -1;
 	}
 
@@ -98,7 +98,7 @@ static int tlv320aic23_write(struct snd_soc_codec *codec, unsigned int reg,
 	if (codec->hw_write(codec->control_data, data, 2) == 2)
 		return 0;
 
-	printk(KERN_ERR "%s cannot write %03x to register R%d\n", __func__,
+	printk(KERN_ERR "%s cannot write %03x to register R%u\n", __func__,
 	       value, reg);
 
 	return -EIO;
@@ -265,22 +265,22 @@ static const int bosr_usb_divisor_table[] = {
 #define UPPER_GROUP ((1<<8) | (1<<9) | (1<<10) | (1<<11)        | (1<<15))
 static const unsigned short sr_valid_mask[] = {
 	LOWER_GROUP|UPPER_GROUP,	/* Normal, bosr - 0*/
-	LOWER_GROUP|UPPER_GROUP,	/* Normal, bosr - 1*/
 	LOWER_GROUP,			/* Usb, bosr - 0*/
+	LOWER_GROUP|UPPER_GROUP,	/* Normal, bosr - 1*/
 	UPPER_GROUP,			/* Usb, bosr - 1*/
 };
 /*
  * Every divisor is a factor of 11*12
  */
 #define SR_MULT (11*12)
-#define A(x) (x) ? (SR_MULT/x) : 0
+#define A(x) (SR_MULT/x)
 static const unsigned char sr_adc_mult_table[] = {
-	A(2), A(2), A(12), A(12),  A(0), A(0), A(3), A(1),
-	A(2), A(2), A(11), A(11),  A(0), A(0), A(0), A(1)
+	A(2), A(2), A(12), A(12),  0, 0, A(3), A(1),
+	A(2), A(2), A(11), A(11),  0, 0, 0, A(1)
 };
 static const unsigned char sr_dac_mult_table[] = {
-	A(2), A(12), A(2), A(12),  A(0), A(0), A(3), A(1),
-	A(2), A(11), A(2), A(11),  A(0), A(0), A(0), A(1)
+	A(2), A(12), A(2), A(12),  0, 0, A(3), A(1),
+	A(2), A(11), A(2), A(11),  0, 0, 0, A(1)
 };
 
 static unsigned get_score(int adc, int adc_l, int adc_h, int need_adc,
@@ -523,6 +523,8 @@ static int tlv320aic23_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	case SND_SOC_DAIFMT_I2S:
 		iface_reg |= TLV320AIC23_FOR_I2S;
 		break;
+	case SND_SOC_DAIFMT_DSP_A:
+		iface_reg |= TLV320AIC23_LRP_ON;
 	case SND_SOC_DAIFMT_DSP_B:
 		iface_reg |= TLV320AIC23_FOR_DSP;
 		break;
@@ -623,11 +625,10 @@ static int tlv320aic23_resume(struct platform_device *pdev)
 {
 	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
 	struct snd_soc_codec *codec = socdev->card->codec;
-	int i;
 	u16 reg;
 
 	/* Sync reg_cache with the hardware */
-	for (reg = 0; reg < ARRAY_SIZE(tlv320aic23_reg); i++) {
+	for (reg = 0; reg < TLV320AIC23_RESET; reg++) {
 		u16 val = tlv320aic23_read_reg_cache(codec, reg);
 		tlv320aic23_write(codec, reg, val);
 	}

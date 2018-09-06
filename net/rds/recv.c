@@ -46,12 +46,14 @@ void rds_inc_init(struct rds_incoming *inc, struct rds_connection *conn,
 	inc->i_saddr = saddr;
 	inc->i_rdma_cookie = 0;
 }
+EXPORT_SYMBOL_GPL(rds_inc_init);
 
 void rds_inc_addref(struct rds_incoming *inc)
 {
 	rdsdebug("addref inc %p ref %d\n", inc, atomic_read(&inc->i_refcount));
 	atomic_inc(&inc->i_refcount);
 }
+EXPORT_SYMBOL_GPL(rds_inc_addref);
 
 void rds_inc_put(struct rds_incoming *inc)
 {
@@ -62,6 +64,7 @@ void rds_inc_put(struct rds_incoming *inc)
 		inc->i_conn->c_trans->inc_free(inc);
 	}
 }
+EXPORT_SYMBOL_GPL(rds_inc_put);
 
 static void rds_recv_rcvbuf_delta(struct rds_sock *rs, struct sock *sk,
 				  struct rds_cong_map *map,
@@ -237,6 +240,7 @@ out:
 	if (rs)
 		rds_sock_put(rs);
 }
+EXPORT_SYMBOL_GPL(rds_recv_incoming);
 
 /*
  * be very careful here.  This is being called as the condition in
@@ -292,7 +296,7 @@ static int rds_still_queued(struct rds_sock *rs, struct rds_incoming *inc,
 int rds_notify_queue_get(struct rds_sock *rs, struct msghdr *msghdr)
 {
 	struct rds_notifier *notifier;
-	struct rds_rdma_notify cmsg;
+	struct rds_rdma_notify cmsg = { 0 }; /* fill holes with zero */
 	unsigned int count = 0, max_messages = ~0U;
 	unsigned long flags;
 	LIST_HEAD(copy);
@@ -409,18 +413,18 @@ int rds_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	if (msg_flags & MSG_OOB)
 		goto out;
 
-	/* If there are pending notifications, do those - and nothing else */
-	if (!list_empty(&rs->rs_notify_queue)) {
-		ret = rds_notify_queue_get(rs, msg);
-		goto out;
-	}
-
-	if (rs->rs_cong_notify) {
-		ret = rds_notify_cong(rs, msg);
-		goto out;
-	}
-
 	while (1) {
+		/* If there are pending notifications, do those - and nothing else */
+		if (!list_empty(&rs->rs_notify_queue)) {
+			ret = rds_notify_queue_get(rs, msg);
+			break;
+		}
+
+		if (rs->rs_cong_notify) {
+			ret = rds_notify_cong(rs, msg);
+			break;
+		}
+
 		if (!rds_next_incoming(rs, &inc)) {
 			if (nonblock) {
 				ret = -EAGAIN;
@@ -428,7 +432,9 @@ int rds_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 			}
 
 			timeo = wait_event_interruptible_timeout(*sk->sk_sleep,
-						rds_next_incoming(rs, &inc),
+						(!list_empty(&rs->rs_notify_queue)
+						|| rs->rs_cong_notify
+						|| rds_next_incoming(rs, &inc)),
 						timeo);
 			rdsdebug("recvmsg woke inc %p timeo %ld\n", inc,
 				 timeo);
@@ -480,6 +486,7 @@ int rds_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 			sin->sin_port = inc->i_hdr.h_sport;
 			sin->sin_addr.s_addr = inc->i_saddr;
 			memset(sin->sin_zero, 0, sizeof(sin->sin_zero));
+			msg->msg_namelen = sizeof(*sin);
 		}
 		break;
 	}

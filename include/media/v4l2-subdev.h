@@ -79,7 +79,11 @@ struct v4l2_decode_vbi_line {
    not yet implemented) since ops provide proper type-checking.
  */
 
-/* init: initialize the sensor registors to some sort of reasonable default
+/* s_config: if set, then it is always called by the v4l2_i2c_new_subdev*
+	functions after the v4l2_subdev was registered. It is used to pass
+	platform data to the subdev which can be used during initialization.
+
+   init: initialize the sensor registors to some sort of reasonable default
 	values. Do not use for new drivers and should be removed in existing
 	drivers.
 
@@ -96,6 +100,7 @@ struct v4l2_decode_vbi_line {
 struct v4l2_subdev_core_ops {
 	int (*g_chip_ident)(struct v4l2_subdev *sd, struct v4l2_dbg_chip_ident *chip);
 	int (*log_status)(struct v4l2_subdev *sd);
+	int (*s_config)(struct v4l2_subdev *sd, int irq, void *platform_data);
 	int (*init)(struct v4l2_subdev *sd, u32 val);
 	int (*load_fw)(struct v4l2_subdev *sd);
 	int (*reset)(struct v4l2_subdev *sd, u32 val);
@@ -132,6 +137,8 @@ struct v4l2_subdev_tuner_ops {
 	int (*g_frequency)(struct v4l2_subdev *sd, struct v4l2_frequency *freq);
 	int (*g_tuner)(struct v4l2_subdev *sd, struct v4l2_tuner *vt);
 	int (*s_tuner)(struct v4l2_subdev *sd, struct v4l2_tuner *vt);
+	int (*g_modulator)(struct v4l2_subdev *sd, struct v4l2_modulator *vm);
+	int (*s_modulator)(struct v4l2_subdev *sd, struct v4l2_modulator *vm);
 	int (*s_type_addr)(struct v4l2_subdev *sd, struct tuner_setup *type);
 	int (*s_config)(struct v4l2_subdev *sd, const struct v4l2_priv_tun_config *config);
 	int (*s_standby)(struct v4l2_subdev *sd);
@@ -215,6 +222,9 @@ struct v4l2_subdev_video_ops {
 	int (*g_fmt)(struct v4l2_subdev *sd, struct v4l2_format *fmt);
 	int (*try_fmt)(struct v4l2_subdev *sd, struct v4l2_format *fmt);
 	int (*s_fmt)(struct v4l2_subdev *sd, struct v4l2_format *fmt);
+	int (*cropcap)(struct v4l2_subdev *sd, struct v4l2_cropcap *cc);
+	int (*g_crop)(struct v4l2_subdev *sd, struct v4l2_crop *crop);
+	int (*s_crop)(struct v4l2_subdev *sd, struct v4l2_crop *crop);
 	int (*g_parm)(struct v4l2_subdev *sd, struct v4l2_streamparm *param);
 	int (*s_parm)(struct v4l2_subdev *sd, struct v4l2_streamparm *param);
 	int (*enum_framesizes)(struct v4l2_subdev *sd, struct v4l2_frmsizeenum *fsize);
@@ -230,12 +240,16 @@ struct v4l2_subdev_ops {
 
 #define V4L2_SUBDEV_NAME_SIZE 32
 
+/* Set this flag if this subdev is a i2c device. */
+#define V4L2_SUBDEV_FL_IS_I2C (1U << 0)
+
 /* Each instance of a subdev driver should create this struct, either
    stand-alone or embedded in a larger struct.
  */
 struct v4l2_subdev {
 	struct list_head list;
 	struct module *owner;
+	u32 flags;
 	struct v4l2_device *v4l2_dev;
 	const struct v4l2_subdev_ops *ops;
 	/* name must be unique */
@@ -264,6 +278,7 @@ static inline void v4l2_subdev_init(struct v4l2_subdev *sd,
 	BUG_ON(!ops || !ops->core);
 	sd->ops = ops;
 	sd->v4l2_dev = NULL;
+	sd->flags = 0;
 	sd->name[0] = '\0';
 	sd->grp_id = 0;
 	sd->priv = NULL;

@@ -1764,7 +1764,7 @@ BOOLEAN ParseKeyData(
 	// Get GTK length - refer to IEEE 802.11i-2004 p.82
 	GTKLEN = pKDE->Len -6;
 
-	if (GTKLEN < MIN_LEN_OF_GTK)
+	if (GTKLEN < LEN_AES_KEY)
 	{
 		DBGPRINT(RT_DEBUG_ERROR, ("ERROR: GTK Key length is too short (%d) \n", GTKLEN));
         return FALSE;
@@ -1915,8 +1915,6 @@ VOID	RTMPReportMicError(
     }
 }
 
-
-#ifdef WPA_SUPPLICANT_SUPPORT
 #define	LENGTH_EAP_H    4
 // If the received frame is EAP-Packet ,find out its EAP-Code (Request(0x01), Response(0x02), Success(0x03), Failure(0x04)).
 INT	    WpaCheckEapCode(
@@ -1957,7 +1955,6 @@ VOID    WpaSendMicFailureToWpaSupplicant(
 
     return;
 }
-#endif // WPA_SUPPLICANT_SUPPORT //
 
 VOID	WpaMicFailureReportFrame(
 	IN  PRTMP_ADAPTER   pAd,

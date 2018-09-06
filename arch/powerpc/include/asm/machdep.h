@@ -110,6 +110,10 @@ struct machdep_calls {
 	void		(*show_percpuinfo)(struct seq_file *m, int i);
 
 	void		(*init_IRQ)(void);
+
+	/* Return an irq, or NO_IRQ to indicate there are none pending.
+	 * If for some reason there is no irq, but the interrupt
+	 * shouldn't be counted as spurious, return NO_IRQ_IGNORE. */
 	unsigned int	(*get_irq)(void);
 #ifdef CONFIG_KEXEC
 	void		(*kexec_cpu_down)(int crash_shutdown, int secondary);
@@ -205,13 +209,13 @@ struct machdep_calls {
 	/*
 	 * optional PCI "hooks"
 	 */
-	/* Called in indirect_* to avoid touching devices */
-	int (*pci_exclude_device)(struct pci_controller *, unsigned char, unsigned char);
-
 	/* Called at then very end of pcibios_init() */
 	void (*pcibios_after_init)(void);
 
 #endif /* CONFIG_PPC32 */
+
+	/* Called in indirect_* to avoid touching devices */
+	int (*pci_exclude_device)(struct pci_controller *, unsigned char, unsigned char);
 
 	/* Called after PPC generic resource fixup to perform
 	   machine specific fixups */

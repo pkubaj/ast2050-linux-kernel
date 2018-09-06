@@ -37,6 +37,8 @@
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
 
+#define PREFIX "ACPI: "
+
 #define ACPI_AC_CLASS			"ac_adapter"
 #define ACPI_AC_DEVICE_NAME		"AC Adapter"
 #define ACPI_AC_FILE_STATE		"state"
@@ -61,6 +63,7 @@ static int acpi_ac_open_fs(struct inode *inode, struct file *file);
 static int acpi_ac_add(struct acpi_device *device);
 static int acpi_ac_remove(struct acpi_device *device, int type);
 static int acpi_ac_resume(struct acpi_device *device);
+static void acpi_ac_notify(struct acpi_device *device, u32 event);
 
 static const struct acpi_device_id ac_device_ids[] = {
 	{"ACPI0003", 0},
@@ -72,10 +75,12 @@ static struct acpi_driver acpi_ac_driver = {
 	.name = "ac",
 	.class = ACPI_AC_CLASS,
 	.ids = ac_device_ids,
+	.flags = ACPI_DRIVER_ALL_NOTIFY_EVENTS,
 	.ops = {
 		.add = acpi_ac_add,
 		.remove = acpi_ac_remove,
 		.resume = acpi_ac_resume,
+		.notify = acpi_ac_notify,
 		},
 };
 
@@ -220,16 +225,14 @@ static int acpi_ac_remove_fs(struct acpi_device *device)
                                    Driver Model
    -------------------------------------------------------------------------- */
 
-static void acpi_ac_notify(acpi_handle handle, u32 event, void *data)
+static void acpi_ac_notify(struct acpi_device *device, u32 event)
 {
-	struct acpi_ac *ac = data;
-	struct acpi_device *device = NULL;
+	struct acpi_ac *ac = acpi_driver_data(device);
 
 
 	if (!ac)
 		return;
 
-	device = ac->device;
 	switch (event) {
 	default:
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
@@ -242,6 +245,7 @@ static void acpi_ac_notify(acpi_handle handle, u32 event, void *data)
 		acpi_bus_generate_netlink_event(device->pnp.device_class,
 						  dev_name(&device->dev), event,
 						  (u32) ac->state);
+		acpi_notifier_call_chain(device, event, (u32) ac->state);
 #ifdef CONFIG_ACPI_SYSFS_POWER
 		kobject_uevent(&ac->charger.dev->kobj, KOBJ_CHANGE);
 #endif
@@ -253,7 +257,6 @@ static void acpi_ac_notify(acpi_handle handle, u32 event, void *data)
 static int acpi_ac_add(struct acpi_device *device)
 {
 	int result = 0;
-	acpi_status status = AE_OK;
 	struct acpi_ac *ac = NULL;
 
 
@@ -284,15 +287,10 @@ static int acpi_ac_add(struct acpi_device *device)
 	ac->charger.properties = ac_props;
 	ac->charger.num_properties = ARRAY_SIZE(ac_props);
 	ac->charger.get_property = get_ac_property;
-	power_supply_register(&ac->device->dev, &ac->charger);
-#endif
-	status = acpi_install_notify_handler(device->handle,
-					     ACPI_ALL_NOTIFY, acpi_ac_notify,
-					     ac);
-	if (ACPI_FAILURE(status)) {
-		result = -ENODEV;
+	result = power_supply_register(&ac->device->dev, &ac->charger);
+	if (result)
 		goto end;
-	}
+#endif
 
 	printk(KERN_INFO PREFIX "%s [%s] (%s)\n",
 	       acpi_device_name(device), acpi_device_bid(device),
@@ -328,7 +326,6 @@ static int acpi_ac_resume(struct acpi_device *device)
 
 static int acpi_ac_remove(struct acpi_device *device, int type)
 {
-	acpi_status status = AE_OK;
 	struct acpi_ac *ac = NULL;
 
 
@@ -337,8 +334,6 @@ static int acpi_ac_remove(struct acpi_device *device, int type)
 
 	ac = acpi_driver_data(device);
 
-	status = acpi_remove_notify_handler(device->handle,
-					    ACPI_ALL_NOTIFY, acpi_ac_notify);
 #ifdef CONFIG_ACPI_SYSFS_POWER
 	if (ac->charger.dev)
 		power_supply_unregister(&ac->charger);

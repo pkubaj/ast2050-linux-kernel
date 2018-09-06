@@ -1,7 +1,7 @@
 /*
  * Flash memory access on SA11x0 based devices
  *
- * (C) 2000 Nicolas Pitre <nico@cam.org>
+ * (C) 2000 Nicolas Pitre <nico@fluxnic.net>
  */
 #include <linux/module.h>
 #include <linux/types.h>
@@ -209,8 +209,8 @@ static int sa1100_probe_subdev(struct sa_subdev_info *subdev, struct resource *r
 	}
 	subdev->mtd->owner = THIS_MODULE;
 
-	printk(KERN_INFO "SA1100 flash: CFI device at 0x%08lx, %dMiB, "
-		"%d-bit\n", phys, subdev->mtd->size >> 20,
+	printk(KERN_INFO "SA1100 flash: CFI device at 0x%08lx, %uMiB, %d-bit\n",
+		phys, (unsigned)(subdev->mtd->size >> 20),
 		subdev->map.bankwidth * 8);
 
 	return 0;
@@ -415,25 +415,6 @@ static int __exit sa1100_mtd_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-static int sa1100_mtd_suspend(struct platform_device *dev, pm_message_t state)
-{
-	struct sa_info *info = platform_get_drvdata(dev);
-	int ret = 0;
-
-	if (info)
-		ret = info->mtd->suspend(info->mtd);
-
-	return ret;
-}
-
-static int sa1100_mtd_resume(struct platform_device *dev)
-{
-	struct sa_info *info = platform_get_drvdata(dev);
-	if (info)
-		info->mtd->resume(info->mtd);
-	return 0;
-}
-
 static void sa1100_mtd_shutdown(struct platform_device *dev)
 {
 	struct sa_info *info = platform_get_drvdata(dev);
@@ -441,16 +422,12 @@ static void sa1100_mtd_shutdown(struct platform_device *dev)
 		info->mtd->resume(info->mtd);
 }
 #else
-#define sa1100_mtd_suspend NULL
-#define sa1100_mtd_resume  NULL
 #define sa1100_mtd_shutdown NULL
 #endif
 
 static struct platform_driver sa1100_mtd_driver = {
 	.probe		= sa1100_mtd_probe,
 	.remove		= __exit_p(sa1100_mtd_remove),
-	.suspend	= sa1100_mtd_suspend,
-	.resume		= sa1100_mtd_resume,
 	.shutdown	= sa1100_mtd_shutdown,
 	.driver		= {
 		.name	= "sa1100-mtd",

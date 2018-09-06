@@ -129,6 +129,7 @@ void sem_init_ns(struct ipc_namespace *ns)
 void sem_exit_ns(struct ipc_namespace *ns)
 {
 	free_ipcs(ns, &sem_ids(ns), freeary);
+	idr_destroy(&ns->ids[IPC_SEM_IDS].ipcs_idr);
 }
 #endif
 
@@ -263,6 +264,12 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
 		return retval;
 	}
 
+	sma->sem_base = (struct sem *) &sma[1];
+	INIT_LIST_HEAD(&sma->sem_pending);
+	INIT_LIST_HEAD(&sma->list_id);
+	sma->sem_nsems = nsems;
+	sma->sem_ctime = get_seconds();
+
 	id = ipc_addid(&sem_ids(ns), &sma->sem_perm, ns->sc_semmni);
 	if (id < 0) {
 		security_sem_free(sma);
@@ -271,11 +278,6 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
 	}
 	ns->used_sems += nsems;
 
-	sma->sem_base = (struct sem *) &sma[1];
-	INIT_LIST_HEAD(&sma->sem_pending);
-	INIT_LIST_HEAD(&sma->list_id);
-	sma->sem_nsems = nsems;
-	sma->sem_ctime = get_seconds();
 	sem_unlock(sma);
 
 	return sma->sem_perm.id;
@@ -558,6 +560,8 @@ static unsigned long copy_semid_to_user(void __user *buf, struct semid64_ds *in,
 	case IPC_OLD:
 	    {
 		struct semid_ds out;
+
+		memset(&out, 0, sizeof(out));
 
 		ipc64_perm_to_ipc_perm(&in->sem_perm, &out.sem_perm);
 
@@ -1290,18 +1294,29 @@ void exit_sem(struct task_struct *tsk)
 		int i;
 
 		rcu_read_lock();
-		un = list_entry(rcu_dereference(ulp->list_proc.next),
-					struct sem_undo, list_proc);
-		if (&un->list_proc == &ulp->list_proc)
-			semid = -1;
-		 else
-			semid = un->semid;
+		un = list_entry_rcu(ulp->list_proc.next,
+				    struct sem_undo, list_proc);
+		if (&un->list_proc == &ulp->list_proc) {
+			/*
+			 * We must wait for freeary() before freeing this ulp,
+			 * in case we raced with last sem_undo. There is a small
+			 * possibility where we exit while freeary() didn't
+			 * finish unlocking sem_undo_list.
+			 */
+			spin_unlock_wait(&ulp->lock);
+			rcu_read_unlock();
+			break;
+		}
+		spin_lock(&ulp->lock);
+		semid = un->semid;
+		spin_unlock(&ulp->lock);
 		rcu_read_unlock();
 
+		/* exit_sem raced with IPC_RMID, nothing to do */
 		if (semid == -1)
-			break;
+			continue;
 
-		sma = sem_lock_check(tsk->nsproxy->ipc_ns, un->semid);
+		sma = sem_lock_check(tsk->nsproxy->ipc_ns, semid);
 
 		/* exit_sem raced with IPC_RMID, nothing to do */
 		if (IS_ERR(sma))

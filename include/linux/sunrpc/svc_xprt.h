@@ -65,6 +65,7 @@ struct svc_xprt {
 	size_t			xpt_locallen;	/* length of address */
 	struct sockaddr_storage	xpt_remote;	/* remote peer's address */
 	size_t			xpt_remotelen;	/* length of address */
+	struct rpc_wait_queue	xpt_bc_pending;	/* backchannel wait queue */
 };
 
 int	svc_reg_xprt_class(struct svc_xprt_class *);
@@ -83,7 +84,7 @@ int	svc_port_is_privileged(struct sockaddr *sin);
 int	svc_print_xprts(char *buf, int maxlen);
 struct	svc_xprt *svc_find_xprt(struct svc_serv *serv, const char *xcl_name,
 			const sa_family_t af, const unsigned short port);
-int	svc_xprt_names(struct svc_serv *serv, char *buf, int buflen);
+int	svc_xprt_names(struct svc_serv *serv, char *buf, const int buflen);
 
 static inline void svc_xprt_get(struct svc_xprt *xprt)
 {
@@ -118,7 +119,7 @@ static inline unsigned short svc_addr_port(const struct sockaddr *sa)
 	return 0;
 }
 
-static inline size_t svc_addr_len(struct sockaddr *sa)
+static inline size_t svc_addr_len(const struct sockaddr *sa)
 {
 	switch (sa->sa_family) {
 	case AF_INET:
@@ -126,7 +127,8 @@ static inline size_t svc_addr_len(struct sockaddr *sa)
 	case AF_INET6:
 		return sizeof(struct sockaddr_in6);
 	}
-	return -EAFNOSUPPORT;
+
+	return 0;
 }
 
 static inline unsigned short svc_xprt_local_port(const struct svc_xprt *xprt)

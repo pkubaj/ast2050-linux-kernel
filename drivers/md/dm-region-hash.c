@@ -283,7 +283,7 @@ static struct dm_region *__rh_alloc(struct dm_region_hash *rh, region_t region)
 
 	nreg = mempool_alloc(rh->region_pool, GFP_ATOMIC);
 	if (unlikely(!nreg))
-		nreg = kmalloc(sizeof(*nreg), GFP_NOIO);
+		nreg = kmalloc(sizeof(*nreg), GFP_NOIO | __GFP_NOFAIL);
 
 	nreg->state = rh->log->type->in_sync(rh->log, region, 1) ?
 		      DM_RH_CLEAN : DM_RH_NOSYNC;
@@ -643,10 +643,9 @@ void dm_rh_recovery_end(struct dm_region *reg, int success)
 	spin_lock_irq(&rh->region_lock);
 	if (success)
 		list_add(&reg->list, &reg->rh->recovered_regions);
-	else {
-		reg->state = DM_RH_NOSYNC;
+	else
 		list_add(&reg->list, &reg->rh->failed_recovered_regions);
-	}
+
 	spin_unlock_irq(&rh->region_lock);
 
 	rh->wakeup_workers(rh->context);

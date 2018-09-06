@@ -227,8 +227,8 @@ struct irqaction timer_irqaction = {
 	.name		= "timer",
 };
 
-static struct hw_interrupt_type rtc_irq_type = {
-	.typename	= "RTC",
+static struct irq_chip rtc_irq_type = {
+	.name		= "RTC",
 	.startup	= rtc_startup,
 	.shutdown	= rtc_enable_disable,
 	.enable		= rtc_enable_disable,

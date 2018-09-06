@@ -101,6 +101,7 @@ static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
 			DRM_ERROR("Invalid depth buffer offset\n");
 			return -EINVAL;
 		}
+		dev_priv->have_z_offset = 1;
 		break;
 
 	case RADEON_EMIT_PP_CNTL:
@@ -876,6 +877,12 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 		if (tmp & RADEON_BACK)
 			flags |= RADEON_FRONT;
 	}
+	if (flags & (RADEON_DEPTH|RADEON_STENCIL)) {
+		if (!dev_priv->have_z_offset) {
+			printk_once(KERN_ERR "radeon: illegal depth clear request. Buggy mesa detected - please update.\n");
+			flags &= ~(RADEON_DEPTH | RADEON_STENCIL);
+		}
+	}
 
 	if (flags & (RADEON_FRONT | RADEON_BACK)) {
 
@@ -1546,7 +1553,7 @@ static void radeon_cp_dispatch_vertex(struct drm_device * dev,
 	} while (i < nbox);
 }
 
-static void radeon_cp_discard_buffer(struct drm_device *dev, struct drm_master *master, struct drm_buf *buf)
+void radeon_cp_discard_buffer(struct drm_device *dev, struct drm_master *master, struct drm_buf *buf)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_radeon_master_private *master_priv = master->driver_priv;
@@ -2213,7 +2220,10 @@ static int radeon_cp_swap(struct drm_device *dev, void *data, struct drm_file *f
 	if (sarea_priv->nbox > RADEON_NR_SAREA_CLIPRECTS)
 		sarea_priv->nbox = RADEON_NR_SAREA_CLIPRECTS;
 
-	radeon_cp_dispatch_swap(dev, file_priv->master);
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		r600_cp_dispatch_swap(dev, file_priv);
+	else
+		radeon_cp_dispatch_swap(dev, file_priv->master);
 	sarea_priv->ctx_owner = 0;
 
 	COMMIT_RING();
@@ -2412,7 +2422,10 @@ static int radeon_cp_texture(struct drm_device *dev, void *data, struct drm_file
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	ret = radeon_cp_dispatch_texture(dev, file_priv, tex, &image);
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		ret = r600_cp_dispatch_texture(dev, file_priv, tex, &image);
+	else
+		ret = radeon_cp_dispatch_texture(dev, file_priv, tex, &image);
 
 	return ret;
 }
@@ -2495,8 +2508,9 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 		radeon_cp_dispatch_indirect(dev, buf, indirect->start, indirect->end);
 	}
 
-	if (indirect->discard)
+	if (indirect->discard) {
 		radeon_cp_discard_buffer(dev, file_priv->master, buf);
+	}
 
 	COMMIT_RING();
 	return 0;
@@ -2866,12 +2880,12 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data, struct drm_file 
 	 */
 	orig_bufsz = cmdbuf->bufsz;
 	if (orig_bufsz != 0) {
-		kbuf = drm_alloc(cmdbuf->bufsz, DRM_MEM_DRIVER);
+		kbuf = kmalloc(cmdbuf->bufsz, GFP_KERNEL);
 		if (kbuf == NULL)
 			return -ENOMEM;
 		if (DRM_COPY_FROM_USER(kbuf, (void __user *)cmdbuf->buf,
 				       cmdbuf->bufsz)) {
-			drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+			kfree(kbuf);
 			return -EFAULT;
 		}
 		cmdbuf->buf = kbuf;
@@ -2884,7 +2898,7 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data, struct drm_file 
 		temp = r300_do_cp_cmdbuf(dev, file_priv, cmdbuf);
 
 		if (orig_bufsz != 0)
-			drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+			kfree(kbuf);
 
 		return temp;
 	}
@@ -2991,7 +3005,7 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data, struct drm_file 
 	}
 
 	if (orig_bufsz != 0)
-		drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+		kfree(kbuf);
 
 	DRM_DEBUG("DONE\n");
 	COMMIT_RING();
@@ -2999,7 +3013,7 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data, struct drm_file 
 
       err:
 	if (orig_bufsz != 0)
-		drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+		kfree(kbuf);
 	return -EINVAL;
 }
 
@@ -3027,7 +3041,10 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		value = GET_SCRATCH(dev_priv, 2);
 		break;
 	case RADEON_PARAM_IRQ_NR:
-		value = drm_dev_to_irq(dev);
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+			value = 0;
+		else
+			value = drm_dev_to_irq(dev);
 		break;
 	case RADEON_PARAM_GART_BASE:
 		value = dev_priv->gart_vm_start;
@@ -3080,6 +3097,9 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		break;
 	case RADEON_PARAM_NUM_GB_PIPES:
 		value = dev_priv->num_gb_pipes;
+		break;
+	case RADEON_PARAM_NUM_Z_PIPES:
+		value = dev_priv->num_z_pipes;
 		break;
 	default:
 		DRM_DEBUG("Invalid parameter %d\n", param->param);
@@ -3175,9 +3195,7 @@ int radeon_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 	struct drm_radeon_driver_file_fields *radeon_priv;
 
 	DRM_DEBUG("\n");
-	radeon_priv =
-	    (struct drm_radeon_driver_file_fields *)
-	    drm_alloc(sizeof(*radeon_priv), DRM_MEM_FILES);
+	radeon_priv = kmalloc(sizeof(*radeon_priv), GFP_KERNEL);
 
 	if (!radeon_priv)
 		return -ENOMEM;
@@ -3196,7 +3214,7 @@ void radeon_driver_postclose(struct drm_device *dev, struct drm_file *file_priv)
 	struct drm_radeon_driver_file_fields *radeon_priv =
 	    file_priv->driver_priv;
 
-	drm_free(radeon_priv, sizeof(*radeon_priv), DRM_MEM_FILES);
+	kfree(radeon_priv);
 }
 
 struct drm_ioctl_desc radeon_ioctls[] = {
@@ -3226,7 +3244,8 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_RADEON_IRQ_WAIT, radeon_irq_wait, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SETPARAM, radeon_cp_setparam, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SURF_ALLOC, radeon_surface_alloc, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_RADEON_SURF_FREE, radeon_surface_free, DRM_AUTH)
+	DRM_IOCTL_DEF(DRM_RADEON_SURF_FREE, radeon_surface_free, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_RADEON_CS, r600_cs_legacy_ioctl, DRM_AUTH)
 };
 
 int radeon_max_ioctl = DRM_ARRAY_SIZE(radeon_ioctls);

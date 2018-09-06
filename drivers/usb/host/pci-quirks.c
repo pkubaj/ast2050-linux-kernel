@@ -15,6 +15,7 @@
 #include <linux/delay.h>
 #include <linux/acpi.h>
 #include "pci-quirks.h"
+#include "xhci-ext-caps.h"
 
 
 #define UHCI_USBLEGSUP		0xc0		/* legacy support */
@@ -33,6 +34,8 @@
 #define OHCI_INTRSTATUS		0x0c
 #define OHCI_INTRENABLE		0x10
 #define OHCI_INTRDISABLE	0x14
+#define OHCI_FMINTERVAL		0x34
+#define OHCI_HCR		(1 << 0)	/* host controller reset */
 #define OHCI_OCR		(1 << 3)	/* ownership change request */
 #define OHCI_CTRL_RWC		(1 << 9)	/* remote wakeup connected */
 #define OHCI_CTRL_IR		(1 << 8)	/* interrupt routing */
@@ -168,6 +171,7 @@ static int __devinit mmio_resource_enabled(struct pci_dev *pdev, int idx)
 static void __devinit quirk_usb_handoff_ohci(struct pci_dev *pdev)
 {
 	void __iomem *base;
+	u32 control;
 
 	if (!mmio_resource_enabled(pdev, 0))
 		return;
@@ -176,10 +180,14 @@ static void __devinit quirk_usb_handoff_ohci(struct pci_dev *pdev)
 	if (base == NULL)
 		return;
 
+	control = readl(base + OHCI_CONTROL);
+
 /* On PA-RISC, PDC can leave IR set incorrectly; ignore it there. */
-#ifndef __hppa__
-{
-	u32 control = readl(base + OHCI_CONTROL);
+#ifdef __hppa__
+#define	OHCI_CTRL_MASK		(OHCI_CTRL_RWC | OHCI_CTRL_IR)
+#else
+#define	OHCI_CTRL_MASK		OHCI_CTRL_RWC
+
 	if (control & OHCI_CTRL_IR) {
 		int wait_time = 500; /* arbitrary; 5 seconds */
 		writel(OHCI_INTR_OC, base + OHCI_INTRENABLE);
@@ -193,12 +201,37 @@ static void __devinit quirk_usb_handoff_ohci(struct pci_dev *pdev)
 			dev_warn(&pdev->dev, "OHCI: BIOS handoff failed"
 					" (BIOS bug?) %08x\n",
 					readl(base + OHCI_CONTROL));
-
-		/* reset controller, preserving RWC */
-		writel(control & OHCI_CTRL_RWC, base + OHCI_CONTROL);
 	}
-}
 #endif
+
+	/* reset controller, preserving RWC (and possibly IR) */
+	writel(control & OHCI_CTRL_MASK, base + OHCI_CONTROL);
+	readl(base + OHCI_CONTROL);
+
+	/* Some NVIDIA controllers stop working if kept in RESET for too long */
+	if (pdev->vendor == PCI_VENDOR_ID_NVIDIA) {
+		u32 fminterval;
+		int cnt;
+
+		/* drive reset for at least 50 ms (7.1.7.5) */
+		msleep(50);
+
+		/* software reset of the controller, preserving HcFmInterval */
+		fminterval = readl(base + OHCI_FMINTERVAL);
+		writel(OHCI_HCR, base + OHCI_CMDSTATUS);
+
+		/* reset requires max 10 us delay */
+		for (cnt = 30; cnt > 0; --cnt) {	/* ... allow extra time */
+			if ((readl(base + OHCI_CMDSTATUS) & OHCI_HCR) == 0)
+				break;
+			udelay(1);
+		}
+		writel(fminterval, base + OHCI_FMINTERVAL);
+
+		/* Now we're in the SUSPEND state with all devices reset
+		 * and wakeups and interrupts disabled
+		 */
+	}
 
 	/*
 	 * disable interrupts
@@ -341,15 +374,166 @@ static void __devinit quirk_usb_disable_ehci(struct pci_dev *pdev)
 	return;
 }
 
+/*
+ * handshake - spin reading a register until handshake completes
+ * @ptr: address of hc register to be read
+ * @mask: bits to look at in result of read
+ * @done: value of those bits when handshake succeeds
+ * @wait_usec: timeout in microseconds
+ * @delay_usec: delay in microseconds to wait between polling
+ *
+ * Polls a register every delay_usec microseconds.
+ * Returns 0 when the mask bits have the value done.
+ * Returns -ETIMEDOUT if this condition is not true after
+ * wait_usec microseconds have passed.
+ */
+static int handshake(void __iomem *ptr, u32 mask, u32 done,
+		int wait_usec, int delay_usec)
+{
+	u32	result;
 
+	do {
+		result = readl(ptr);
+		result &= mask;
+		if (result == done)
+			return 0;
+		udelay(delay_usec);
+		wait_usec -= delay_usec;
+	} while (wait_usec > 0);
+	return -ETIMEDOUT;
+}
+
+/**
+ * PCI Quirks for xHCI.
+ *
+ * Takes care of the handoff between the Pre-OS (i.e. BIOS) and the OS.
+ * It signals to the BIOS that the OS wants control of the host controller,
+ * and then waits 5 seconds for the BIOS to hand over control.
+ * If we timeout, assume the BIOS is broken and take control anyway.
+ */
+static void __devinit quirk_usb_handoff_xhci(struct pci_dev *pdev)
+{
+	void __iomem *base;
+	int ext_cap_offset;
+	void __iomem *op_reg_base;
+	u32 val;
+	int timeout;
+	int len = pci_resource_len(pdev, 0);
+
+	if (!mmio_resource_enabled(pdev, 0))
+		return;
+
+	base = ioremap_nocache(pci_resource_start(pdev, 0), len);
+	if (base == NULL)
+		return;
+
+	/*
+	 * Find the Legacy Support Capability register -
+	 * this is optional for xHCI host controllers.
+	 */
+	ext_cap_offset = xhci_find_next_cap_offset(base, XHCI_HCC_PARAMS_OFFSET);
+	do {
+		if ((ext_cap_offset + sizeof(val)) > len) {
+			/* We're reading garbage from the controller */
+			dev_warn(&pdev->dev,
+				 "xHCI controller failing to respond");
+			return;
+		}
+
+		if (!ext_cap_offset)
+			/* We've reached the end of the extended capabilities */
+			goto hc_init;
+
+		val = readl(base + ext_cap_offset);
+		if (XHCI_EXT_CAPS_ID(val) == XHCI_EXT_CAPS_LEGACY)
+			break;
+		ext_cap_offset = xhci_find_next_cap_offset(base, ext_cap_offset);
+	} while (1);
+
+	/* If the BIOS owns the HC, signal that the OS wants it, and wait */
+	if (val & XHCI_HC_BIOS_OWNED) {
+		writel(val | XHCI_HC_OS_OWNED, base + ext_cap_offset);
+
+		/* Wait for 5 seconds with 10 microsecond polling interval */
+		timeout = handshake(base + ext_cap_offset, XHCI_HC_BIOS_OWNED,
+				0, 5000, 10);
+
+		/* Assume a buggy BIOS and take HC ownership anyway */
+		if (timeout) {
+			dev_warn(&pdev->dev, "xHCI BIOS handoff failed"
+					" (BIOS bug ?) %08x\n", val);
+			writel(val & ~XHCI_HC_BIOS_OWNED, base + ext_cap_offset);
+		}
+	}
+
+	val = readl(base + ext_cap_offset + XHCI_LEGACY_CONTROL_OFFSET);
+	/* Mask off (turn off) any enabled SMIs */
+	val &= XHCI_LEGACY_DISABLE_SMI;
+	/* Mask all SMI events bits, RW1C */
+	val |= XHCI_LEGACY_SMI_EVENTS;
+	/* Disable any BIOS SMIs and clear all SMI events*/
+	writel(val, base + ext_cap_offset + XHCI_LEGACY_CONTROL_OFFSET);
+
+hc_init:
+	op_reg_base = base + XHCI_HC_LENGTH(readl(base));
+
+	/* Wait for the host controller to be ready before writing any
+	 * operational or runtime registers.  Wait 5 seconds and no more.
+	 */
+	timeout = handshake(op_reg_base + XHCI_STS_OFFSET, XHCI_STS_CNR, 0,
+			5000, 10);
+	/* Assume a buggy HC and start HC initialization anyway */
+	if (timeout) {
+		val = readl(op_reg_base + XHCI_STS_OFFSET);
+		dev_warn(&pdev->dev,
+				"xHCI HW not ready after 5 sec (HC bug?) "
+				"status = 0x%x\n", val);
+	}
+
+	/* Send the halt and disable interrupts command */
+	val = readl(op_reg_base + XHCI_CMD_OFFSET);
+	val &= ~(XHCI_CMD_RUN | XHCI_IRQS);
+	writel(val, op_reg_base + XHCI_CMD_OFFSET);
+
+	/* Wait for the HC to halt - poll every 125 usec (one microframe). */
+	timeout = handshake(op_reg_base + XHCI_STS_OFFSET, XHCI_STS_HALT, 1,
+			XHCI_MAX_HALT_USEC, 125);
+	if (timeout) {
+		val = readl(op_reg_base + XHCI_STS_OFFSET);
+		dev_warn(&pdev->dev,
+				"xHCI HW did not halt within %d usec "
+				"status = 0x%x\n", XHCI_MAX_HALT_USEC, val);
+	}
+
+	iounmap(base);
+}
 
 static void __devinit quirk_usb_early_handoff(struct pci_dev *pdev)
 {
+	/* Skip Netlogic mips SoC's internal PCI USB controller.
+	 * This device does not need/support EHCI/OHCI handoff
+	 */
+	if (pdev->vendor == 0x184e)	/* vendor Netlogic */
+		return;
+	if (pdev->class != PCI_CLASS_SERIAL_USB_UHCI &&
+			pdev->class != PCI_CLASS_SERIAL_USB_OHCI &&
+			pdev->class != PCI_CLASS_SERIAL_USB_EHCI &&
+			pdev->class != PCI_CLASS_SERIAL_USB_XHCI)
+		return;
+
+	if (pci_enable_device(pdev) < 0) {
+		dev_warn(&pdev->dev, "Can't enable PCI device, "
+				"BIOS handoff failed.\n");
+		return;
+	}
 	if (pdev->class == PCI_CLASS_SERIAL_USB_UHCI)
 		quirk_usb_handoff_uhci(pdev);
 	else if (pdev->class == PCI_CLASS_SERIAL_USB_OHCI)
 		quirk_usb_handoff_ohci(pdev);
 	else if (pdev->class == PCI_CLASS_SERIAL_USB_EHCI)
 		quirk_usb_disable_ehci(pdev);
+	else if (pdev->class == PCI_CLASS_SERIAL_USB_XHCI)
+		quirk_usb_handoff_xhci(pdev);
+	pci_disable_device(pdev);
 }
 DECLARE_PCI_FIXUP_FINAL(PCI_ANY_ID, PCI_ANY_ID, quirk_usb_early_handoff);

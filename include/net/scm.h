@@ -10,12 +10,13 @@
 /* Well, we should have at least one descriptor open
  * to accept passed FDs 8)
  */
-#define SCM_MAX_FD	255
+#define SCM_MAX_FD	253
 
 struct scm_fp_list
 {
 	struct list_head	list;
-	int			count;
+	short			count;
+	short			max;
 	struct file		*fp[SCM_MAX_FD];
 };
 
@@ -26,7 +27,6 @@ struct scm_cookie
 #ifdef CONFIG_SECURITY_NETWORK
 	u32			secid;		/* Passed security ID 	*/
 #endif
-	unsigned long		seq;		/* Connection seqno	*/
 };
 
 extern void scm_detach_fds(struct msghdr *msg, struct scm_cookie *scm);
@@ -59,7 +59,6 @@ static __inline__ int scm_send(struct socket *sock, struct msghdr *msg,
 	scm->creds.gid = current_gid();
 	scm->creds.pid = task_tgid_vnr(p);
 	scm->fp = NULL;
-	scm->seq = 0;
 	unix_get_peersec_dgram(sock, scm);
 	if (msg->msg_controllen <= 0)
 		return 0;

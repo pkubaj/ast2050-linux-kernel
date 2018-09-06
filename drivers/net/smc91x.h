@@ -28,7 +28,7 @@
  . Authors
  .	Erik Stahlman		<erik@vt.edu>
  .	Daris A Nevil		<dnevil@snmc.com>
- .	Nicolas Pitre 		<nico@cam.org>
+ .	Nicolas Pitre 		<nico@fluxnic.net>
  .
  ---------------------------------------------------------------------------*/
 #ifndef _SMC91X_H_
@@ -45,7 +45,8 @@
     defined(CONFIG_MACH_ZYLONITE) ||\
     defined(CONFIG_MACH_LITTLETON) ||\
     defined(CONFIG_MACH_ZYLONITE2) ||\
-    defined(CONFIG_ARCH_VIPER)
+    defined(CONFIG_ARCH_VIPER) ||\
+    defined(CONFIG_MACH_STARGATE2)
 
 #include <asm/mach-types.h>
 
@@ -73,7 +74,7 @@
 /* We actually can't write halfwords properly if not word aligned */
 static inline void SMC_outw(u16 val, void __iomem *ioaddr, int reg)
 {
-	if (machine_is_mainstone() && reg & 2) {
+	if ((machine_is_mainstone() || machine_is_stargate2()) && reg & 2) {
 		unsigned int v = val << 16;
 		v |= readl(ioaddr + (reg & ~2)) & 0xffff;
 		writel(v, ioaddr + (reg & ~2));
@@ -81,34 +82,6 @@ static inline void SMC_outw(u16 val, void __iomem *ioaddr, int reg)
 		writew(val, ioaddr + reg);
 	}
 }
-
-#elif defined(CONFIG_BLACKFIN)
-
-#define SMC_IRQ_FLAGS		IRQF_TRIGGER_HIGH
-#define RPC_LSA_DEFAULT		RPC_LED_100_10
-#define RPC_LSB_DEFAULT		RPC_LED_TX_RX
-
-#define SMC_CAN_USE_8BIT	0
-#define SMC_CAN_USE_16BIT	1
-# if defined(CONFIG_BF561)
-#define SMC_CAN_USE_32BIT	1
-# else
-#define SMC_CAN_USE_32BIT	0
-# endif
-#define SMC_IO_SHIFT		0
-#define SMC_NOWAIT      	1
-#define SMC_USE_BFIN_DMA	0
-
-#define SMC_inw(a, r)		readw((a) + (r))
-#define SMC_outw(v, a, r)	writew(v, (a) + (r))
-#define SMC_insw(a, r, p, l)	readsw((a) + (r), p, l)
-#define SMC_outsw(a, r, p, l)	writesw((a) + (r), p, l)
-# if SMC_CAN_USE_32BIT
-#define SMC_inl(a, r)		readl((a) + (r))
-#define SMC_outl(v, a, r)	writel(v, (a) + (r))
-#define SMC_insl(a, r, p, l)	readsl((a) + (r), p, l)
-#define SMC_outsl(a, r, p, l)	writesl((a) + (r), p, l)
-# endif
 
 #elif defined(CONFIG_REDWOOD_5) || defined(CONFIG_REDWOOD_6)
 
@@ -185,7 +158,8 @@ static inline void SMC_outw(u16 val, void __iomem *ioaddr, int reg)
 #define SMC_outsb(a, r, p, l)	writesb((a) + (r), p, (l))
 #define SMC_IRQ_FLAGS		(-1)	/* from resource */
 
-#elif	defined(CONFIG_MACH_LOGICPD_PXA270)
+#elif	defined(CONFIG_MACH_LOGICPD_PXA270) \
+	|| defined(CONFIG_MACH_NOMADIK_8815NHK)
 
 #define SMC_CAN_USE_8BIT	0
 #define SMC_CAN_USE_16BIT	1

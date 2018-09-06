@@ -1,7 +1,7 @@
 /*
  *  drivers/s390/net/qeth_l3_main.c
  *
- *    Copyright IBM Corp. 2007
+ *    Copyright IBM Corp. 2007, 2009
  *    Author(s): Utz Bacher <utz.bacher@de.ibm.com>,
  *		 Frank Pavlic <fpavlic@de.ibm.com>,
  *		 Thomas Spatzier <tspat@de.ibm.com>,
@@ -1920,16 +1920,22 @@ static inline __u16 qeth_l3_rebuild_skb(struct qeth_card *card,
 		 hdr->hdr.l3.vlan_id : *((u16 *)&hdr->hdr.l3.dest_addr[12]);
 	}
 
-	skb->ip_summed = card->options.checksum_type;
-	if (card->options.checksum_type == HW_CHECKSUMMING) {
+	switch (card->options.checksum_type) {
+	case SW_CHECKSUMMING:
+		skb->ip_summed = CHECKSUM_NONE;
+		break;
+	case NO_CHECKSUMMING:
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
+		break;
+	case HW_CHECKSUMMING:
 		if ((hdr->hdr.l3.ext_flags &
-		      (QETH_HDR_EXT_CSUM_HDR_REQ |
-		       QETH_HDR_EXT_CSUM_TRANSP_REQ)) ==
-		     (QETH_HDR_EXT_CSUM_HDR_REQ |
-		      QETH_HDR_EXT_CSUM_TRANSP_REQ))
+		    (QETH_HDR_EXT_CSUM_HDR_REQ |
+		     QETH_HDR_EXT_CSUM_TRANSP_REQ)) ==
+		    (QETH_HDR_EXT_CSUM_HDR_REQ |
+		     QETH_HDR_EXT_CSUM_TRANSP_REQ))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 		else
-			skb->ip_summed = SW_CHECKSUMMING;
+			skb->ip_summed = CHECKSUM_NONE;
 	}
 
 	return vlan_id;
@@ -1981,7 +1987,6 @@ static void qeth_l3_process_inbound_buffer(struct qeth_card *card,
 			continue;
 		}
 
-		card->dev->last_rx = jiffies;
 		card->stats.rx_packets++;
 		card->stats.rx_bytes += len;
 	}
@@ -2519,6 +2524,51 @@ static int qeth_l3_do_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	return rc;
 }
 
+int inline qeth_l3_get_cast_type(struct qeth_card *card, struct sk_buff *skb)
+{
+	int cast_type = RTN_UNSPEC;
+
+	if (skb_dst(skb) && skb_dst(skb)->neighbour) {
+		cast_type = skb_dst(skb)->neighbour->type;
+		if ((cast_type == RTN_BROADCAST) ||
+		    (cast_type == RTN_MULTICAST) ||
+		    (cast_type == RTN_ANYCAST))
+			return cast_type;
+		else
+			return RTN_UNSPEC;
+	}
+	/* try something else */
+	if (skb->protocol == ETH_P_IPV6)
+		return (skb_network_header(skb)[24] == 0xff) ?
+				RTN_MULTICAST : 0;
+	else if (skb->protocol == ETH_P_IP)
+		return ((skb_network_header(skb)[16] & 0xf0) == 0xe0) ?
+				RTN_MULTICAST : 0;
+	/* ... */
+	if (!memcmp(skb->data, skb->dev->broadcast, 6))
+		return RTN_BROADCAST;
+	else {
+		u16 hdr_mac;
+
+		hdr_mac = *((u16 *)skb->data);
+		/* tr multicast? */
+		switch (card->info.link_type) {
+		case QETH_LINK_TYPE_HSTR:
+		case QETH_LINK_TYPE_LANE_TR:
+			if ((hdr_mac == QETH_TR_MAC_NC) ||
+			    (hdr_mac == QETH_TR_MAC_C))
+				return RTN_MULTICAST;
+			break;
+		/* eth or so multicast? */
+		default:
+		if ((hdr_mac == QETH_ETH_MAC_V4) ||
+			    (hdr_mac == QETH_ETH_MAC_V6))
+				return RTN_MULTICAST;
+		}
+	}
+	return cast_type;
+}
+
 static void qeth_l3_fill_header(struct qeth_card *card, struct qeth_hdr *hdr,
 		struct sk_buff *skb, int ipv, int cast_type)
 {
@@ -2543,9 +2593,9 @@ static void qeth_l3_fill_header(struct qeth_card *card, struct qeth_hdr *hdr,
 		/* IPv4 */
 		hdr->hdr.l3.flags = qeth_l3_get_qeth_hdr_flags4(cast_type);
 		memset(hdr->hdr.l3.dest_addr, 0, 12);
-		if ((skb->dst) && (skb->dst->neighbour)) {
+		if ((skb_dst(skb)) && (skb_dst(skb)->neighbour)) {
 			*((u32 *) (&hdr->hdr.l3.dest_addr[12])) =
-			    *((u32 *) skb->dst->neighbour->primary_key);
+			    *((u32 *) skb_dst(skb)->neighbour->primary_key);
 		} else {
 			/* fill in destination address used in ip header */
 			*((u32 *) (&hdr->hdr.l3.dest_addr[12])) =
@@ -2556,9 +2606,9 @@ static void qeth_l3_fill_header(struct qeth_card *card, struct qeth_hdr *hdr,
 		hdr->hdr.l3.flags = qeth_l3_get_qeth_hdr_flags6(cast_type);
 		if (card->info.type == QETH_CARD_TYPE_IQD)
 			hdr->hdr.l3.flags &= ~QETH_HDR_PASSTHRU;
-		if ((skb->dst) && (skb->dst->neighbour)) {
+		if ((skb_dst(skb)) && (skb_dst(skb)->neighbour)) {
 			memcpy(hdr->hdr.l3.dest_addr,
-			       skb->dst->neighbour->primary_key, 16);
+			       skb_dst(skb)->neighbour->primary_key, 16);
 		} else {
 			/* fill in destination address used in ip header */
 			memcpy(hdr->hdr.l3.dest_addr,
@@ -2644,7 +2694,7 @@ static int qeth_l3_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct qeth_card *card = dev->ml_priv;
 	struct sk_buff *new_skb = NULL;
 	int ipv = qeth_get_ip_version(skb);
-	int cast_type = qeth_get_cast_type(card, skb);
+	int cast_type = qeth_l3_get_cast_type(card, skb);
 	struct qeth_qdio_out_q *queue = card->qdio.out_qs
 		[qeth_get_priority_queue(card, skb, ipv, cast_type)];
 	int tx_bytes = skb->len;
@@ -2787,6 +2837,7 @@ static int qeth_l3_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 				card->perf_stats.sg_frags_sent += nr_frags + 1;
 			}
 		}
+		rc = NETDEV_TX_OK;
 	} else {
 		if (data_offset >= 0)
 			kmem_cache_free(qeth_core_header_cache, hdr);
@@ -2894,7 +2945,7 @@ static int qeth_l3_ethtool_set_tso(struct net_device *dev, u32 data)
 	return 0;
 }
 
-static struct ethtool_ops qeth_l3_ethtool_ops = {
+static const struct ethtool_ops qeth_l3_ethtool_ops = {
 	.get_link = ethtool_op_get_link,
 	.get_tx_csum = ethtool_op_get_tx_csum,
 	.set_tx_csum = ethtool_op_set_tx_hw_csum,
@@ -3006,6 +3057,7 @@ static int qeth_l3_setup_netdev(struct qeth_card *card)
 	card->dev->features |=	NETIF_F_HW_VLAN_TX |
 				NETIF_F_HW_VLAN_RX |
 				NETIF_F_HW_VLAN_FILTER;
+	card->dev->priv_flags &= ~IFF_XMIT_DST_RELEASE;
 
 	SET_NETDEV_DEV(card->dev, &card->gdev->dev);
 	return register_netdev(card->dev);
@@ -3070,6 +3122,7 @@ static void qeth_l3_remove_device(struct ccwgroup_device *cgdev)
 {
 	struct qeth_card *card = dev_get_drvdata(&cgdev->dev);
 
+	qeth_set_allowed_threads(card, 0, 1);
 	wait_event(card->wait_q, qeth_threads_running(card, 0xffffffff) == 0);
 
 	if (cgdev->state == CCWGROUP_ONLINE) {
@@ -3141,8 +3194,9 @@ static int __qeth_l3_set_online(struct ccwgroup_device *gdev, int recovery_mode)
 			dev_warn(&card->gdev->dev,
 				"The LAN is offline\n");
 			card->lan_online = 0;
+			return 0;
 		}
-		return rc;
+		goto out_remove;
 	} else
 		card->lan_online = 1;
 	qeth_set_large_send(card, card->options.large_send);
@@ -3170,6 +3224,7 @@ static int __qeth_l3_set_online(struct ccwgroup_device *gdev, int recovery_mode)
 	netif_carrier_on(card->dev);
 
 	qeth_set_allowed_threads(card, 0xffffffff, 0);
+	qeth_l3_set_ip_addr_list(card);
 	if (recover_flag == CARD_STATE_RECOVER) {
 		if (recovery_mode)
 			qeth_l3_open(card->dev);
@@ -3274,12 +3329,62 @@ static void qeth_l3_shutdown(struct ccwgroup_device *gdev)
 	qeth_clear_qdio_buffers(card);
 }
 
+static int qeth_l3_pm_suspend(struct ccwgroup_device *gdev)
+{
+	struct qeth_card *card = dev_get_drvdata(&gdev->dev);
+
+	if (card->dev)
+		netif_device_detach(card->dev);
+	qeth_set_allowed_threads(card, 0, 1);
+	wait_event(card->wait_q, qeth_threads_running(card, 0xffffffff) == 0);
+	if (gdev->state == CCWGROUP_OFFLINE)
+		return 0;
+	if (card->state == CARD_STATE_UP) {
+		card->use_hard_stop = 1;
+		__qeth_l3_set_offline(card->gdev, 1);
+	} else
+		__qeth_l3_set_offline(card->gdev, 0);
+	return 0;
+}
+
+static int qeth_l3_pm_resume(struct ccwgroup_device *gdev)
+{
+	struct qeth_card *card = dev_get_drvdata(&gdev->dev);
+	int rc = 0;
+
+	if (gdev->state == CCWGROUP_OFFLINE)
+		goto out;
+
+	if (card->state == CARD_STATE_RECOVER) {
+		rc = __qeth_l3_set_online(card->gdev, 1);
+		if (rc) {
+			if (card->dev) {
+				rtnl_lock();
+				dev_close(card->dev);
+				rtnl_unlock();
+			}
+		}
+	} else
+		rc = __qeth_l3_set_online(card->gdev, 0);
+out:
+	qeth_set_allowed_threads(card, 0xffffffff, 0);
+	if (card->dev)
+		netif_device_attach(card->dev);
+	if (rc)
+		dev_warn(&card->gdev->dev, "The qeth device driver "
+			"failed to recover an error on the device\n");
+	return rc;
+}
+
 struct ccwgroup_driver qeth_l3_ccwgroup_driver = {
 	.probe = qeth_l3_probe_device,
 	.remove = qeth_l3_remove_device,
 	.set_online = qeth_l3_set_online,
 	.set_offline = qeth_l3_set_offline,
 	.shutdown = qeth_l3_shutdown,
+	.freeze = qeth_l3_pm_suspend,
+	.thaw = qeth_l3_pm_resume,
+	.restore = qeth_l3_pm_resume,
 };
 EXPORT_SYMBOL_GPL(qeth_l3_ccwgroup_driver);
 

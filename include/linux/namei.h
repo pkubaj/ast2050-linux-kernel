@@ -18,6 +18,7 @@ enum { MAX_NESTED_LINKS = 8 };
 struct nameidata {
 	struct path	path;
 	struct qstr	last;
+	struct path	root;
 	unsigned int	flags;
 	int		last_type;
 	unsigned	depth;
@@ -39,7 +40,7 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
  *  - follow links at the end
  *  - require a directory
  *  - ending slashes ok even for nonexistent files
- *  - internal "there are more path compnents" flag
+ *  - internal "there are more path components" flag
  *  - locked when lookup done with dcache_lock held
  *  - dentry cache is untrusted; force a real lookup
  */
@@ -77,8 +78,8 @@ extern void release_open_intent(struct nameidata *);
 extern struct dentry *lookup_one_len(const char *, struct dentry *, int);
 extern struct dentry *lookup_one_noperm(const char *, struct dentry *);
 
-extern int follow_down(struct vfsmount **, struct dentry **);
-extern int follow_up(struct vfsmount **, struct dentry **);
+extern int follow_down(struct path *);
+extern int follow_up(struct path *);
 
 extern struct dentry *lock_rename(struct dentry *, struct dentry *);
 extern void unlock_rename(struct dentry *, struct dentry *);

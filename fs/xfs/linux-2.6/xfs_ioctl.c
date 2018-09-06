@@ -41,7 +41,6 @@
 #include "xfs_itable.h"
 #include "xfs_error.h"
 #include "xfs_rw.h"
-#include "xfs_acl.h"
 #include "xfs_attr.h"
 #include "xfs_bmap.h"
 #include "xfs_buf_item.h"
@@ -411,7 +410,8 @@ xfs_attrlist_by_handle(
 		return -XFS_ERROR(EPERM);
 	if (copy_from_user(&al_hreq, arg, sizeof(xfs_fsop_attrlist_handlereq_t)))
 		return -XFS_ERROR(EFAULT);
-	if (al_hreq.buflen > XATTR_LIST_MAX)
+	if (al_hreq.buflen < sizeof(struct attrlist) ||
+	    al_hreq.buflen > XATTR_LIST_MAX)
 		return -XFS_ERROR(EINVAL);
 
 	/*
@@ -674,10 +674,9 @@ xfs_ioc_bulkstat(
 		error = xfs_bulkstat_single(mp, &inlast,
 						bulkreq.ubuffer, &done);
 	else	/* XFS_IOC_FSBULKSTAT */
-		error = xfs_bulkstat(mp, &inlast, &count,
-			(bulkstat_one_pf)xfs_bulkstat_one, NULL,
-			sizeof(xfs_bstat_t), bulkreq.ubuffer,
-			BULKSTAT_FG_QUICK, &done);
+		error = xfs_bulkstat(mp, &inlast, &count, xfs_bulkstat_one,
+				     sizeof(xfs_bstat_t), bulkreq.ubuffer,
+				     &done);
 
 	if (error)
 		return -error;
@@ -699,14 +698,19 @@ xfs_ioc_fsgeometry_v1(
 	xfs_mount_t		*mp,
 	void			__user *arg)
 {
-	xfs_fsop_geom_v1_t	fsgeo;
+	xfs_fsop_geom_t         fsgeo;
 	int			error;
 
-	error = xfs_fs_geometry(mp, (xfs_fsop_geom_t *)&fsgeo, 3);
+	error = xfs_fs_geometry(mp, &fsgeo, 3);
 	if (error)
 		return -error;
 
-	if (copy_to_user(arg, &fsgeo, sizeof(fsgeo)))
+	/*
+	 * Caller should have passed an argument of type
+	 * xfs_fsop_geom_v1_t.  This is a proper subset of the
+	 * xfs_fsop_geom_t that xfs_fs_geometry() fills in.
+	 */
+	if (copy_to_user(arg, &fsgeo, sizeof(xfs_fsop_geom_v1_t)))
 		return -XFS_ERROR(EFAULT);
 	return 0;
 }
@@ -789,6 +793,8 @@ xfs_ioc_fsgetxattr(
 	void			__user *arg)
 {
 	struct fsxattr		fa;
+
+	memset(&fa, 0, sizeof(struct fsxattr));
 
 	xfs_ilock(ip, XFS_ILOCK_SHARED);
 	fa.fsx_xflags = xfs_ip2xflags(ip);
@@ -899,7 +905,8 @@ xfs_ioctl_setattr(
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
 	unsigned int		lock_flags = 0;
-	struct xfs_dquot	*udqp = NULL, *gdqp = NULL;
+	struct xfs_dquot	*udqp = NULL;
+	struct xfs_dquot	*gdqp = NULL;
 	struct xfs_dquot	*olddquot = NULL;
 	int			code;
 
@@ -919,7 +926,7 @@ xfs_ioctl_setattr(
 	 * because the i_*dquot fields will get updated anyway.
 	 */
 	if (XFS_IS_QUOTA_ON(mp) && (mask & FSX_PROJID)) {
-		code = XFS_QM_DQVOPALLOC(mp, ip, ip->i_d.di_uid,
+		code = xfs_qm_vop_dqalloc(ip, ip->i_d.di_uid,
 					 ip->i_d.di_gid, fa->fsx_projid,
 					 XFS_QMOPT_PQUOTA, &udqp, &gdqp);
 		if (code)
@@ -954,10 +961,11 @@ xfs_ioctl_setattr(
 	 * Do a quota reservation only if projid is actually going to change.
 	 */
 	if (mask & FSX_PROJID) {
-		if (XFS_IS_PQUOTA_ON(mp) &&
+		if (XFS_IS_QUOTA_RUNNING(mp) &&
+		    XFS_IS_PQUOTA_ON(mp) &&
 		    ip->i_d.di_projid != fa->fsx_projid) {
 			ASSERT(tp);
-			code = XFS_QM_DQVOPCHOWNRESV(mp, tp, ip, udqp, gdqp,
+			code = xfs_qm_vop_chown_reserve(tp, ip, udqp, gdqp,
 						capable(CAP_FOWNER) ?
 						XFS_QMOPT_FORCE_RES : 0);
 			if (code)	/* out of quota */
@@ -1059,8 +1067,8 @@ xfs_ioctl_setattr(
 		 * in the transaction.
 		 */
 		if (ip->i_d.di_projid != fa->fsx_projid) {
-			if (XFS_IS_PQUOTA_ON(mp)) {
-				olddquot = XFS_QM_DQVOPCHOWN(mp, tp, ip,
+			if (XFS_IS_QUOTA_RUNNING(mp) && XFS_IS_PQUOTA_ON(mp)) {
+				olddquot = xfs_qm_vop_chown(tp, ip,
 							&ip->i_gdquot, gdqp);
 			}
 			ip->i_d.di_projid = fa->fsx_projid;
@@ -1106,9 +1114,9 @@ xfs_ioctl_setattr(
 	/*
 	 * Release any dquot(s) the inode had kept before chown.
 	 */
-	XFS_QM_DQRELE(mp, olddquot);
-	XFS_QM_DQRELE(mp, udqp);
-	XFS_QM_DQRELE(mp, gdqp);
+	xfs_qm_dqrele(olddquot);
+	xfs_qm_dqrele(udqp);
+	xfs_qm_dqrele(gdqp);
 
 	if (code)
 		return code;
@@ -1122,8 +1130,8 @@ xfs_ioctl_setattr(
 	return 0;
 
  error_return:
-	XFS_QM_DQRELE(mp, udqp);
-	XFS_QM_DQRELE(mp, gdqp);
+	xfs_qm_dqrele(udqp);
+	xfs_qm_dqrele(gdqp);
 	xfs_trans_cancel(tp, 0);
 	if (lock_flags)
 		xfs_iunlock(ip, lock_flags);

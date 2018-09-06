@@ -235,7 +235,7 @@ static int mspro_block_bd_getgeo(struct block_device *bdev,
 	return 0;
 }
 
-static struct block_device_operations ms_block_bdops = {
+static const struct block_device_operations ms_block_bdops = {
 	.open    = mspro_block_bd_open,
 	.release = mspro_block_bd_release,
 	.getgeo  = mspro_block_bd_getgeo,
@@ -672,15 +672,14 @@ try_again:
 					       msb->req_sg);
 
 		if (!msb->seg_count) {
-			chunk = __blk_end_request(msb->block_req, -ENOMEM,
-					blk_rq_cur_bytes(msb->block_req));
+			chunk = __blk_end_request_cur(msb->block_req, -ENOMEM);
 			continue;
 		}
 
-		t_sec = msb->block_req->sector << 9;
+		t_sec = blk_rq_pos(msb->block_req) << 9;
 		sector_div(t_sec, msb->page_size);
 
-		count = msb->block_req->nr_sectors << 9;
+		count = blk_rq_bytes(msb->block_req);
 		count /= msb->page_size;
 
 		param.system = msb->system;
@@ -705,8 +704,8 @@ try_again:
 		return 0;
 	}
 
-	dev_dbg(&card->dev, "elv_next\n");
-	msb->block_req = elv_next_request(msb->queue);
+	dev_dbg(&card->dev, "blk_fetch\n");
+	msb->block_req = blk_fetch_request(msb->queue);
 	if (!msb->block_req) {
 		dev_dbg(&card->dev, "issue end\n");
 		return -EAGAIN;
@@ -735,7 +734,7 @@ static int mspro_block_complete_req(struct memstick_dev *card, int error)
 
 		if (error || (card->current_mrq.tpc == MSPRO_CMD_STOP)) {
 			if (msb->data_dir == READ) {
-				for (cnt = 0; cnt < msb->current_seg; cnt++)
+				for (cnt = 0; cnt < msb->current_seg; cnt++) {
 					t_len += msb->req_sg[cnt].length
 						 / msb->page_size;
 
@@ -743,9 +742,10 @@ static int mspro_block_complete_req(struct memstick_dev *card, int error)
 						t_len += msb->current_page - 1;
 
 					t_len *= msb->page_size;
+				}
 			}
 		} else
-			t_len = msb->block_req->nr_sectors << 9;
+			t_len = blk_rq_bytes(msb->block_req);
 
 		dev_dbg(&card->dev, "transferred %x (%d)\n", t_len, error);
 
@@ -825,8 +825,8 @@ static void mspro_block_submit_req(struct request_queue *q)
 		return;
 
 	if (msb->eject) {
-		while ((req = elv_next_request(q)) != NULL)
-			__blk_end_request(req, -ENODEV, blk_rq_bytes(req));
+		while ((req = blk_fetch_request(q)) != NULL)
+			__blk_end_request_all(req, -ENODEV);
 
 		return;
 	}
@@ -1243,7 +1243,7 @@ static int mspro_block_init_disk(struct memstick_dev *card)
 
 	sprintf(msb->disk->disk_name, "mspblk%d", disk_id);
 
-	blk_queue_hardsect_size(msb->queue, msb->page_size);
+	blk_queue_logical_block_size(msb->queue, msb->page_size);
 
 	capacity = be16_to_cpu(sys_info->user_block_count);
 	capacity *= be16_to_cpu(sys_info->block_size);
@@ -1331,12 +1331,13 @@ static void mspro_block_remove(struct memstick_dev *card)
 	struct mspro_block_data *msb = memstick_get_drvdata(card);
 	unsigned long flags;
 
-	del_gendisk(msb->disk);
-	dev_dbg(&card->dev, "mspro block remove\n");
 	spin_lock_irqsave(&msb->q_lock, flags);
 	msb->eject = 1;
 	blk_start_queue(msb->queue);
 	spin_unlock_irqrestore(&msb->q_lock, flags);
+
+	del_gendisk(msb->disk);
+	dev_dbg(&card->dev, "mspro block remove\n");
 
 	blk_cleanup_queue(msb->queue);
 	msb->queue = NULL;

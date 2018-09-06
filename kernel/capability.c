@@ -15,7 +15,6 @@
 #include <linux/syscalls.h>
 #include <linux/pid_namespace.h>
 #include <asm/uaccess.h>
-#include "cred-internals.h"
 
 /*
  * Leveraged for setting/resetting capabilities
@@ -306,7 +305,7 @@ int capable(int cap)
 		BUG();
 	}
 
-	if (security_capable(cap) == 0) {
+	if (security_capable(current_cred(), cap) == 0) {
 		current->flags |= PF_SUPERPRIV;
 		return 1;
 	}

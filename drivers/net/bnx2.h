@@ -361,6 +361,12 @@ struct l2_fhdr {
 #define BNX2_L2CTX_CTX_TYPE_CTX_BD_CHN_TYPE_VALUE	 (1<<28)
 
 #define BNX2_L2CTX_HOST_BDIDX				0x00000004
+#define BNX2_L2CTX_L5_STATUSB_NUM_SHIFT			 16
+#define BNX2_L2CTX_L2_STATUSB_NUM_SHIFT			 24
+#define BNX2_L2CTX_L5_STATUSB_NUM(sb_id)		\
+	(((sb_id) > 0) ? (((sb_id) + 7) << BNX2_L2CTX_L5_STATUSB_NUM_SHIFT) : 0)
+#define BNX2_L2CTX_L2_STATUSB_NUM(sb_id)		\
+	(((sb_id) > 0) ? (((sb_id) + 7) << BNX2_L2CTX_L2_STATUSB_NUM_SHIFT) : 0)
 #define BNX2_L2CTX_HOST_BSEQ				0x00000008
 #define BNX2_L2CTX_NX_BSEQ				0x0000000c
 #define BNX2_L2CTX_NX_BDHADDR_HI			0x00000010
@@ -5900,6 +5906,7 @@ struct l2_fhdr {
 #define BNX2_RXP_FTQ_CTL_CUR_DEPTH			 (0x3ffL<<22)
 
 #define BNX2_RXP_SCRATCH				0x000e0000
+#define BNX2_RXP_SCRATCH_RXP_FLOOD			 0x000e0024
 #define BNX2_RXP_SCRATCH_RSS_TBL_SZ			 0x000e0038
 #define BNX2_RXP_SCRATCH_RSS_TBL			 0x000e003c
 #define BNX2_RXP_SCRATCH_RSS_TBL_MAX_ENTRIES		 128
@@ -6552,6 +6559,8 @@ struct sw_pg {
 
 struct sw_tx_bd {
 	struct sk_buff		*skb;
+	unsigned short		is_gso;
+	unsigned short		nr_frags;
 };
 
 #define SW_RXBD_RING_SIZE (sizeof(struct sw_bd) * RX_DESC_CNT)
@@ -6678,6 +6687,11 @@ struct bnx2_napi {
 	u32 			last_status_idx;
 	u32			int_num;
 
+#ifdef BCM_CNIC
+	u32			cnic_tag;
+	int			cnic_present;
+#endif
+
 	struct bnx2_rx_ring_info	rx_ring;
 	struct bnx2_tx_ring_info	tx_ring;
 };
@@ -6707,6 +6721,7 @@ struct bnx2 {
 					 BNX2_FLAG_USING_MSIX)
 #define BNX2_FLAG_JUMBO_BROKEN		0x00000800
 #define BNX2_FLAG_CAN_KEEP_VLAN		0x00001000
+#define BNX2_FLAG_BROKEN_STATS		0x00002000
 
 	struct bnx2_napi	bnx2_napi[BNX2_MAX_MSIX_VEC];
 
@@ -6726,6 +6741,11 @@ struct bnx2 {
 	/* TX constants */
 	int		tx_ring_size;
 	u32		tx_wake_thresh;
+
+#ifdef BCM_CNIC
+	struct cnic_ops		*cnic_ops;
+	void			*cnic_data;
+#endif
 
 	/* End of fields used in the performance code paths. */
 
@@ -6872,7 +6892,7 @@ struct bnx2 {
 	int			pm_cap;
 	int			pcix_cap;
 
-	struct flash_spec	*flash_info;
+	const struct flash_spec	*flash_info;
 	u32			flash_size;
 
 	int			status_stats_size;
@@ -6884,6 +6904,11 @@ struct bnx2 {
 	u8			num_rx_rings;
 
 	u32			idle_chk_status_idx;
+
+#ifdef BCM_CNIC
+	struct mutex		cnic_lock;
+	struct cnic_eth_dev	cnic_eth_dev;
+#endif
 
 	const struct firmware	*mips_firmware;
 	const struct firmware	*rv2p_firmware;

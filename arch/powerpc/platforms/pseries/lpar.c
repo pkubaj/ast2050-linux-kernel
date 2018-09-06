@@ -286,7 +286,7 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	unsigned long hpte_v, hpte_r;
 
 	if (!(vflags & HPTE_V_BOLTED))
-		pr_debug("hpte_insert(group=%lx, va=%016lx, pa=%016lx, "
+		pr_devel("hpte_insert(group=%lx, va=%016lx, pa=%016lx, "
 			 "rflags=%lx, vflags=%lx, psize=%d)\n",
 			 hpte_group, va, pa, rflags, vflags, psize);
 
@@ -294,7 +294,7 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	hpte_r = hpte_encode_r(pa, psize) | rflags;
 
 	if (!(vflags & HPTE_V_BOLTED))
-		pr_debug(" hpte_v=%016lx, hpte_r=%016lx\n", hpte_v, hpte_r);
+		pr_devel(" hpte_v=%016lx, hpte_r=%016lx\n", hpte_v, hpte_r);
 
 	/* Now fill in the actual HPTE */
 	/* Set CEC cookie to 0         */
@@ -311,7 +311,7 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	lpar_rc = plpar_pte_enter(flags, hpte_group, hpte_v, hpte_r, &slot);
 	if (unlikely(lpar_rc == H_PTEG_FULL)) {
 		if (!(vflags & HPTE_V_BOLTED))
-			pr_debug(" full\n");
+			pr_devel(" full\n");
 		return -1;
 	}
 
@@ -322,11 +322,11 @@ static long pSeries_lpar_hpte_insert(unsigned long hpte_group,
 	 */
 	if (unlikely(lpar_rc != H_SUCCESS)) {
 		if (!(vflags & HPTE_V_BOLTED))
-			pr_debug(" lpar err %lu\n", lpar_rc);
+			pr_devel(" lpar err %lu\n", lpar_rc);
 		return -2;
 	}
 	if (!(vflags & HPTE_V_BOLTED))
-		pr_debug(" -> slot: %lu\n", slot & 7);
+		pr_devel(" -> slot: %lu\n", slot & 7);
 
 	/* Because of iSeries, we have to pass down the secondary
 	 * bucket bit here as well
@@ -366,21 +366,28 @@ static void pSeries_lpar_hptab_clear(void)
 {
 	unsigned long size_bytes = 1UL << ppc64_pft_size;
 	unsigned long hpte_count = size_bytes >> 4;
-	unsigned long dummy1, dummy2, dword0;
+	struct {
+		unsigned long pteh;
+		unsigned long ptel;
+	} ptes[4];
 	long lpar_rc;
-	int i;
+	unsigned long i, j;
 
-	/* TODO: Use bulk call */
-	for (i = 0; i < hpte_count; i++) {
-		/* dont remove HPTEs with VRMA mappings */
-		lpar_rc = plpar_pte_remove_raw(H_ANDCOND, i, HPTE_V_1TB_SEG,
-						&dummy1, &dummy2);
-		if (lpar_rc == H_NOT_FOUND) {
-			lpar_rc = plpar_pte_read_raw(0, i, &dword0, &dummy1);
-			if (!lpar_rc && ((dword0 & HPTE_V_VRMA_MASK)
-				!= HPTE_V_VRMA_MASK))
-				/* Can be hpte for 1TB Seg. So remove it */
-				plpar_pte_remove_raw(0, i, 0, &dummy1, &dummy2);
+	/* Read in batches of 4,
+	 * invalidate only valid entries not in the VRMA
+	 * hpte_count will be a multiple of 4
+         */
+	for (i = 0; i < hpte_count; i += 4) {
+		lpar_rc = plpar_pte_read_4_raw(0, i, (void *)ptes);
+		if (lpar_rc != H_SUCCESS)
+			continue;
+		for (j = 0; j < 4; j++){
+			if ((ptes[j].pteh & HPTE_V_VRMA_MASK) ==
+				HPTE_V_VRMA_MASK)
+				continue;
+			if (ptes[j].pteh & HPTE_V_VALID)
+				plpar_pte_remove_raw(0, i + j, 0,
+					&(ptes[j].pteh), &(ptes[j].ptel));
 		}
 	}
 }
@@ -418,17 +425,17 @@ static long pSeries_lpar_hpte_updatepp(unsigned long slot,
 
 	want_v = hpte_encode_avpn(va, psize, ssize);
 
-	pr_debug("    update: avpnv=%016lx, hash=%016lx, f=%lx, psize: %d ...",
+	pr_devel("    update: avpnv=%016lx, hash=%016lx, f=%lx, psize: %d ...",
 		 want_v, slot, flags, psize);
 
 	lpar_rc = plpar_pte_protect(flags, slot, want_v);
 
 	if (lpar_rc == H_NOT_FOUND) {
-		pr_debug("not found !\n");
+		pr_devel("not found !\n");
 		return -1;
 	}
 
-	pr_debug("ok\n");
+	pr_devel("ok\n");
 
 	BUG_ON(lpar_rc != H_SUCCESS);
 
@@ -503,7 +510,7 @@ static void pSeries_lpar_hpte_invalidate(unsigned long slot, unsigned long va,
 	unsigned long lpar_rc;
 	unsigned long dummy1, dummy2;
 
-	pr_debug("    inval : slot=%lx, va=%016lx, psize: %d, local: %d\n",
+	pr_devel("    inval : slot=%lx, va=%016lx, psize: %d, local: %d\n",
 		 slot, va, psize, local);
 
 	want_v = hpte_encode_avpn(va, psize, ssize);
@@ -609,3 +616,55 @@ void __init hpte_init_lpar(void)
 	ppc_md.flush_hash_range	= pSeries_lpar_flush_hash_range;
 	ppc_md.hpte_clear_all   = pSeries_lpar_hptab_clear;
 }
+
+#ifdef CONFIG_PPC_SMLPAR
+#define CMO_FREE_HINT_DEFAULT 1
+static int cmo_free_hint_flag = CMO_FREE_HINT_DEFAULT;
+
+static int __init cmo_free_hint(char *str)
+{
+	char *parm;
+	parm = strstrip(str);
+
+	if (strcasecmp(parm, "no") == 0 || strcasecmp(parm, "off") == 0) {
+		printk(KERN_INFO "cmo_free_hint: CMO free page hinting is not active.\n");
+		cmo_free_hint_flag = 0;
+		return 1;
+	}
+
+	cmo_free_hint_flag = 1;
+	printk(KERN_INFO "cmo_free_hint: CMO free page hinting is active.\n");
+
+	if (strcasecmp(parm, "yes") == 0 || strcasecmp(parm, "on") == 0)
+		return 1;
+
+	return 0;
+}
+
+__setup("cmo_free_hint=", cmo_free_hint);
+
+static void pSeries_set_page_state(struct page *page, int order,
+				   unsigned long state)
+{
+	int i, j;
+	unsigned long cmo_page_sz, addr;
+
+	cmo_page_sz = cmo_get_page_size();
+	addr = __pa((unsigned long)page_address(page));
+
+	for (i = 0; i < (1 << order); i++, addr += PAGE_SIZE) {
+		for (j = 0; j < PAGE_SIZE; j += cmo_page_sz)
+			plpar_hcall_norets(H_PAGE_INIT, state, addr + j, 0);
+	}
+}
+
+void arch_free_page(struct page *page, int order)
+{
+	if (!cmo_free_hint_flag || !firmware_has_feature(FW_FEATURE_CMO))
+		return;
+
+	pSeries_set_page_state(page, order, H_PAGE_SET_UNUSED);
+}
+EXPORT_SYMBOL(arch_free_page);
+
+#endif

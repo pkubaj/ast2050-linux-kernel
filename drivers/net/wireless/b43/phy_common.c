@@ -84,7 +84,7 @@ int b43_phy_init(struct b43_wldev *dev)
 
 	phy->channel = ops->get_default_chan(dev);
 
-	ops->software_rfkill(dev, RFKILL_STATE_UNBLOCKED);
+	ops->software_rfkill(dev, false);
 	err = ops->init(dev);
 	if (err) {
 		b43err(dev->wl, "PHY init failed\n");
@@ -104,7 +104,7 @@ err_phy_exit:
 	if (ops->exit)
 		ops->exit(dev);
 err_block_rf:
-	ops->software_rfkill(dev, RFKILL_STATE_SOFT_BLOCKED);
+	ops->software_rfkill(dev, true);
 
 	return err;
 }
@@ -113,7 +113,7 @@ void b43_phy_exit(struct b43_wldev *dev)
 {
 	const struct b43_phy_operations *ops = dev->phy.ops;
 
-	ops->software_rfkill(dev, RFKILL_STATE_SOFT_BLOCKED);
+	ops->software_rfkill(dev, true);
 	if (ops->exit)
 		ops->exit(dev);
 }
@@ -240,22 +240,44 @@ void b43_phy_write(struct b43_wldev *dev, u16 reg, u16 value)
 	dev->phy.ops->phy_write(dev, reg, value);
 }
 
+void b43_phy_copy(struct b43_wldev *dev, u16 destreg, u16 srcreg)
+{
+	assert_mac_suspended(dev);
+	dev->phy.ops->phy_write(dev, destreg,
+		dev->phy.ops->phy_read(dev, srcreg));
+}
+
 void b43_phy_mask(struct b43_wldev *dev, u16 offset, u16 mask)
 {
-	b43_phy_write(dev, offset,
-		      b43_phy_read(dev, offset) & mask);
+	if (dev->phy.ops->phy_maskset) {
+		assert_mac_suspended(dev);
+		dev->phy.ops->phy_maskset(dev, offset, mask, 0);
+	} else {
+		b43_phy_write(dev, offset,
+			      b43_phy_read(dev, offset) & mask);
+	}
 }
 
 void b43_phy_set(struct b43_wldev *dev, u16 offset, u16 set)
 {
-	b43_phy_write(dev, offset,
-		      b43_phy_read(dev, offset) | set);
+	if (dev->phy.ops->phy_maskset) {
+		assert_mac_suspended(dev);
+		dev->phy.ops->phy_maskset(dev, offset, 0xFFFF, set);
+	} else {
+		b43_phy_write(dev, offset,
+			      b43_phy_read(dev, offset) | set);
+	}
 }
 
 void b43_phy_maskset(struct b43_wldev *dev, u16 offset, u16 mask, u16 set)
 {
-	b43_phy_write(dev, offset,
-		      (b43_phy_read(dev, offset) & mask) | set);
+	if (dev->phy.ops->phy_maskset) {
+		assert_mac_suspended(dev);
+		dev->phy.ops->phy_maskset(dev, offset, mask, set);
+	} else {
+		b43_phy_write(dev, offset,
+			      (b43_phy_read(dev, offset) & mask) | set);
+	}
 }
 
 int b43_switch_channel(struct b43_wldev *dev, unsigned int new_channel)
@@ -295,18 +317,13 @@ err_restore_cookie:
 	return err;
 }
 
-void b43_software_rfkill(struct b43_wldev *dev, enum rfkill_state state)
+void b43_software_rfkill(struct b43_wldev *dev, bool blocked)
 {
 	struct b43_phy *phy = &dev->phy;
 
-	if (state == RFKILL_STATE_HARD_BLOCKED) {
-		/* We cannot hardware-block the device */
-		state = RFKILL_STATE_SOFT_BLOCKED;
-	}
-
 	b43_mac_suspend(dev);
-	phy->ops->software_rfkill(dev, state);
-	phy->radio_on = (state == RFKILL_STATE_UNBLOCKED);
+	phy->ops->software_rfkill(dev, blocked);
+	phy->radio_on = !blocked;
 	b43_mac_enable(dev);
 }
 
@@ -330,7 +347,6 @@ void b43_phy_txpower_adjust_work(struct work_struct *work)
 	mutex_unlock(&wl->mutex);
 }
 
-/* Called with wl->irq_lock locked */
 void b43_phy_txpower_check(struct b43_wldev *dev, unsigned int flags)
 {
 	struct b43_phy *phy = &dev->phy;
@@ -357,7 +373,7 @@ void b43_phy_txpower_check(struct b43_wldev *dev, unsigned int flags)
 
 	/* We must adjust the transmission power in hardware.
 	 * Schedule b43_phy_txpower_adjust_work(). */
-	queue_work(dev->wl->hw->workqueue, &dev->wl->txpower_adjust_work);
+	ieee80211_queue_work(dev->wl->hw, &dev->wl->txpower_adjust_work);
 }
 
 int b43_phy_shm_tssi_read(struct b43_wldev *dev, u16 shm_offset)

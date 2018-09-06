@@ -83,23 +83,16 @@ void rds_iw_add_one(struct ib_device *device)
 	rds_iwdev->max_wrs = dev_attr->max_qp_wr;
 	rds_iwdev->max_sge = min(dev_attr->max_sge, RDS_IW_MAX_SGE);
 
-	rds_iwdev->page_shift = max(PAGE_SHIFT, ffs(dev_attr->page_size_cap) - 1);
-
 	rds_iwdev->dev = device;
 	rds_iwdev->pd = ib_alloc_pd(device);
 	if (IS_ERR(rds_iwdev->pd))
 		goto free_dev;
 
 	if (!rds_iwdev->dma_local_lkey) {
-		if (device->node_type != RDMA_NODE_RNIC) {
-			rds_iwdev->mr = ib_get_dma_mr(rds_iwdev->pd,
-						IB_ACCESS_LOCAL_WRITE);
-		} else {
-			rds_iwdev->mr = ib_get_dma_mr(rds_iwdev->pd,
-						IB_ACCESS_REMOTE_READ |
-						IB_ACCESS_REMOTE_WRITE |
-						IB_ACCESS_LOCAL_WRITE);
-		}
+		rds_iwdev->mr = ib_get_dma_mr(rds_iwdev->pd,
+					IB_ACCESS_REMOTE_READ |
+					IB_ACCESS_REMOTE_WRITE |
+					IB_ACCESS_LOCAL_WRITE);
 		if (IS_ERR(rds_iwdev->mr))
 			goto err_pd;
 	} else
@@ -233,8 +226,8 @@ static int rds_iw_laddr_check(__be32 addr)
 	 * IB and iWARP capable NICs.
 	 */
 	cm_id = rdma_create_id(NULL, NULL, RDMA_PS_TCP);
-	if (!cm_id)
-		return -EADDRNOTAVAIL;
+	if (IS_ERR(cm_id))
+		return PTR_ERR(cm_id);
 
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
@@ -244,7 +237,8 @@ static int rds_iw_laddr_check(__be32 addr)
 	ret = rdma_bind_addr(cm_id, (struct sockaddr *)&sin);
 	/* due to this, we will claim to support IB devices unless we
 	   check node_type. */
-	if (ret || cm_id->device->node_type != RDMA_NODE_RNIC)
+	if (ret || !cm_id->device ||
+	    cm_id->device->node_type != RDMA_NODE_RNIC)
 		ret = -EADDRNOTAVAIL;
 
 	rdsdebug("addr %pI4 ret %d node type %d\n",
@@ -291,6 +285,7 @@ struct rds_transport rds_iw_transport = {
 	.flush_mrs		= rds_iw_flush_mrs,
 	.t_owner		= THIS_MODULE,
 	.t_name			= "iwarp",
+	.t_type			= RDS_TRANS_IWARP,
 	.t_prefer_loopback	= 1,
 };
 

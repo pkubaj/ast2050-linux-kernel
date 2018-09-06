@@ -62,6 +62,7 @@ cmd triggers supported:
 
 */
 
+#include <linux/interrupt.h>
 #include "../comedidev.h"
 
 #include <linux/ioport.h>
@@ -72,7 +73,7 @@ cmd triggers supported:
 
 #define DAS800_SIZE           8
 #define TIMER_BASE            1000
-#define N_CHAN_AI             8	// number of analog input channels
+#define N_CHAN_AI             8	/*  number of analog input channels */
 
 /* Registers for the das800 */
 
@@ -94,8 +95,8 @@ cmd triggers supported:
 #define   IRQ                   0x8
 #define   BUSY                  0x80
 #define DAS800_GAIN           3
-#define   CIO_FFOV              0x8	// fifo overflow for cio-das802/16
-#define   CIO_ENHF              0x90	// interrupt fifo half full for cio-das802/16
+#define   CIO_FFOV              0x8	/*  fifo overflow for cio-das802/16 */
+#define   CIO_ENHF              0x90	/*  interrupt fifo half full for cio-das802/16 */
 #define   CONTROL1              0x80
 #define   CONV_CONTROL          0xa0
 #define   SCAN_LIMITS           0xc0
@@ -113,118 +114,118 @@ struct das800_board {
 	int resolution;
 };
 
-//analog input ranges
+/* analog input ranges */
 static const struct comedi_lrange range_das800_ai = {
 	1,
 	{
-			RANGE(-5, 5),
-		}
+	 RANGE(-5, 5),
+	 }
 };
 
 static const struct comedi_lrange range_das801_ai = {
 	9,
 	{
-			RANGE(-5, 5),
-			RANGE(-10, 10),
-			RANGE(0, 10),
-			RANGE(-0.5, 0.5),
-			RANGE(0, 1),
-			RANGE(-0.05, 0.05),
-			RANGE(0, 0.1),
-			RANGE(-0.01, 0.01),
-			RANGE(0, 0.02),
-		}
+	 RANGE(-5, 5),
+	 RANGE(-10, 10),
+	 RANGE(0, 10),
+	 RANGE(-0.5, 0.5),
+	 RANGE(0, 1),
+	 RANGE(-0.05, 0.05),
+	 RANGE(0, 0.1),
+	 RANGE(-0.01, 0.01),
+	 RANGE(0, 0.02),
+	 }
 };
 
 static const struct comedi_lrange range_cio_das801_ai = {
 	9,
 	{
-			RANGE(-5, 5),
-			RANGE(-10, 10),
-			RANGE(0, 10),
-			RANGE(-0.5, 0.5),
-			RANGE(0, 1),
-			RANGE(-0.05, 0.05),
-			RANGE(0, 0.1),
-			RANGE(-0.005, 0.005),
-			RANGE(0, 0.01),
-		}
+	 RANGE(-5, 5),
+	 RANGE(-10, 10),
+	 RANGE(0, 10),
+	 RANGE(-0.5, 0.5),
+	 RANGE(0, 1),
+	 RANGE(-0.05, 0.05),
+	 RANGE(0, 0.1),
+	 RANGE(-0.005, 0.005),
+	 RANGE(0, 0.01),
+	 }
 };
 
 static const struct comedi_lrange range_das802_ai = {
 	9,
 	{
-			RANGE(-5, 5),
-			RANGE(-10, 10),
-			RANGE(0, 10),
-			RANGE(-2.5, 2.5),
-			RANGE(0, 5),
-			RANGE(-1.25, 1.25),
-			RANGE(0, 2.5),
-			RANGE(-0.625, 0.625),
-			RANGE(0, 1.25),
-		}
+	 RANGE(-5, 5),
+	 RANGE(-10, 10),
+	 RANGE(0, 10),
+	 RANGE(-2.5, 2.5),
+	 RANGE(0, 5),
+	 RANGE(-1.25, 1.25),
+	 RANGE(0, 2.5),
+	 RANGE(-0.625, 0.625),
+	 RANGE(0, 1.25),
+	 }
 };
 
 static const struct comedi_lrange range_das80216_ai = {
 	8,
 	{
-			RANGE(-10, 10),
-			RANGE(0, 10),
-			RANGE(-5, 5),
-			RANGE(0, 5),
-			RANGE(-2.5, 2.5),
-			RANGE(0, 2.5),
-			RANGE(-1.25, 1.25),
-			RANGE(0, 1.25),
-		}
+	 RANGE(-10, 10),
+	 RANGE(0, 10),
+	 RANGE(-5, 5),
+	 RANGE(0, 5),
+	 RANGE(-2.5, 2.5),
+	 RANGE(0, 2.5),
+	 RANGE(-1.25, 1.25),
+	 RANGE(0, 1.25),
+	 }
 };
 
 enum { das800, ciodas800, das801, ciodas801, das802, ciodas802, ciodas80216 };
 
 static const struct das800_board das800_boards[] = {
 	{
-	      name:	"das-800",
-	      ai_speed:25000,
-	      ai_range:&range_das800_ai,
-	      resolution:12,
-		},
+	 .name = "das-800",
+	 .ai_speed = 25000,
+	 .ai_range = &range_das800_ai,
+	 .resolution = 12,
+	 },
 	{
-	      name:	"cio-das800",
-	      ai_speed:20000,
-	      ai_range:&range_das800_ai,
-	      resolution:12,
-		},
+	 .name = "cio-das800",
+	 .ai_speed = 20000,
+	 .ai_range = &range_das800_ai,
+	 .resolution = 12,
+	 },
 	{
-	      name:	"das-801",
-	      ai_speed:25000,
-	      ai_range:&range_das801_ai,
-	      resolution:12,
-		},
+	 .name = "das-801",
+	 .ai_speed = 25000,
+	 .ai_range = &range_das801_ai,
+	 .resolution = 12,
+	 },
 	{
-	      name:	"cio-das801",
-	      ai_speed:20000,
-	      ai_range:&range_cio_das801_ai,
-	      resolution:12,
-		},
+	 .name = "cio-das801",
+	 .ai_speed = 20000,
+	 .ai_range = &range_cio_das801_ai,
+	 .resolution = 12,
+	 },
 	{
-	      name:	"das-802",
-	      ai_speed:25000,
-	      ai_range:&range_das802_ai,
-	      resolution:12,
-		},
+	 .name = "das-802",
+	 .ai_speed = 25000,
+	 .ai_range = &range_das802_ai,
+	 .resolution = 12,
+	 },
 	{
-	      name:	"cio-das802",
-	      ai_speed:20000,
-	      ai_range:&range_das802_ai,
-	      resolution:12,
-		},
+	 .name = "cio-das802",
+	 .ai_speed = 20000,
+	 .ai_range = &range_das802_ai,
+	 .resolution = 12,
+	 },
 	{
-	      name:	"cio-das802/16",
-	      ai_speed:10000,
-	      ai_range:&range_das80216_ai,
-	      resolution:16,
-		},
+	 .name = "cio-das802/16",
+	 .ai_speed = 10000,
+	 .ai_range = &range_das80216_ai,
+	 .resolution = 16,
+	 },
 };
 
 /*
@@ -242,47 +243,53 @@ struct das800_private {
 
 #define devpriv ((struct das800_private *)dev->private)
 
-static int das800_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int das800_detach(struct comedi_device * dev);
-static int das800_cancel(struct comedi_device * dev, struct comedi_subdevice * s);
+static int das800_attach(struct comedi_device *dev,
+			 struct comedi_devconfig *it);
+static int das800_detach(struct comedi_device *dev);
+static int das800_cancel(struct comedi_device *dev, struct comedi_subdevice *s);
 
 static struct comedi_driver driver_das800 = {
-      driver_name:"das800",
-      module:THIS_MODULE,
-      attach:das800_attach,
-      detach:das800_detach,
-      num_names:sizeof(das800_boards) / sizeof(struct das800_board),
-      board_name:&das800_boards[0].name,
-      offset:sizeof(struct das800_board),
+	.driver_name = "das800",
+	.module = THIS_MODULE,
+	.attach = das800_attach,
+	.detach = das800_detach,
+	.num_names = ARRAY_SIZE(das800_boards),
+	.board_name = &das800_boards[0].name,
+	.offset = sizeof(struct das800_board),
 };
 
-static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG);
-static void enable_das800(struct comedi_device * dev);
-static void disable_das800(struct comedi_device * dev);
-static int das800_ai_do_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd);
-static int das800_ai_do_cmd(struct comedi_device * dev, struct comedi_subdevice * s);
-static int das800_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int das800_di_rbits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int das800_do_wbits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int das800_probe(struct comedi_device * dev);
-static int das800_set_frequency(struct comedi_device * dev);
+static irqreturn_t das800_interrupt(int irq, void *d);
+static void enable_das800(struct comedi_device *dev);
+static void disable_das800(struct comedi_device *dev);
+static int das800_ai_do_cmdtest(struct comedi_device *dev,
+				struct comedi_subdevice *s,
+				struct comedi_cmd *cmd);
+static int das800_ai_do_cmd(struct comedi_device *dev,
+			    struct comedi_subdevice *s);
+static int das800_ai_rinsn(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data);
+static int das800_di_rbits(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data);
+static int das800_do_wbits(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data);
+static int das800_probe(struct comedi_device *dev);
+static int das800_set_frequency(struct comedi_device *dev);
 
 /* checks and probes das-800 series board type */
-static int das800_probe(struct comedi_device * dev)
+static int das800_probe(struct comedi_device *dev)
 {
 	int id_bits;
 	unsigned long irq_flags;
 	int board;
 
-	// 'comedi spin lock irqsave' disables even rt interrupts, we use them to protect indirect addressing
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	/*  'comedi spin lock irqsave' disables even rt interrupts, we use them to protect indirect addressing */
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(ID, dev->iobase + DAS800_GAIN);	/* select base address + 7 to be ID register */
 	id_bits = inb(dev->iobase + DAS800_ID) & 0x3;	/* get id bits */
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 
 	board = thisboard - das800_boards;
 
@@ -329,7 +336,7 @@ static int das800_probe(struct comedi_device * dev)
 		break;
 	default:
 		printk(" Board model: probe returned 0x%x (unknown)\n",
-			id_bits);
+		       id_bits);
 		return board;
 		break;
 	}
@@ -343,7 +350,7 @@ static int das800_probe(struct comedi_device * dev)
 COMEDI_INITCLEANUP(driver_das800);
 
 /* interrupt service routine */
-static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
+static irqreturn_t das800_interrupt(int irq, void *d)
 {
 	short i;		/* loop index */
 	short dataPoint = 0;
@@ -352,8 +359,8 @@ static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
 	struct comedi_async *async;
 	int status;
 	unsigned long irq_flags;
-	static const int max_loops = 128;	// half-fifo size for cio-das802/16
-	// flags
+	static const int max_loops = 128;	/*  half-fifo size for cio-das802/16 */
+	/*  flags */
 	int fifo_empty = 0;
 	int fifo_overflow = 0;
 
@@ -369,13 +376,13 @@ static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
 	 */
 	async = s->async;
 
-	// if hardware conversions are not enabled, then quit
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	/*  if hardware conversions are not enabled, then quit */
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(CONTROL1, dev->iobase + DAS800_GAIN);	/* select base address + 7 to be STATUS2 register */
 	status = inb(dev->iobase + DAS800_STATUS2) & STATUS2_HCEN;
 	/* don't release spinlock yet since we want to make sure noone else disables hardware conversions */
 	if (status == 0) {
-		comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+		spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 		return IRQ_HANDLED;
 	}
 
@@ -390,7 +397,7 @@ static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
 			if (fifo_overflow)
 				break;
 		} else {
-			fifo_empty = 0;	// cio-das802/16 has no fifo empty status bit
+			fifo_empty = 0;	/*  cio-das802/16 has no fifo empty status bit */
 		}
 		if (fifo_empty) {
 			break;
@@ -410,12 +417,12 @@ static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
 	/* check for fifo overflow */
 	if (thisboard->resolution == 12) {
 		fifo_overflow = dataPoint & FIFO_OVF;
-		// else cio-das802/16
+		/*  else cio-das802/16 */
 	} else {
 		fifo_overflow = inb(dev->iobase + DAS800_GAIN) & CIO_FFOV;
 	}
 	if (fifo_overflow) {
-		comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+		spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 		comedi_error(dev, "DAS800 FIFO overflow");
 		das800_cancel(dev, dev->subdevices + 0);
 		async->events |= COMEDI_CB_ERROR | COMEDI_CB_EOA;
@@ -428,11 +435,11 @@ static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
 		 * We already have spinlock, so indirect addressing is safe */
 		outb(CONTROL1, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be control register 1 */
 		outb(CONTROL1_INTE | devpriv->do_bits,
-			dev->iobase + DAS800_CONTROL1);
-		comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+		     dev->iobase + DAS800_CONTROL1);
+		spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 		/* otherwise, stop taking data */
 	} else {
-		comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+		spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 		disable_das800(dev);	/* diable hardware triggered conversions */
 		async->events |= COMEDI_CB_EOA;
 	}
@@ -441,7 +448,7 @@ static irqreturn_t das800_interrupt(int irq, void *d PT_REGS_ARG)
 	return IRQ_HANDLED;
 }
 
-static int das800_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int das800_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 	unsigned long iobase = it->options[0];
@@ -484,7 +491,7 @@ static int das800_attach(struct comedi_device * dev, struct comedi_devconfig * i
 		return -EINVAL;
 	}
 	if (irq) {
-		if (comedi_request_irq(irq, das800_interrupt, 0, "das800", dev)) {
+		if (request_irq(irq, das800_interrupt, 0, "das800", dev)) {
 			printk("unable to allocate irq %u\n", irq);
 			return -EINVAL;
 		}
@@ -531,15 +538,15 @@ static int das800_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	disable_das800(dev);
 
 	/* initialize digital out channels */
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(CONTROL1, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be control register 1 */
 	outb(CONTROL1_INTE | devpriv->do_bits, dev->iobase + DAS800_CONTROL1);
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 
 	return 0;
 };
 
-static int das800_detach(struct comedi_device * dev)
+static int das800_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: das800: remove\n", dev->minor);
 
@@ -547,11 +554,11 @@ static int das800_detach(struct comedi_device * dev)
 	if (dev->iobase)
 		release_region(dev->iobase, DAS800_SIZE);
 	if (dev->irq)
-		comedi_free_irq(dev->irq, dev);
+		free_irq(dev->irq, dev);
 	return 0;
 };
 
-static int das800_cancel(struct comedi_device * dev, struct comedi_subdevice * s)
+static int das800_cancel(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	devpriv->forever = 0;
 	devpriv->count = 0;
@@ -560,32 +567,33 @@ static int das800_cancel(struct comedi_device * dev, struct comedi_subdevice * s
 }
 
 /* enable_das800 makes the card start taking hardware triggered conversions */
-static void enable_das800(struct comedi_device * dev)
+static void enable_das800(struct comedi_device *dev)
 {
 	unsigned long irq_flags;
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
-	// enable fifo-half full interrupts for cio-das802/16
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
+	/*  enable fifo-half full interrupts for cio-das802/16 */
 	if (thisboard->resolution == 16)
 		outb(CIO_ENHF, dev->iobase + DAS800_GAIN);
 	outb(CONV_CONTROL, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be conversion control register */
 	outb(CONV_HCEN, dev->iobase + DAS800_CONV_CONTROL);	/* enable hardware triggering */
 	outb(CONTROL1, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be control register 1 */
 	outb(CONTROL1_INTE | devpriv->do_bits, dev->iobase + DAS800_CONTROL1);	/* enable card's interrupt */
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 }
 
 /* disable_das800 stops hardware triggered conversions */
-static void disable_das800(struct comedi_device * dev)
+static void disable_das800(struct comedi_device *dev)
 {
 	unsigned long irq_flags;
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(CONV_CONTROL, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be conversion control register */
 	outb(0x0, dev->iobase + DAS800_CONV_CONTROL);	/* disable hardware triggering of conversions */
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 }
 
-static int das800_ai_do_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd)
+static int das800_ai_do_cmdtest(struct comedi_device *dev,
+				struct comedi_subdevice *s,
+				struct comedi_cmd *cmd)
 {
 	int err = 0;
 	int tmp;
@@ -675,8 +683,9 @@ static int das800_ai_do_cmdtest(struct comedi_device * dev, struct comedi_subdev
 		tmp = cmd->convert_arg;
 		/* calculate counter values that give desired timing */
 		i8253_cascade_ns_to_timer_2div(TIMER_BASE, &(devpriv->divisor1),
-			&(devpriv->divisor2), &(cmd->convert_arg),
-			cmd->flags & TRIG_ROUND_MASK);
+					       &(devpriv->divisor2),
+					       &(cmd->convert_arg),
+					       cmd->flags & TRIG_ROUND_MASK);
 		if (tmp != cmd->convert_arg)
 			err++;
 	}
@@ -684,20 +693,20 @@ static int das800_ai_do_cmdtest(struct comedi_device * dev, struct comedi_subdev
 	if (err)
 		return 4;
 
-	// check channel/gain list against card's limitations
+	/*  check channel/gain list against card's limitations */
 	if (cmd->chanlist) {
 		gain = CR_RANGE(cmd->chanlist[0]);
 		startChan = CR_CHAN(cmd->chanlist[0]);
 		for (i = 1; i < cmd->chanlist_len; i++) {
 			if (CR_CHAN(cmd->chanlist[i]) !=
-				(startChan + i) % N_CHAN_AI) {
+			    (startChan + i) % N_CHAN_AI) {
 				comedi_error(dev,
-					"entries in chanlist must be consecutive channels, counting upwards\n");
+					     "entries in chanlist must be consecutive channels, counting upwards\n");
 				err++;
 			}
 			if (CR_RANGE(cmd->chanlist[i]) != gain) {
 				comedi_error(dev,
-					"entries in chanlist must all have the same gain\n");
+					     "entries in chanlist must all have the same gain\n");
 				err++;
 			}
 		}
@@ -709,7 +718,8 @@ static int das800_ai_do_cmdtest(struct comedi_device * dev, struct comedi_subdev
 	return 0;
 }
 
-static int das800_ai_do_cmd(struct comedi_device * dev, struct comedi_subdevice * s)
+static int das800_ai_do_cmd(struct comedi_device *dev,
+			    struct comedi_subdevice *s)
 {
 	int startChan, endChan, scan, gain;
 	int conv_bits;
@@ -718,7 +728,7 @@ static int das800_ai_do_cmd(struct comedi_device * dev, struct comedi_subdevice 
 
 	if (!dev->irq) {
 		comedi_error(dev,
-			"no irq assigned for das-800, cannot do hardware conversions");
+			     "no irq assigned for das-800, cannot do hardware conversions");
 		return -1;
 	}
 
@@ -729,10 +739,10 @@ static int das800_ai_do_cmd(struct comedi_device * dev, struct comedi_subdevice 
 	endChan = (startChan + async->cmd.chanlist_len - 1) % 8;
 	scan = (endChan << 3) | startChan;
 
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(SCAN_LIMITS, dev->iobase + DAS800_GAIN);	/* select base address + 2 to be scan limits register */
 	outb(scan, dev->iobase + DAS800_SCAN_LIMITS);	/* set scan limits */
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 
 	/* set gain */
 	gain = CR_RANGE(async->cmd.chanlist[0]);
@@ -766,8 +776,10 @@ static int das800_ai_do_cmd(struct comedi_device * dev, struct comedi_subdevice 
 		conv_bits |= CASC | ITE;
 		/* set conversion frequency */
 		i8253_cascade_ns_to_timer_2div(TIMER_BASE, &(devpriv->divisor1),
-			&(devpriv->divisor2), &(async->cmd.convert_arg),
-			async->cmd.flags & TRIG_ROUND_MASK);
+					       &(devpriv->divisor2),
+					       &(async->cmd.convert_arg),
+					       async->cmd.
+					       flags & TRIG_ROUND_MASK);
 		if (das800_set_frequency(dev) < 0) {
 			comedi_error(dev, "Error setting up counters");
 			return -1;
@@ -779,17 +791,18 @@ static int das800_ai_do_cmd(struct comedi_device * dev, struct comedi_subdevice 
 		break;
 	}
 
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(CONV_CONTROL, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be conversion control register */
 	outb(conv_bits, dev->iobase + DAS800_CONV_CONTROL);
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 	async->events = 0;
 	enable_das800(dev);
 	return 0;
 }
 
-static int das800_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int das800_ai_rinsn(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data)
 {
 	int i, n;
 	int chan;
@@ -803,10 +816,10 @@ static int das800_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice *
 	/* set multiplexer */
 	chan = CR_CHAN(insn->chanspec);
 
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(CONTROL1, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be control register 1 */
 	outb(chan | devpriv->do_bits, dev->iobase + DAS800_CONTROL1);
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 
 	/* set gain / range */
 	range = CR_RANGE(insn->chanspec);
@@ -815,7 +828,7 @@ static int das800_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice *
 	range &= 0xf;
 	outb(range, dev->iobase + DAS800_GAIN);
 
-	comedi_udelay(5);
+	udelay(5);
 
 	for (n = 0; n < insn->n; n++) {
 		/* trigger conversion */
@@ -842,8 +855,9 @@ static int das800_ai_rinsn(struct comedi_device * dev, struct comedi_subdevice *
 	return n;
 }
 
-static int das800_di_rbits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int das800_di_rbits(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data)
 {
 	unsigned int bits;
 
@@ -855,23 +869,24 @@ static int das800_di_rbits(struct comedi_device * dev, struct comedi_subdevice *
 	return 2;
 }
 
-static int das800_do_wbits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int das800_do_wbits(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data)
 {
 	int wbits;
 	unsigned long irq_flags;
 
-	// only set bits that have been masked
+	/*  only set bits that have been masked */
 	data[0] &= 0xf;
 	wbits = devpriv->do_bits >> 4;
 	wbits &= ~data[0];
 	wbits |= data[0] & data[1];
 	devpriv->do_bits = wbits << 4;
 
-	comedi_spin_lock_irqsave(&dev->spinlock, irq_flags);
+	spin_lock_irqsave(&dev->spinlock, irq_flags);
 	outb(CONTROL1, dev->iobase + DAS800_GAIN);	/* select dev->iobase + 2 to be control register 1 */
 	outb(devpriv->do_bits | CONTROL1_INTE, dev->iobase + DAS800_CONTROL1);
-	comedi_spin_unlock_irqrestore(&dev->spinlock, irq_flags);
+	spin_unlock_irqrestore(&dev->spinlock, irq_flags);
 
 	data[1] = wbits;
 
@@ -879,7 +894,7 @@ static int das800_do_wbits(struct comedi_device * dev, struct comedi_subdevice *
 }
 
 /* loads counters with divisor1, divisor2 from private structure */
-static int das800_set_frequency(struct comedi_device * dev)
+static int das800_set_frequency(struct comedi_device *dev)
 {
 	int err = 0;
 

@@ -21,22 +21,20 @@
 #include "vhci.h"
 
 
-/* get URB from transmitted urb queue */
-static struct urb *pickup_urb_and_free_priv(struct vhci_device *vdev,
+/* get URB from transmitted urb queue. caller must hold vdev->priv_lock */
+struct urb *pickup_urb_and_free_priv(struct vhci_device *vdev,
 					    __u32 seqnum)
 {
 	struct vhci_priv *priv, *tmp;
 	struct urb *urb = NULL;
 	int status;
 
-	spin_lock(&vdev->priv_lock);
-
 	list_for_each_entry_safe(priv, tmp, &vdev->priv_rx, list) {
 		if (priv->seqnum == seqnum) {
 			urb = priv->urb;
 			status = urb->status;
 
-			dbg_vhci_rx("find urb %p vurb %p seqnum %u\n",
+			usbip_dbg_vhci_rx("find urb %p vurb %p seqnum %u\n",
 				    urb, priv, seqnum);
 
 			/* TODO: fix logic here to improve indent situtation */
@@ -61,8 +59,6 @@ static struct urb *pickup_urb_and_free_priv(struct vhci_device *vdev,
 		}
 	}
 
-	spin_unlock(&vdev->priv_lock);
-
 	return urb;
 }
 
@@ -71,14 +67,19 @@ static void vhci_recv_ret_submit(struct vhci_device *vdev,
 {
 	struct usbip_device *ud = &vdev->ud;
 	struct urb *urb;
+	unsigned long flags;
 
+	spin_lock(&vdev->priv_lock);
 
 	urb = pickup_urb_and_free_priv(vdev, pdu->base.seqnum);
 
+	spin_unlock(&vdev->priv_lock);
 
 	if (!urb) {
-		uerr("cannot find a urb of seqnum %u\n", pdu->base.seqnum);
-		uinfo("max seqnum %d\n", atomic_read(&the_controller->seqnum));
+		usbip_uerr("cannot find a urb of seqnum %u\n",
+							pdu->base.seqnum);
+		usbip_uinfo("max seqnum %d\n",
+					atomic_read(&the_controller->seqnum));
 		usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
 		return;
 	}
@@ -97,21 +98,24 @@ static void vhci_recv_ret_submit(struct vhci_device *vdev,
 	if (usbip_recv_iso(ud, urb) < 0)
 		return;
 
+	/* restore the padding in iso packets */
+	if (usbip_pad_iso(ud, urb) < 0)
+		return;
 
-	if (dbg_flag_vhci_rx)
+	if (usbip_dbg_flag_vhci_rx)
 		usbip_dump_urb(urb);
 
 
-	dbg_vhci_rx("now giveback urb %p\n", urb);
+	usbip_dbg_vhci_rx("now giveback urb %p\n", urb);
 
-	spin_lock(&the_controller->lock);
+	spin_lock_irqsave(&the_controller->lock, flags);
 	usb_hcd_unlink_urb_from_ep(vhci_to_hcd(the_controller), urb);
-	spin_unlock(&the_controller->lock);
+	spin_unlock_irqrestore(&the_controller->lock, flags);
 
 	usb_hcd_giveback_urb(vhci_to_hcd(the_controller), urb, urb->status);
 
 
-	dbg_vhci_rx("Leave\n");
+	usbip_dbg_vhci_rx("Leave\n");
 
 	return;
 }
@@ -125,9 +129,9 @@ static struct vhci_unlink *dequeue_pending_unlink(struct vhci_device *vdev,
 	spin_lock(&vdev->priv_lock);
 
 	list_for_each_entry_safe(unlink, tmp, &vdev->unlink_rx, list) {
-		uinfo("unlink->seqnum %lu\n", unlink->seqnum);
+		usbip_uinfo("unlink->seqnum %lu\n", unlink->seqnum);
 		if (unlink->seqnum == pdu->base.seqnum) {
-			dbg_vhci_rx("found pending unlink, %lu\n",
+			usbip_dbg_vhci_rx("found pending unlink, %lu\n",
 							unlink->seqnum);
 			list_del(&unlink->list);
 
@@ -147,34 +151,41 @@ static void vhci_recv_ret_unlink(struct vhci_device *vdev,
 {
 	struct vhci_unlink *unlink;
 	struct urb *urb;
+	unsigned long flags;
 
 	usbip_dump_header(pdu);
 
 	unlink = dequeue_pending_unlink(vdev, pdu);
 	if (!unlink) {
-		uinfo("cannot find the pending unlink %u\n", pdu->base.seqnum);
+		usbip_uinfo("cannot find the pending unlink %u\n",
+							pdu->base.seqnum);
 		return;
 	}
 
+	spin_lock(&vdev->priv_lock);
+
 	urb = pickup_urb_and_free_priv(vdev, unlink->unlink_seqnum);
+
+	spin_unlock(&vdev->priv_lock);
+
 	if (!urb) {
 		/*
 		 * I get the result of a unlink request. But, it seems that I
 		 * already received the result of its submit result and gave
 		 * back the URB.
 		 */
-		uinfo("the urb (seqnum %d) was already given backed\n",
+		usbip_uinfo("the urb (seqnum %d) was already given backed\n",
 							pdu->base.seqnum);
 	} else {
-		dbg_vhci_rx("now giveback urb %p\n", urb);
+		usbip_dbg_vhci_rx("now giveback urb %p\n", urb);
 
 		/* If unlink is succeed, status is -ECONNRESET */
 		urb->status = pdu->u.ret_unlink.status;
-		uinfo("%d\n", urb->status);
+		usbip_uinfo("%d\n", urb->status);
 
-		spin_lock(&the_controller->lock);
+		spin_lock_irqsave(&the_controller->lock, flags);
 		usb_hcd_unlink_urb_from_ep(vhci_to_hcd(the_controller), urb);
-		spin_unlock(&the_controller->lock);
+		spin_unlock_irqrestore(&the_controller->lock, flags);
 
 		usb_hcd_giveback_urb(vhci_to_hcd(the_controller), urb,
 								urb->status);
@@ -193,7 +204,7 @@ static void vhci_rx_pdu(struct usbip_device *ud)
 	struct vhci_device *vdev = container_of(ud, struct vhci_device, ud);
 
 
-	dbg_vhci_rx("Enter\n");
+	usbip_dbg_vhci_rx("Enter\n");
 
 	memset(&pdu, 0, sizeof(pdu));
 
@@ -201,15 +212,15 @@ static void vhci_rx_pdu(struct usbip_device *ud)
 	/* 1. receive a pdu header */
 	ret = usbip_xmit(0, ud->tcp_socket, (char *) &pdu, sizeof(pdu), 0);
 	if (ret != sizeof(pdu)) {
-		uerr("receiving pdu failed! size is %d, should be %d\n",
-				ret, (unsigned int)sizeof(pdu));
+		usbip_uerr("receiving pdu failed! size is %d, should be %d\n",
+					ret, (unsigned int)sizeof(pdu));
 		usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
 		return;
 	}
 
 	usbip_header_correct_endian(&pdu, 0);
 
-	if (dbg_flag_vhci_rx)
+	if (usbip_dbg_flag_vhci_rx)
 		usbip_dump_header(&pdu);
 
 	switch (pdu.base.command) {
@@ -221,7 +232,7 @@ static void vhci_rx_pdu(struct usbip_device *ud)
 		break;
 	default:
 		/* NOTREACHED */
-		uerr("unknown pdu %u\n", pdu.base.command);
+		usbip_uerr("unknown pdu %u\n", pdu.base.command);
 		usbip_dump_header(&pdu);
 		usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
 	}
@@ -237,12 +248,12 @@ void vhci_rx_loop(struct usbip_task *ut)
 
 	while (1) {
 		if (signal_pending(current)) {
-			dbg_vhci_rx("signal catched!\n");
+			usbip_dbg_vhci_rx("signal catched!\n");
 			break;
 		}
 
 
-		if (usbip_event_happend(ud))
+		if (usbip_event_happened(ud))
 			break;
 
 		vhci_rx_pdu(ud);

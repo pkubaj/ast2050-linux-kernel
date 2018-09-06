@@ -229,7 +229,7 @@ static void pppol2tp_tunnel_free(struct pppol2tp_tunnel *tunnel);
 static atomic_t pppol2tp_tunnel_count;
 static atomic_t pppol2tp_session_count;
 static struct ppp_channel_ops pppol2tp_chan_ops = { pppol2tp_xmit , NULL };
-static struct proto_ops pppol2tp_ops;
+static const struct proto_ops pppol2tp_ops;
 
 /* per-net private data for this module */
 static int pppol2tp_net_id;
@@ -433,8 +433,7 @@ static void pppol2tp_recv_dequeue_skb(struct pppol2tp_session *session, struct s
 		 *   to the inner packet either
 		 */
 		secpath_reset(skb);
-		dst_release(skb->dst);
-		skb->dst = NULL;
+		skb_dst_drop(skb);
 		nf_reset(skb);
 
 		po = pppox_sk(session_sock);
@@ -757,6 +756,7 @@ static int pppol2tp_recv_core(struct sock *sock, struct sk_buff *skb)
 
 	/* Try to dequeue as many skbs from reorder_q as we can. */
 	pppol2tp_recv_dequeue(session);
+	sock_put(sock);
 
 	return 0;
 
@@ -773,6 +773,7 @@ discard_bad_csum:
 	UDP_INC_STATS_USER(&init_net, UDP_MIB_INERRORS, 0);
 	tunnel->stats.rx_errors++;
 	kfree_skb(skb);
+	sock_put(sock);
 
 	return 0;
 
@@ -827,8 +828,6 @@ static int pppol2tp_recvmsg(struct kiocb *iocb, struct socket *sock,
 	err = -EIO;
 	if (sk->sk_state & PPPOX_BOUND)
 		goto end;
-
-	msg->msg_namelen = 0;
 
 	err = 0;
 	skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT,
@@ -976,7 +975,8 @@ static int pppol2tp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msgh
 	/* Calculate UDP checksum if configured to do so */
 	if (sk_tun->sk_no_check == UDP_CSUM_NOXMIT)
 		skb->ip_summed = CHECKSUM_NONE;
-	else if (!(skb->dst->dev->features & NETIF_F_V4_CSUM)) {
+	else if ((skb_dst(skb) && skb_dst(skb)->dev) &&
+		 (!(skb_dst(skb)->dev->features & NETIF_F_V4_CSUM))) {
 		skb->ip_summed = CHECKSUM_COMPLETE;
 		csum = skb_checksum(skb, 0, udp_len, 0);
 		uh->check = csum_tcpudp_magic(inet->saddr, inet->daddr,
@@ -1172,14 +1172,15 @@ static int pppol2tp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 	nf_reset(skb);
 
 	/* Get routing info from the tunnel socket */
-	dst_release(skb->dst);
-	skb->dst = dst_clone(__sk_dst_get(sk_tun));
+	skb_dst_drop(skb);
+	skb_dst_set(skb, dst_clone(__sk_dst_get(sk_tun)));
 	pppol2tp_skb_set_owner_w(skb, sk_tun);
 
 	/* Calculate UDP checksum if configured to do so */
 	if (sk_tun->sk_no_check == UDP_CSUM_NOXMIT)
 		skb->ip_summed = CHECKSUM_NONE;
-	else if (!(skb->dst->dev->features & NETIF_F_V4_CSUM)) {
+	else if ((skb_dst(skb) && skb_dst(skb)->dev) &&
+		 (!(skb_dst(skb)->dev->features & NETIF_F_V4_CSUM))) {
 		skb->ip_summed = CHECKSUM_COMPLETE;
 		csum = skb_checksum(skb, 0, udp_len, 0);
 		uh->check = csum_tcpudp_magic(inet->saddr, inet->daddr,
@@ -1238,8 +1239,7 @@ static void pppol2tp_tunnel_closeall(struct pppol2tp_tunnel *tunnel)
 	struct pppol2tp_session *session;
 	struct sock *sk;
 
-	if (tunnel == NULL)
-		BUG();
+	BUG_ON(tunnel == NULL);
 
 	PRINTK(tunnel->debug, PPPOL2TP_MSG_CONTROL, KERN_INFO,
 	       "%s: closing all sessions...\n", tunnel->name);
@@ -1659,6 +1659,7 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 		if (tunnel_sock == NULL)
 			goto end;
 
+		sock_hold(tunnel_sock);
 		tunnel = tunnel_sock->sk_user_data;
 	} else {
 		tunnel = pppol2tp_tunnel_find(sock_net(sk), sp->pppol2tp.s_tunnel);
@@ -2181,7 +2182,7 @@ static int pppol2tp_session_setsockopt(struct sock *sk,
  * session or the special tunnel type.
  */
 static int pppol2tp_setsockopt(struct socket *sock, int level, int optname,
-			       char __user *optval, int optlen)
+			       char __user *optval, unsigned int optlen)
 {
 	struct sock *sk = sock->sk;
 	struct pppol2tp_session *session = sk->sk_user_data;
@@ -2190,7 +2191,7 @@ static int pppol2tp_setsockopt(struct socket *sock, int level, int optname,
 	int err;
 
 	if (level != SOL_PPPOL2TP)
-		return udp_prot.setsockopt(sk, level, optname, optval, optlen);
+		return -EINVAL;
 
 	if (optlen < sizeof(int))
 		return -EINVAL;
@@ -2314,7 +2315,7 @@ static int pppol2tp_getsockopt(struct socket *sock, int level,
 	int err;
 
 	if (level != SOL_PPPOL2TP)
-		return udp_prot.getsockopt(sk, level, optname, optval, optlen);
+		return -EINVAL;
 
 	if (get_user(len, (int __user *) optlen))
 		return -EFAULT;
@@ -2576,7 +2577,7 @@ static const struct file_operations pppol2tp_proc_fops = {
  * Init and cleanup
  *****************************************************************************/
 
-static struct proto_ops pppol2tp_ops = {
+static const struct proto_ops pppol2tp_ops = {
 	.family		= AF_PPPOX,
 	.owner		= THIS_MODULE,
 	.release	= pppol2tp_release,

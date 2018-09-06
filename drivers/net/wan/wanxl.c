@@ -268,7 +268,7 @@ static irqreturn_t wanxl_intr(int irq, void* dev_id)
 
 
 
-static int wanxl_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t wanxl_xmit(struct sk_buff *skb, struct net_device *dev)
 {
         port_t *port = dev_to_port(dev);
 	desc_t *desc;
@@ -283,7 +283,7 @@ static int wanxl_xmit(struct sk_buff *skb, struct net_device *dev)
 #endif
 		netif_stop_queue(dev);
 		spin_unlock_irq(&port->lock);
-		return 1;       /* request packet to be queued */
+		return NETDEV_TX_BUSY;       /* request packet to be queued */
 	}
 
 #ifdef DEBUG_PKT
@@ -310,7 +310,7 @@ static int wanxl_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	spin_unlock(&port->lock);
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 
@@ -354,6 +354,7 @@ static int wanxl_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			ifr->ifr_settings.size = size; /* data size wanted */
 			return -ENOBUFS;
 		}
+		memset(&line, 0, sizeof(line));
 		line.clock_type = get_status(port)->clocking;
 		line.clock_rate = 0;
 		line.loopback = 0;

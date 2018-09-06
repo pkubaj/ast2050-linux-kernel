@@ -50,7 +50,7 @@
 #include <linux/string.h>
 #include <linux/dmi.h>
 #include <linux/acpi.h>
-#include <asm/io.h>
+#include <linux/io.h>
 
 #define DRVNAME "it87"
 
@@ -78,6 +78,13 @@ superio_inb(int reg)
 {
 	outb(reg, REG);
 	return inb(VAL);
+}
+
+static inline void
+superio_outb(int reg, int val)
+{
+	outb(reg, REG);
+	outb(val, VAL);
 }
 
 static int superio_inw(int reg)
@@ -1028,15 +1035,29 @@ static int __init it87_find(unsigned short *address,
 		chip_type, *address, sio_data->revision);
 
 	/* Read GPIO config and VID value from LDN 7 (GPIO) */
-	if (chip_type != IT8705F_DEVID) {
+	if (sio_data->type != it87) {
 		int reg;
 
 		superio_select(GPIO);
-		if ((chip_type == it8718) ||
-		    (chip_type == it8720))
+		if (sio_data->type == it8718 || sio_data->type == it8720)
 			sio_data->vid_value = superio_inb(IT87_SIO_VID_REG);
 
 		reg = superio_inb(IT87_SIO_PINX2_REG);
+		/*
+		 * The IT8720F has no VIN7 pin, so VCCH should always be
+		 * routed internally to VIN7 with an internal divider.
+		 * Curiously, there still is a configuration bit to control
+		 * this, which means it can be set incorrectly. And even
+		 * more curiously, many boards out there are improperly
+		 * configured, even though the IT8720F datasheet claims
+		 * that the internal routing of VCCH to VIN7 is the default
+		 * setting. So we force the internal routing in this case.
+		 */
+		if (sio_data->type == it8720 && !(reg & (1 << 1))) {
+			reg |= (1 << 1);
+			superio_outb(IT87_SIO_PINX2_REG, reg);
+			pr_notice("it87: Routing internal VCCH to in7\n");
+		}
 		if (reg & (1 << 0))
 			pr_info("it87: in3 is VCC (+5V)\n");
 		if (reg & (1 << 1))

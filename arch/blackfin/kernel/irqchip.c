@@ -1,30 +1,7 @@
 /*
- * File:         arch/blackfin/kernel/irqchip.c
- * Based on:
- * Author:
+ * Copyright 2005-2009 Analog Devices Inc.
  *
- * Created:
- * Description:  This file contains the simple DMA Implementation for Blackfin
- *
- * Modified:
- *               Copyright 2004-2006 Analog Devices Inc.
- *
- * Bugs:         Enter bugs at http://blackfin.uclinux.org/
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see the file COPYING, or write
- * to the Free Software Foundation, Inc.,
- * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ * Licensed under the GPL-2 or later
  */
 
 #include <linux/kernel_stat.h>
@@ -38,7 +15,6 @@
 #include <asm/pda.h>
 
 static atomic_t irq_err_count;
-
 void ack_bad_irq(unsigned int irq)
 {
 	atomic_inc(&irq_err_count);
@@ -55,6 +31,7 @@ static struct irq_desc bad_irq_desc = {
 #error "Blackfin architecture does not support CONFIG_CPUMASK_OFFSTACK."
 #endif
 
+#ifdef CONFIG_PROC_FS
 int show_interrupts(struct seq_file *p, void *v)
 {
 	int i = *(loff_t *) v, j;
@@ -86,50 +63,29 @@ int show_interrupts(struct seq_file *p, void *v)
 	}
 	return 0;
 }
-
-/*
- * do_IRQ handles all hardware IRQs.  Decoded IRQs should not
- * come via this function.  Instead, they should provide their
- * own 'handler'
- */
-#ifdef CONFIG_DO_IRQ_L1
-__attribute__((l1_text))
 #endif
-asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
-{
-#ifndef CONFIG_IPIPE
-	unsigned short pending, other_ints;
-#endif
-	struct pt_regs *old_regs = set_irq_regs(regs);
-
-	irq_enter();
 
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
+static void check_stack_overflow(int irq)
+{
 	/* Debugging check for stack overflow: is there less than STACK_WARN free? */
-	{
-		long sp;
+	long sp = __get_SP() & (THREAD_SIZE - 1);
 
-		sp = __get_SP() & (THREAD_SIZE-1);
-
-		if (unlikely(sp < (sizeof(struct thread_info) + STACK_WARN))) {
-			dump_stack();
-			printk(KERN_EMERG "%s: possible stack overflow while handling irq %i "
-					" only %ld bytes free\n",
-				__func__, irq, sp - sizeof(struct thread_info));
-		}
+	if (unlikely(sp < (sizeof(struct thread_info) + STACK_WARN))) {
+		dump_stack();
+		pr_emerg("irq%i: possible stack overflow only %ld bytes free\n",
+			irq, sp - sizeof(struct thread_info));
 	}
+}
+#else
+static inline void check_stack_overflow(int irq) { }
 #endif
 
-	/*
-	 * Some hardware gives randomly wrong interrupts.  Rather
-	 * than crashing, do something sensible.
-	 */
-	if (irq >= NR_IRQS)
-		handle_bad_irq(irq, &bad_irq_desc);
-	else
-		generic_handle_irq(irq);
-
 #ifndef CONFIG_IPIPE
+static void maybe_lower_to_irq14(void)
+{
+	unsigned short pending, other_ints;
+
 	/*
 	 * If we're the only interrupt running (ignoring IRQ15 which
 	 * is for syscalls), lower our priority to IRQ14 so that
@@ -143,7 +99,38 @@ asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
 	other_ints = pending & (pending - 1);
 	if (other_ints == 0)
 		lower_to_irq14();
-#endif /* !CONFIG_IPIPE */
+}
+#else
+static inline void maybe_lower_to_irq14(void) { }
+#endif
+
+/*
+ * do_IRQ handles all hardware IRQs.  Decoded IRQs should not
+ * come via this function.  Instead, they should provide their
+ * own 'handler'
+ */
+#ifdef CONFIG_DO_IRQ_L1
+__attribute__((l1_text))
+#endif
+asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	irq_enter();
+
+	check_stack_overflow(irq);
+
+	/*
+	 * Some hardware gives randomly wrong interrupts.  Rather
+	 * than crashing, do something sensible.
+	 */
+	if (irq >= NR_IRQS)
+		handle_bad_irq(irq, &bad_irq_desc);
+	else
+		generic_handle_irq(irq);
+
+	maybe_lower_to_irq14();
+
 	irq_exit();
 
 	set_irq_regs(old_regs);

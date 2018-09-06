@@ -63,6 +63,7 @@
 #include <asm/uaccess.h>
 #include <linux/crc32.h>
 #include <linux/mutex.h>
+#include <linux/sched.h>
 
 #include "dvb_demux.h"
 #include "dvb_net.h"
@@ -349,6 +350,7 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 	const u8 *ts, *ts_end, *from_where = NULL;
 	u8 ts_remain = 0, how_much = 0, new_ts = 1;
 	struct ethhdr *ethh = NULL;
+	bool error = false;
 
 #ifdef ULE_DEBUG
 	/* The code inside ULE_DEBUG keeps a history of the last 100 TS cells processed. */
@@ -458,10 +460,16 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 
 						/* Drop partly decoded SNDU, reset state, resync on PUSI. */
 						if (priv->ule_skb) {
-							dev_kfree_skb( priv->ule_skb );
+							error = true;
+							dev_kfree_skb(priv->ule_skb);
+						}
+
+						if (error || priv->ule_sndu_remain) {
 							dev->stats.rx_errors++;
 							dev->stats.rx_frame_errors++;
+							error = false;
 						}
+
 						reset_ule(priv);
 						priv->need_pusi = 1;
 						continue;
@@ -503,6 +511,7 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 				       "bytes left in TS.  Resyncing.\n", ts_remain);
 				priv->ule_sndu_len = 0;
 				priv->need_pusi = 1;
+				ts += TS_SZ;
 				continue;
 			}
 
@@ -532,6 +541,7 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 				from_where += 2;
 			}
 
+			priv->ule_sndu_remain = priv->ule_sndu_len + 2;
 			/*
 			 * State of current TS:
 			 *   ts_remain (remaining bytes in the current TS cell)
@@ -541,6 +551,7 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 			 */
 			switch (ts_remain) {
 				case 1:
+					priv->ule_sndu_remain--;
 					priv->ule_sndu_type = from_where[0] << 8;
 					priv->ule_sndu_type_1 = 1; /* first byte of ule_type is set. */
 					ts_remain -= 1; from_where += 1;
@@ -554,6 +565,7 @@ static void dvb_net_ule( struct net_device *dev, const u8 *buf, size_t buf_len )
 				default: /* complete ULE header is present in current TS. */
 					/* Extract ULE type field. */
 					if (priv->ule_sndu_type_1) {
+						priv->ule_sndu_type_1 = 0;
 						priv->ule_sndu_type |= from_where[0];
 						from_where += 1; /* points to payload start. */
 						ts_remain -= 1;
@@ -904,7 +916,7 @@ static int dvb_net_sec_callback(const u8 *buffer1, size_t buffer1_len,
 static int dvb_net_tx(struct sk_buff *skb, struct net_device *dev)
 {
 	dev_kfree_skb(skb);
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 static u8 mask_normal[6]={0xff, 0xff, 0xff, 0xff, 0xff, 0xff};

@@ -55,7 +55,6 @@ Configuration Options:
 
 #include <linux/pci.h>		/* for PCI devices */
 
-#define MIN(a,b) ( ((a) < (b)) ? (a) : (b) )
 #define SDEV_NO ((int)(s - dev->subdevices))
 #define CHANS 8
 #define IOSIZE 16
@@ -77,14 +76,14 @@ struct pcmda12_board {
 static const struct comedi_lrange pcmda12_ranges = {
 	3,
 	{
-			UNI_RANGE(5), UNI_RANGE(10), BIP_RANGE(5)
-		}
+	 UNI_RANGE(5), UNI_RANGE(10), BIP_RANGE(5)
+	 }
 };
 
 static const struct pcmda12_board pcmda12_boards[] = {
 	{
-	      name:	"pcmda12",
-		},
+	 .name = "pcmda12",
+	 },
 };
 
 /*
@@ -98,7 +97,6 @@ struct pcmda12_private {
 	int simultaneous_xfer_mode;
 };
 
-
 #define devpriv ((struct pcmda12_private *)(dev->private))
 
 /*
@@ -107,16 +105,17 @@ struct pcmda12_private {
  * the board, and also about the kernel module that contains
  * the device code.
  */
-static int pcmda12_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int pcmda12_detach(struct comedi_device * dev);
+static int pcmda12_attach(struct comedi_device *dev,
+			  struct comedi_devconfig *it);
+static int pcmda12_detach(struct comedi_device *dev);
 
-static void zero_chans(struct comedi_device * dev);
+static void zero_chans(struct comedi_device *dev);
 
 static struct comedi_driver driver = {
-      driver_name:"pcmda12",
-      module:THIS_MODULE,
-      attach:pcmda12_attach,
-      detach:pcmda12_detach,
+	.driver_name = "pcmda12",
+	.module = THIS_MODULE,
+	.attach = pcmda12_attach,
+	.detach = pcmda12_detach,
 /* It is not necessary to implement the following members if you are
  * writing a driver for a ISA PnP or PCI card */
 	/* Most drivers will support multiple types of boards by
@@ -135,15 +134,15 @@ static struct comedi_driver driver = {
 	 * the type of board in software.  ISA PnP, PCI, and PCMCIA
 	 * devices are such boards.
 	 */
-      board_name:&pcmda12_boards[0].name,
-      offset:sizeof(struct pcmda12_board),
-      num_names:sizeof(pcmda12_boards) / sizeof(struct pcmda12_board),
+	.board_name = &pcmda12_boards[0].name,
+	.offset = sizeof(struct pcmda12_board),
+	.num_names = ARRAY_SIZE(pcmda12_boards),
 };
 
-static int ao_winsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
-static int ao_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data);
+static int ao_winsn(struct comedi_device *dev, struct comedi_subdevice *s,
+		    struct comedi_insn *insn, unsigned int *data);
+static int ao_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+		    struct comedi_insn *insn, unsigned int *data);
 
 /*
  * Attach is called by the Comedi core to configure the driver
@@ -151,14 +150,15 @@ static int ao_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
  * in the driver structure, dev->board_ptr contains that
  * address.
  */
-static int pcmda12_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int pcmda12_attach(struct comedi_device *dev,
+			  struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 	unsigned long iobase;
 
 	iobase = it->options[0];
 	printk("comedi%d: %s: io: %lx %s ", dev->minor, driver.driver_name,
-		iobase, it->options[1] ? "simultaneous xfer mode enabled" : "");
+	       iobase, it->options[1] ? "simultaneous xfer mode enabled" : "");
 
 	if (!request_region(iobase, IOSIZE, driver.driver_name)) {
 		printk("I/O port conflict\n");
@@ -220,7 +220,7 @@ static int pcmda12_attach(struct comedi_device * dev, struct comedi_devconfig * 
  * allocated by _attach().  dev->private and dev->subdevices are
  * deallocated automatically by the core.
  */
-static int pcmda12_detach(struct comedi_device * dev)
+static int pcmda12_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: %s: remove\n", dev->minor, driver.driver_name);
 	if (dev->iobase)
@@ -228,7 +228,7 @@ static int pcmda12_detach(struct comedi_device * dev)
 	return 0;
 }
 
-static void zero_chans(struct comedi_device * dev)
+static void zero_chans(struct comedi_device *dev)
 {				/* sets up an
 				   ASIC chip to defaults */
 	int i;
@@ -241,8 +241,8 @@ static void zero_chans(struct comedi_device * dev)
 	inb(LSB_PORT(0));	/* update chans. */
 }
 
-static int ao_winsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ao_winsn(struct comedi_device *dev, struct comedi_subdevice *s,
+		    struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -283,8 +283,8 @@ static int ao_winsn(struct comedi_device * dev, struct comedi_subdevice * s,
    DAC outputs, which makes all AO channels update simultaneously.
    This is useful for some control applications, I would imagine.
 */
-static int ao_rinsn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ao_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+		    struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);

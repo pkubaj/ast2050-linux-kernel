@@ -94,7 +94,7 @@ static int p80211req_mibset_mibget(wlandevice_t *wlandev,
 *	Potentially blocks the caller, so it's a good idea to
 *	not call this function from an interrupt context.
 ----------------------------------------------------------------*/
-int p80211req_dorequest(wlandevice_t *wlandev, u8 *msgbuf)
+int p80211req_dorequest(wlandevice_t * wlandev, u8 * msgbuf)
 {
 	int result = 0;
 	p80211msg_t *msg = (p80211msg_t *) msgbuf;
@@ -129,7 +129,7 @@ int p80211req_dorequest(wlandevice_t *wlandev, u8 *msgbuf)
 		wlandev->mlmerequest(wlandev, msg);
 
 	clear_bit(1, &(wlandev->request_pending));
-	return result; /* if result==0, msg->status still may contain an err */
+	return result;		/* if result==0, msg->status still may contain an err */
 }
 
 /*----------------------------------------------------------------
@@ -243,8 +243,8 @@ static int p80211req_mibset_mibget(wlandevice_t *wlandev,
 			u32 *data = (u32 *) mibitem->data;
 
 			if (isget) {
-				if (wlandev->
-				    hostwep & HOSTWEP_EXCLUDEUNENCRYPTED)
+				if (wlandev->hostwep &
+				    HOSTWEP_EXCLUDEUNENCRYPTED)
 					*data = P80211ENUM_truth_true;
 				else
 					*data = P80211ENUM_truth_false;

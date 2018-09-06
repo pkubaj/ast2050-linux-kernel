@@ -181,7 +181,6 @@ struct rds_iw_device {
 	struct ib_pd		*pd;
 	struct ib_mr		*mr;
 	struct rds_iw_mr_pool	*mr_pool;
-	int			page_shift;
 	int			max_sge;
 	unsigned int		max_wrs;
 	unsigned int		dma_local_lkey:1;
@@ -361,7 +360,7 @@ int rds_iw_xmit_rdma(struct rds_connection *conn, struct rds_rdma_op *op);
 void rds_iw_send_add_credits(struct rds_connection *conn, unsigned int credits);
 void rds_iw_advertise_credits(struct rds_connection *conn, unsigned int posted);
 int rds_iw_send_grab_credits(struct rds_iw_connection *ic, u32 wanted,
-			     u32 *adv_credits, int need_posted);
+			     u32 *adv_credits, int need_posted, int max_posted);
 
 /* ib_stats.c */
 DECLARE_PER_CPU(struct rds_iw_statistics, rds_iw_stats);

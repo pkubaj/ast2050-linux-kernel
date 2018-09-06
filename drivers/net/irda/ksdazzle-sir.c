@@ -82,7 +82,6 @@
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/kref.h>
 #include <linux/usb.h>
 #include <linux/device.h>
 #include <linux/crc32.h>
@@ -298,14 +297,12 @@ static void ksdazzle_send_irq(struct urb *urb)
 /*
  * Called from net/core when new frame is available.
  */
-static int ksdazzle_hard_xmit(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t ksdazzle_hard_xmit(struct sk_buff *skb,
+					    struct net_device *netdev)
 {
 	struct ksdazzle_cb *kingsun;
 	unsigned int wraplen;
 	int ret = 0;
-
-	if (skb == NULL || netdev == NULL)
-		return -EINVAL;
 
 	netif_stop_queue(netdev);
 
@@ -341,7 +338,7 @@ static int ksdazzle_hard_xmit(struct sk_buff *skb, struct net_device *netdev)
 	dev_kfree_skb(skb);
 	spin_unlock(&kingsun->lock);
 
-	return ret;
+	return NETDEV_TX_OK;
 }
 
 /* Receive callback function */

@@ -44,8 +44,6 @@ extern int gspca_debug;
 #define GSPCA_MAX_FRAMES 16	/* maximum number of video frame buffers */
 /* image transfers */
 #define MAX_NURBS 4		/* max number of URBs */
-#define ISO_MAX_PKT 32		/* max number of packets in an ISOC transfer */
-#define ISO_MAX_SIZE 0x8000	/* max size of one URB buffer (32 Kb) */
 
 /* device information - set at probe time */
 struct cam {
@@ -56,6 +54,9 @@ struct cam {
 				 * - cannot be > MAX_NURBS
 				 * - when 0 and bulk_size != 0 means
 				 *   1 URB and submit done by subdriver */
+	u8 bulk;		/* image transfer by 0:isoc / 1:bulk */
+	u8 npkt;		/* number of packets in an ISOC message
+				 * 0 is the default value: 32 packets */
 	u32 input_flags;	/* value for ENUM_INPUT status flags */
 };
 
@@ -68,6 +69,10 @@ typedef void (*cam_v_op) (struct gspca_dev *);
 typedef int (*cam_cf_op) (struct gspca_dev *, const struct usb_device_id *);
 typedef int (*cam_jpg_op) (struct gspca_dev *,
 				struct v4l2_jpegcompression *);
+typedef int (*cam_reg_op) (struct gspca_dev *,
+				struct v4l2_dbg_register *);
+typedef int (*cam_ident_op) (struct gspca_dev *,
+				struct v4l2_dbg_chip_ident *);
 typedef int (*cam_streamparm_op) (struct gspca_dev *,
 				  struct v4l2_streamparm *);
 typedef int (*cam_qmnu_op) (struct gspca_dev *,
@@ -93,9 +98,11 @@ struct sd_desc {
 /* mandatory operations */
 	cam_cf_op config;	/* called on probe */
 	cam_op init;		/* called on probe and resume */
-	cam_op start;		/* called on stream on */
+	cam_op start;		/* called on stream on after URBs creation */
 	cam_pkt_op pkt_scan;
 /* optional operations */
+	cam_op isoc_init;	/* called on stream on before getting the EP */
+	cam_op isoc_nego;	/* called when URB submit failed with NOSPC */
 	cam_v_op stopN;		/* called on stream off - main alt */
 	cam_v_op stop0;		/* called on stream off & disconnect - alt 0 */
 	cam_v_op dq_callback;	/* called when a frame has been dequeued */
@@ -104,6 +111,11 @@ struct sd_desc {
 	cam_qmnu_op querymenu;
 	cam_streamparm_op get_streamparm;
 	cam_streamparm_op set_streamparm;
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	cam_reg_op set_register;
+	cam_reg_op get_register;
+#endif
+	cam_ident_op get_chip_ident;
 };
 
 /* packet types when moving from iso buf to frame buf */
@@ -168,7 +180,7 @@ struct gspca_dev {
 	__u8 iface;			/* USB interface number */
 	__u8 alt;			/* USB alternate setting */
 	__u8 nbalt;			/* number of USB alternate settings */
-	u8 bulk;			/* image transfer by 0:isoc / 1:bulk */
+	u16 pkt_size;			/* ISOC packet size */
 };
 
 int gspca_dev_probe(struct usb_interface *intf,

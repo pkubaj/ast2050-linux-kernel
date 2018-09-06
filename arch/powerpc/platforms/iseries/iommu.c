@@ -177,7 +177,7 @@ static struct iommu_table *iommu_table_find(struct iommu_table * tbl)
 static void pci_dma_dev_setup_iseries(struct pci_dev *pdev)
 {
 	struct iommu_table *tbl;
-	struct device_node *dn = pdev->sysdata;
+	struct device_node *dn = pci_device_to_OF_node(pdev);
 	struct pci_dn *pdn = PCI_DN(dn);
 	const u32 *lsn = of_get_property(dn, "linux,logical-slot-number", NULL);
 
@@ -193,7 +193,7 @@ static void pci_dma_dev_setup_iseries(struct pci_dev *pdev)
 		pdn->iommu_table = iommu_init_table(tbl, -1);
 	else
 		kfree(tbl);
-	pdev->dev.archdata.dma_data = pdn->iommu_table;
+	set_iommu_table_base(&pdev->dev, pdn->iommu_table);
 }
 #else
 #define pci_dma_dev_setup_iseries	NULL

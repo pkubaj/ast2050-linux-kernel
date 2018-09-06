@@ -90,14 +90,14 @@ static int ql_get_mb_sts(struct ql_adapter *qdev, struct mbox_params *mbcp)
  */
 static int ql_wait_mbx_cmd_cmplt(struct ql_adapter *qdev)
 {
-	int count = 50;	/* TODO: arbitrary for now. */
+	int count = 100;
 	u32 value;
 
 	do {
 		value = ql_read32(qdev, STS);
 		if (value & STS_PI)
 			return 0;
-		udelay(UDELAY_DELAY); /* 10us */
+		mdelay(UDELAY_DELAY); /* 100ms */
 	} while (--count);
 	return -ETIMEDOUT;
 }
@@ -141,7 +141,7 @@ end:
 /* We are being asked by firmware to accept
  * a change to the port.  This is only
  * a change to max frame sizes (Tx/Rx), pause
- * paramters, or loopback mode. We wake up a worker
+ * parameters, or loopback mode. We wake up a worker
  * to handler processing this since a mailbox command
  * will need to be sent to ACK the request.
  */
@@ -238,7 +238,7 @@ static void ql_link_up(struct ql_adapter *qdev, struct mbox_params *mbcp)
 				&qdev->mpi_port_cfg_work, 0);
 	}
 
-	netif_carrier_on(qdev->ndev);
+	ql_link_on(qdev);
 }
 
 static void ql_link_down(struct ql_adapter *qdev, struct mbox_params *mbcp)
@@ -251,7 +251,7 @@ static void ql_link_down(struct ql_adapter *qdev, struct mbox_params *mbcp)
 	if (status)
 		QPRINTK(qdev, DRV, ERR, "Link down AEN broken!\n");
 
-	netif_carrier_off(qdev->ndev);
+	ql_link_off(qdev);
 }
 
 static int ql_sfp_in(struct ql_adapter *qdev, struct mbox_params *mbcp)
@@ -371,7 +371,7 @@ static int ql_mpi_handler(struct ql_adapter *qdev, struct mbox_params *mbcp)
 	/* We are being asked by firmware to accept
 	 * a change to the port.  This is only
 	 * a change to max frame sizes (Tx/Rx), pause
-	 * paramters, or loopback mode.
+	 * parameters, or loopback mode.
 	 */
 	case AEN_IDC_REQ:
 		status = ql_idc_req_aen(qdev);
@@ -380,7 +380,7 @@ static int ql_mpi_handler(struct ql_adapter *qdev, struct mbox_params *mbcp)
 	/* Process and inbound IDC event.
 	 * This will happen when we're trying to
 	 * change tx/rx max frame size, change pause
-	 * paramters or loopback mode.
+	 * parameters or loopback mode.
 	 */
 	case AEN_IDC_CMPLT:
 	case AEN_IDC_EXT:
@@ -446,6 +446,9 @@ static int ql_mpi_handler(struct ql_adapter *qdev, struct mbox_params *mbcp)
 		ql_aen_lost(qdev, mbcp);
 		break;
 
+	case AEN_DCBX_CHG:
+		/* Need to support AEN 8110 */
+		break;
 	default:
 		QPRINTK(qdev, DRV, ERR,
 			"Unsupported AE %.08x.\n", mbcp->mbox_out[0]);
@@ -453,6 +456,13 @@ static int ql_mpi_handler(struct ql_adapter *qdev, struct mbox_params *mbcp)
 	}
 end:
 	ql_write32(qdev, CSR, CSR_CMD_CLR_R2PCI_INT);
+	/* Restore the original mailbox count to
+	 * what the caller asked for.  This can get
+	 * changed when a mailbox command is waiting
+	 * for a response and an AEN arrives and
+	 * is handled.
+	 * */
+	mbcp->out_count = orig_count;
 	return status;
 }
 
@@ -463,9 +473,9 @@ end:
  */
 static int ql_mailbox_command(struct ql_adapter *qdev, struct mbox_params *mbcp)
 {
-	int status, count;
+	int status;
+	unsigned long count;
 
-	mutex_lock(&qdev->mpi_mutex);
 
 	/* Begin polled mode for MPI */
 	ql_write32(qdev, INTR_MASK, (INTR_MASK_PI << 16));
@@ -485,14 +495,14 @@ static int ql_mailbox_command(struct ql_adapter *qdev, struct mbox_params *mbcp)
 	/* Wait for the command to complete. We loop
 	 * here because some AEN might arrive while
 	 * we're waiting for the mailbox command to
-	 * complete. If more than 5 arrive then we can
+	 * complete. If more than 5 seconds expire we can
 	 * assume something is wrong. */
-	count = 5;
+	count = jiffies + HZ * MAILBOX_TIMEOUT;
 	do {
 		/* Wait for the interrupt to come in. */
 		status = ql_wait_mbx_cmd_cmplt(qdev);
 		if (status)
-			goto end;
+			continue;
 
 		/* Process the event.  If it's an AEN, it
 		 * will be handled in-line or a worker
@@ -511,15 +521,15 @@ static int ql_mailbox_command(struct ql_adapter *qdev, struct mbox_params *mbcp)
 					MB_CMD_STS_GOOD) ||
 			((mbcp->mbox_out[0] & 0x0000f000) ==
 					MB_CMD_STS_INTRMDT))
-			break;
-	} while (--count);
+			goto done;
+	} while (time_before(jiffies, count));
 
-	if (!count) {
-		QPRINTK(qdev, DRV, ERR,
-			"Timed out waiting for mailbox complete.\n");
-		status = -ETIMEDOUT;
-		goto end;
-	}
+	QPRINTK(qdev, DRV, ERR,
+		"Timed out waiting for mailbox complete.\n");
+	status = -ETIMEDOUT;
+	goto end;
+
+done:
 
 	/* Now we can clear the interrupt condition
 	 * and look at our status.
@@ -534,9 +544,42 @@ static int ql_mailbox_command(struct ql_adapter *qdev, struct mbox_params *mbcp)
 		status = -EIO;
 	}
 end:
-	mutex_unlock(&qdev->mpi_mutex);
 	/* End polled mode for MPI */
 	ql_write32(qdev, INTR_MASK, (INTR_MASK_PI << 16) | INTR_MASK_PI);
+	return status;
+}
+
+
+/* Get MPI firmware version. This will be used for
+ * driver banner and for ethtool info.
+ * Returns zero on success.
+ */
+int ql_mb_about_fw(struct ql_adapter *qdev)
+{
+	struct mbox_params mbc;
+	struct mbox_params *mbcp = &mbc;
+	int status = 0;
+
+	memset(mbcp, 0, sizeof(struct mbox_params));
+
+	mbcp->in_count = 1;
+	mbcp->out_count = 3;
+
+	mbcp->mbox_in[0] = MB_CMD_ABOUT_FW;
+
+	status = ql_mailbox_command(qdev, mbcp);
+	if (status)
+		return status;
+
+	if (mbcp->mbox_out[0] != MB_CMD_STS_GOOD) {
+		QPRINTK(qdev, DRV, ERR,
+			"Failed about firmware command\n");
+		status = -EIO;
+	}
+
+	/* Store the firmware version */
+	qdev->fw_rev_id = mbcp->mbox_out[1];
+
 	return status;
 }
 
@@ -729,13 +772,104 @@ static int ql_idc_wait(struct ql_adapter *qdev)
 	return status;
 }
 
+int ql_mb_set_mgmnt_traffic_ctl(struct ql_adapter *qdev, u32 control)
+{
+	struct mbox_params mbc;
+	struct mbox_params *mbcp = &mbc;
+	int status;
+
+	memset(mbcp, 0, sizeof(struct mbox_params));
+
+	mbcp->in_count = 1;
+	mbcp->out_count = 2;
+
+	mbcp->mbox_in[0] = MB_CMD_SET_MGMNT_TFK_CTL;
+	mbcp->mbox_in[1] = control;
+
+	status = ql_mailbox_command(qdev, mbcp);
+	if (status)
+		return status;
+
+	if (mbcp->mbox_out[0] == MB_CMD_STS_GOOD)
+		return status;
+
+	if (mbcp->mbox_out[0] == MB_CMD_STS_INVLD_CMD) {
+		QPRINTK(qdev, DRV, ERR,
+			"Command not supported by firmware.\n");
+		status = -EINVAL;
+	} else if (mbcp->mbox_out[0] == MB_CMD_STS_ERR) {
+		/* This indicates that the firmware is
+		 * already in the state we are trying to
+		 * change it to.
+		 */
+		QPRINTK(qdev, DRV, ERR,
+			"Command parameters make no change.\n");
+	}
+	return status;
+}
+
+/* Returns a negative error code or the mailbox command status. */
+static int ql_mb_get_mgmnt_traffic_ctl(struct ql_adapter *qdev, u32 *control)
+{
+	struct mbox_params mbc;
+	struct mbox_params *mbcp = &mbc;
+	int status;
+
+	memset(mbcp, 0, sizeof(struct mbox_params));
+	*control = 0;
+
+	mbcp->in_count = 1;
+	mbcp->out_count = 1;
+
+	mbcp->mbox_in[0] = MB_CMD_GET_MGMNT_TFK_CTL;
+
+	status = ql_mailbox_command(qdev, mbcp);
+	if (status)
+		return status;
+
+	if (mbcp->mbox_out[0] == MB_CMD_STS_GOOD) {
+		*control = mbcp->mbox_in[1];
+		return status;
+	}
+
+	if (mbcp->mbox_out[0] == MB_CMD_STS_INVLD_CMD) {
+		QPRINTK(qdev, DRV, ERR,
+			"Command not supported by firmware.\n");
+		status = -EINVAL;
+	} else if (mbcp->mbox_out[0] == MB_CMD_STS_ERR) {
+		QPRINTK(qdev, DRV, ERR,
+			"Failed to get MPI traffic control.\n");
+		status = -EIO;
+	}
+	return status;
+}
+
+int ql_wait_fifo_empty(struct ql_adapter *qdev)
+{
+	int count = 5;
+	u32 mgmnt_fifo_empty;
+	u32 nic_fifo_empty;
+
+	do {
+		nic_fifo_empty = ql_read32(qdev, STS) & STS_NFE;
+		ql_mb_get_mgmnt_traffic_ctl(qdev, &mgmnt_fifo_empty);
+		mgmnt_fifo_empty &= MB_GET_MPI_TFK_FIFO_EMPTY;
+		if (nic_fifo_empty && mgmnt_fifo_empty)
+			return 0;
+		msleep(100);
+	} while (count-- > 0);
+	return -ETIMEDOUT;
+}
+
 /* API called in work thread context to set new TX/RX
  * maximum frame size values to match MTU.
  */
 static int ql_set_port_cfg(struct ql_adapter *qdev)
 {
 	int status;
+	rtnl_lock();
 	status = ql_mb_set_port_cfg(qdev);
+	rtnl_unlock();
 	if (status)
 		return status;
 	status = ql_idc_wait(qdev);
@@ -754,19 +888,18 @@ void ql_mpi_port_cfg_work(struct work_struct *work)
 {
 	struct ql_adapter *qdev =
 	    container_of(work, struct ql_adapter, mpi_port_cfg_work.work);
-	struct net_device *ndev = qdev->ndev;
 	int status;
 
+	rtnl_lock();
 	status = ql_mb_get_port_cfg(qdev);
+	rtnl_unlock();
 	if (status) {
 		QPRINTK(qdev, DRV, ERR,
 			"Bug: Failed to get port config data.\n");
 		goto err;
 	}
 
-	if (ndev->mtu <= 2500)
-		goto end;
-	else if (qdev->link_config & CFG_JUMBO_FRAME_SIZE &&
+	if (qdev->link_config & CFG_JUMBO_FRAME_SIZE &&
 			qdev->max_frame_size ==
 			CFG_DEFAULT_MAX_FRAME_SIZE)
 		goto end;
@@ -811,13 +944,15 @@ void ql_mpi_idc_work(struct work_struct *work)
 	case MB_CMD_PORT_RESET:
 	case MB_CMD_SET_PORT_CFG:
 	case MB_CMD_STOP_FW:
-		netif_carrier_off(qdev->ndev);
+		ql_link_off(qdev);
 		/* Signal the resulting link up AEN
 		 * that the frame routing and mac addr
 		 * needs to be set.
 		 * */
 		set_bit(QL_CAM_RT_SET, &qdev->flags);
+		rtnl_lock();
 		status = ql_mb_idc_ack(qdev);
+		rtnl_unlock();
 		if (status) {
 			QPRINTK(qdev, DRV, ERR,
 			"Bug: No pending IDC!\n");
@@ -831,16 +966,26 @@ void ql_mpi_work(struct work_struct *work)
 	    container_of(work, struct ql_adapter, mpi_work.work);
 	struct mbox_params mbc;
 	struct mbox_params *mbcp = &mbc;
+	int err = 0;
 
-	mutex_lock(&qdev->mpi_mutex);
+	rtnl_lock();
+	/* Begin polled mode for MPI */
+	ql_write32(qdev, INTR_MASK, (INTR_MASK_PI << 16));
 
 	while (ql_read32(qdev, STS) & STS_PI) {
 		memset(mbcp, 0, sizeof(struct mbox_params));
 		mbcp->out_count = 1;
-		ql_mpi_handler(qdev, mbcp);
+		/* Don't continue if an async event
+		 * did not complete properly.
+		 */
+		err = ql_mpi_handler(qdev, mbcp);
+		if (err)
+			break;
 	}
 
-	mutex_unlock(&qdev->mpi_mutex);
+	/* End polled mode for MPI */
+	ql_write32(qdev, INTR_MASK, (INTR_MASK_PI << 16) | INTR_MASK_PI);
+	rtnl_unlock();
 	ql_enable_completion_interrupt(qdev, 0);
 }
 

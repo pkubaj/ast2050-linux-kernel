@@ -262,7 +262,12 @@ found:
 							xip_pfn);
 		if (err == -ENOMEM)
 			return VM_FAULT_OOM;
-		BUG_ON(err);
+		/*
+		 * err == -EBUSY is fine, we've raced against another thread
+		 * that faulted-in the same page
+		 */
+		if (err != -EBUSY)
+			BUG_ON(err);
 		return VM_FAULT_NOPAGE;
 	} else {
 		int err, ret = VM_FAULT_OOM;
@@ -296,7 +301,7 @@ out:
 	}
 }
 
-static struct vm_operations_struct xip_file_vm_ops = {
+static const struct vm_operations_struct xip_file_vm_ops = {
 	.fault	= xip_file_fault,
 };
 

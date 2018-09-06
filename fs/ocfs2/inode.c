@@ -53,6 +53,7 @@
 #include "sysfile.h"
 #include "uptodate.h"
 #include "xattr.h"
+#include "refcounttree.h"
 
 #include "buffer_head_io.h"
 
@@ -215,6 +216,8 @@ bail:
 static int ocfs2_init_locked_inode(struct inode *inode, void *opaque)
 {
 	struct ocfs2_find_inode_args *args = opaque;
+	static struct lock_class_key ocfs2_quota_ip_alloc_sem_key,
+				     ocfs2_file_ip_alloc_sem_key;
 
 	mlog_entry("inode = %p, opaque = %p\n", inode, opaque);
 
@@ -223,6 +226,15 @@ static int ocfs2_init_locked_inode(struct inode *inode, void *opaque)
 	if (args->fi_sysfile_type != 0)
 		lockdep_set_class(&inode->i_mutex,
 			&ocfs2_sysfile_lock_key[args->fi_sysfile_type]);
+	if (args->fi_sysfile_type == USER_QUOTA_SYSTEM_INODE ||
+	    args->fi_sysfile_type == GROUP_QUOTA_SYSTEM_INODE ||
+	    args->fi_sysfile_type == LOCAL_USER_QUOTA_SYSTEM_INODE ||
+	    args->fi_sysfile_type == LOCAL_GROUP_QUOTA_SYSTEM_INODE)
+		lockdep_set_class(&OCFS2_I(inode)->ip_alloc_sem,
+				  &ocfs2_quota_ip_alloc_sem_key);
+	else
+		lockdep_set_class(&OCFS2_I(inode)->ip_alloc_sem,
+				  &ocfs2_file_ip_alloc_sem_key);
 
 	mlog_exit(0);
 	return 0;
@@ -473,7 +485,11 @@ static int ocfs2_read_locked_inode(struct inode *inode,
 						     OCFS2_BH_IGNORE_CACHE);
 	} else {
 		status = ocfs2_read_blocks_sync(osb, args->fi_blkno, 1, &bh);
-		if (!status)
+		/*
+		 * If buffer is in jbd, then its checksum may not have been
+		 * computed as yet.
+		 */
+		if (!status && !buffer_jbd(bh))
 			status = ocfs2_validate_inode_block(osb->sb, bh);
 	}
 	if (status < 0) {
@@ -547,11 +563,13 @@ static int ocfs2_truncate_for_delete(struct ocfs2_super *osb,
 		handle = ocfs2_start_trans(osb, OCFS2_INODE_UPDATE_CREDITS);
 		if (IS_ERR(handle)) {
 			status = PTR_ERR(handle);
+			handle = NULL;
 			mlog_errno(status);
 			goto out;
 		}
 
-		status = ocfs2_journal_access_di(handle, inode, fe_bh,
+		status = ocfs2_journal_access_di(handle, INODE_CACHE(inode),
+						 fe_bh,
 						 OCFS2_JOURNAL_ACCESS_WRITE);
 		if (status < 0) {
 			mlog_errno(status);
@@ -635,7 +653,7 @@ static int ocfs2_remove_inode(struct inode *inode,
 	}
 
 	/* set the inodes dtime */
-	status = ocfs2_journal_access_di(handle, inode, di_bh,
+	status = ocfs2_journal_access_di(handle, INODE_CACHE(inode), di_bh,
 					 OCFS2_JOURNAL_ACCESS_WRITE);
 	if (status < 0) {
 		mlog_errno(status);
@@ -651,7 +669,7 @@ static int ocfs2_remove_inode(struct inode *inode,
 		goto bail_commit;
 	}
 
-	ocfs2_remove_from_cache(inode, di_bh);
+	ocfs2_remove_from_cache(INODE_CACHE(inode), di_bh);
 	vfs_dq_free_inode(inode);
 
 	status = ocfs2_free_dinode(handle, inode_alloc_inode,
@@ -765,6 +783,12 @@ static int ocfs2_wipe_inode(struct inode *inode,
 
 	/*Free extended attribute resources associated with this inode.*/
 	status = ocfs2_xattr_remove(inode, di_bh);
+	if (status < 0) {
+		mlog_errno(status);
+		goto bail_unlock_dir;
+	}
+
+	status = ocfs2_remove_refcount_tree(inode, di_bh);
 	if (status < 0) {
 		mlog_errno(status);
 		goto bail_unlock_dir;
@@ -1101,13 +1125,14 @@ void ocfs2_clear_inode(struct inode *inode)
 	ocfs2_lock_res_free(&oi->ip_inode_lockres);
 	ocfs2_lock_res_free(&oi->ip_open_lockres);
 
-	ocfs2_metadata_cache_purge(inode);
+	ocfs2_metadata_cache_exit(INODE_CACHE(inode));
 
-	mlog_bug_on_msg(oi->ip_metadata_cache.ci_num_cached,
+	mlog_bug_on_msg(INODE_CACHE(inode)->ci_num_cached,
 			"Clear inode of %llu, inode has %u cache items\n",
-			(unsigned long long)oi->ip_blkno, oi->ip_metadata_cache.ci_num_cached);
+			(unsigned long long)oi->ip_blkno,
+			INODE_CACHE(inode)->ci_num_cached);
 
-	mlog_bug_on_msg(!(oi->ip_flags & OCFS2_INODE_CACHE_INLINE),
+	mlog_bug_on_msg(!(INODE_CACHE(inode)->ci_flags & OCFS2_CACHE_FL_INLINE),
 			"Clear inode of %llu, inode has a bad flag\n",
 			(unsigned long long)oi->ip_blkno);
 
@@ -1134,9 +1159,7 @@ void ocfs2_clear_inode(struct inode *inode)
 			(unsigned long long)oi->ip_blkno, oi->ip_open_count);
 
 	/* Clear all other flags. */
-	oi->ip_flags = OCFS2_INODE_CACHE_INLINE;
-	oi->ip_created_trans = 0;
-	oi->ip_last_trans = 0;
+	oi->ip_flags = 0;
 	oi->ip_dir_start_lookup = 0;
 	oi->ip_blkno = 0ULL;
 
@@ -1228,7 +1251,7 @@ int ocfs2_mark_inode_dirty(handle_t *handle,
 	mlog_entry("(inode %llu)\n",
 		   (unsigned long long)OCFS2_I(inode)->ip_blkno);
 
-	status = ocfs2_journal_access_di(handle, inode, bh,
+	status = ocfs2_journal_access_di(handle, INODE_CACHE(inode), bh,
 					 OCFS2_JOURNAL_ACCESS_WRITE);
 	if (status < 0) {
 		mlog_errno(status);
@@ -1369,8 +1392,8 @@ int ocfs2_read_inode_block_full(struct inode *inode, struct buffer_head **bh,
 	int rc;
 	struct buffer_head *tmp = *bh;
 
-	rc = ocfs2_read_blocks(inode, OCFS2_I(inode)->ip_blkno, 1, &tmp,
-			       flags, ocfs2_validate_inode_block);
+	rc = ocfs2_read_blocks(INODE_CACHE(inode), OCFS2_I(inode)->ip_blkno,
+			       1, &tmp, flags, ocfs2_validate_inode_block);
 
 	/* If ocfs2_read_blocks() got us a new bh, pass it up. */
 	if (!rc && !*bh)
@@ -1383,3 +1406,56 @@ int ocfs2_read_inode_block(struct inode *inode, struct buffer_head **bh)
 {
 	return ocfs2_read_inode_block_full(inode, bh, 0);
 }
+
+
+static u64 ocfs2_inode_cache_owner(struct ocfs2_caching_info *ci)
+{
+	struct ocfs2_inode_info *oi = cache_info_to_inode(ci);
+
+	return oi->ip_blkno;
+}
+
+static struct super_block *ocfs2_inode_cache_get_super(struct ocfs2_caching_info *ci)
+{
+	struct ocfs2_inode_info *oi = cache_info_to_inode(ci);
+
+	return oi->vfs_inode.i_sb;
+}
+
+static void ocfs2_inode_cache_lock(struct ocfs2_caching_info *ci)
+{
+	struct ocfs2_inode_info *oi = cache_info_to_inode(ci);
+
+	spin_lock(&oi->ip_lock);
+}
+
+static void ocfs2_inode_cache_unlock(struct ocfs2_caching_info *ci)
+{
+	struct ocfs2_inode_info *oi = cache_info_to_inode(ci);
+
+	spin_unlock(&oi->ip_lock);
+}
+
+static void ocfs2_inode_cache_io_lock(struct ocfs2_caching_info *ci)
+{
+	struct ocfs2_inode_info *oi = cache_info_to_inode(ci);
+
+	mutex_lock(&oi->ip_io_mutex);
+}
+
+static void ocfs2_inode_cache_io_unlock(struct ocfs2_caching_info *ci)
+{
+	struct ocfs2_inode_info *oi = cache_info_to_inode(ci);
+
+	mutex_unlock(&oi->ip_io_mutex);
+}
+
+const struct ocfs2_caching_operations ocfs2_inode_caching_ops = {
+	.co_owner		= ocfs2_inode_cache_owner,
+	.co_get_super		= ocfs2_inode_cache_get_super,
+	.co_cache_lock		= ocfs2_inode_cache_lock,
+	.co_cache_unlock	= ocfs2_inode_cache_unlock,
+	.co_io_lock		= ocfs2_inode_cache_io_lock,
+	.co_io_unlock		= ocfs2_inode_cache_io_unlock,
+};
+

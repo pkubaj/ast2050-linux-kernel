@@ -15,6 +15,7 @@
  *	implemenents security file system for reporting
  *	current measurement list and IMA statistics
  */
+#include <linux/fcntl.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/rculist.h>
@@ -42,7 +43,7 @@ static ssize_t ima_show_htable_violations(struct file *filp,
 	return ima_show_htable_value(buf, count, ppos, &ima_htable.violations);
 }
 
-static struct file_operations ima_htable_violations_ops = {
+static const struct file_operations ima_htable_violations_ops = {
 	.read = ima_show_htable_violations
 };
 
@@ -54,7 +55,7 @@ static ssize_t ima_show_measurements_count(struct file *filp,
 
 }
 
-static struct file_operations ima_measurements_count_ops = {
+static const struct file_operations ima_measurements_count_ops = {
 	.read = ima_show_measurements_count
 };
 
@@ -84,8 +85,8 @@ static void *ima_measurements_next(struct seq_file *m, void *v, loff_t *pos)
 	 * against concurrent list-extension
 	 */
 	rcu_read_lock();
-	qe = list_entry(rcu_dereference(qe->later.next),
-			struct ima_queue_entry, later);
+	qe = list_entry_rcu(qe->later.next,
+			    struct ima_queue_entry, later);
 	rcu_read_unlock();
 	(*pos)++;
 
@@ -145,7 +146,7 @@ static int ima_measurements_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static struct seq_operations ima_measurments_seqops = {
+static const struct seq_operations ima_measurments_seqops = {
 	.start = ima_measurements_start,
 	.next = ima_measurements_next,
 	.stop = ima_measurements_stop,
@@ -157,7 +158,7 @@ static int ima_measurements_open(struct inode *inode, struct file *file)
 	return seq_open(file, &ima_measurments_seqops);
 }
 
-static struct file_operations ima_measurements_ops = {
+static const struct file_operations ima_measurements_ops = {
 	.open = ima_measurements_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
@@ -220,7 +221,7 @@ static int ima_ascii_measurements_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static struct seq_operations ima_ascii_measurements_seqops = {
+static const struct seq_operations ima_ascii_measurements_seqops = {
 	.start = ima_measurements_start,
 	.next = ima_measurements_next,
 	.stop = ima_measurements_stop,
@@ -232,7 +233,7 @@ static int ima_ascii_measurements_open(struct inode *inode, struct file *file)
 	return seq_open(file, &ima_ascii_measurements_seqops);
 }
 
-static struct file_operations ima_ascii_measurements_ops = {
+static const struct file_operations ima_ascii_measurements_ops = {
 	.open = ima_ascii_measurements_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
@@ -283,6 +284,9 @@ static atomic_t policy_opencount = ATOMIC_INIT(1);
  */
 int ima_open_policy(struct inode * inode, struct file * filp)
 {
+	/* No point in being allowed to open it if you aren't going to write */
+	if (!(filp->f_flags & O_WRONLY))
+		return -EACCES;
 	if (atomic_dec_and_test(&policy_opencount))
 		return 0;
 	return -EBUSY;
@@ -309,13 +313,13 @@ static int ima_release_policy(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static struct file_operations ima_measure_policy_ops = {
+static const struct file_operations ima_measure_policy_ops = {
 	.open = ima_open_policy,
 	.write = ima_write_policy,
 	.release = ima_release_policy
 };
 
-int ima_fs_init(void)
+int __init ima_fs_init(void)
 {
 	ima_dir = securityfs_create_dir("ima", NULL);
 	if (IS_ERR(ima_dir))
@@ -349,7 +353,7 @@ int ima_fs_init(void)
 		goto out;
 
 	ima_policy = securityfs_create_file("policy",
-					    S_IRUSR | S_IRGRP | S_IWUSR,
+					    S_IWUSR,
 					    ima_dir, NULL,
 					    &ima_measure_policy_ops);
 	if (IS_ERR(ima_policy))

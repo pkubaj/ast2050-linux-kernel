@@ -105,22 +105,26 @@ int drm_proc_create_files(struct drm_info_list *files, int count,
 		    (dev->driver->driver_features & features) != features)
 			continue;
 
-		tmp = drm_alloc(sizeof(struct drm_info_node), _DRM_DRIVER);
-		ent = create_proc_entry(files[i].name, S_IFREG | S_IRUGO, root);
+		tmp = kmalloc(sizeof(struct drm_info_node), GFP_KERNEL);
+		if (tmp == NULL) {
+			ret = -1;
+			goto fail;
+		}
+		tmp->minor = minor;
+		tmp->info_ent = &files[i];
+		list_add(&tmp->list, &minor->proc_nodes.list);
+
+		ent = proc_create_data(files[i].name, S_IRUGO, root,
+				       &drm_proc_fops, tmp);
 		if (!ent) {
 			DRM_ERROR("Cannot create /proc/dri/%s/%s\n",
 				  name, files[i].name);
-			drm_free(tmp, sizeof(struct drm_info_node),
-				 _DRM_DRIVER);
+			list_del(&tmp->list);
+			kfree(tmp);
 			ret = -1;
 			goto fail;
 		}
 
-		ent->proc_fops = &drm_proc_fops;
-		ent->data = tmp;
-		tmp->minor = minor;
-		tmp->info_ent = &files[i];
-		list_add(&(tmp->list), &(minor->proc_nodes.list));
 	}
 	return 0;
 
@@ -192,8 +196,7 @@ int drm_proc_remove_files(struct drm_info_list *files, int count,
 				remove_proc_entry(files[i].name,
 						  minor->proc_root);
 				list_del(pos);
-				drm_free(tmp, sizeof(struct drm_info_node),
-					 _DRM_DRIVER);
+				kfree(tmp);
 			}
 		}
 	}

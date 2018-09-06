@@ -177,6 +177,13 @@ static int ohci_quirk_amd700(struct usb_hcd *hcd)
 		return 0;
 
 	pci_read_config_byte(amd_smbus_dev, PCI_REVISION_ID, &rev);
+
+	/* SB800 needs pre-fetch fix */
+	if ((rev >= 0x40) && (rev <= 0x4f)) {
+		ohci->flags |= OHCI_QUIRK_AMD_PREFETCH;
+		ohci_dbg(ohci, "enabled AMD prefetch quirk\n");
+	}
+
 	if ((rev > 0x3b) || (rev < 0x30)) {
 		pci_dev_put(amd_smbus_dev);
 		amd_smbus_dev = NULL;
@@ -190,6 +197,28 @@ static int ohci_quirk_amd700(struct usb_hcd *hcd)
 
 	ohci->flags |= OHCI_QUIRK_AMD_ISO;
 	ohci_dbg(ohci, "enabled AMD ISO transfers quirk\n");
+
+	return 0;
+}
+
+/* nVidia controllers continue to drive Reset signalling on the bus
+ * even after system shutdown, wasting power.  This flag tells the
+ * shutdown routine to leave the controller OPERATIONAL instead of RESET.
+ */
+static int ohci_quirk_nvidia_shutdown(struct usb_hcd *hcd)
+{
+	struct pci_dev *pdev = to_pci_dev(hcd->self.controller);
+	struct ohci_hcd	*ohci = hcd_to_ohci(hcd);
+
+	/* Evidently nVidia fixed their later hardware; this is a guess at
+	 * the changeover point.
+	 */
+#define PCI_DEVICE_ID_NVIDIA_NFORCE_MCP51_USB		0x026d
+
+	if (pdev->device < PCI_DEVICE_ID_NVIDIA_NFORCE_MCP51_USB) {
+		ohci->flags |= OHCI_QUIRK_SHUTDOWN;
+		ohci_dbg(ohci, "enabled nVidia shutdown quirk\n");
+	}
 
 	return 0;
 }
@@ -262,6 +291,19 @@ static void amd_iso_dev_put(void)
 
 }
 
+static void sb800_prefetch(struct ohci_hcd *ohci, int on)
+{
+	struct pci_dev *pdev;
+	u16 misc;
+
+	pdev = to_pci_dev(ohci_to_hcd(ohci)->self.controller);
+	pci_read_config_word(pdev, 0x50, &misc);
+	if (on == 0)
+		pci_write_config_word(pdev, 0x50, misc & 0xfcff);
+	else
+		pci_write_config_word(pdev, 0x50, misc | 0x0300);
+}
+
 /* List of quirks for OHCI */
 static const struct pci_device_id ohci_pci_quirks[] = {
 	{
@@ -311,6 +353,10 @@ static const struct pci_device_id ohci_pci_quirks[] = {
 	{
 		PCI_DEVICE(PCI_VENDOR_ID_ATI, 0x4399),
 		.driver_data = (unsigned long)ohci_quirk_amd700,
+	},
+	{
+		PCI_DEVICE(PCI_VENDOR_ID_NVIDIA, PCI_ANY_ID),
+		.driver_data = (unsigned long) ohci_quirk_nvidia_shutdown,
 	},
 
 	/* FIXME for some of the early AMD 760 southbridges, OHCI
@@ -372,7 +418,7 @@ static int __devinit ohci_pci_start (struct usb_hcd *hcd)
 
 #ifdef	CONFIG_PM
 
-static int ohci_pci_suspend (struct usb_hcd *hcd, pm_message_t message)
+static int ohci_pci_suspend(struct usb_hcd *hcd)
 {
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 	unsigned long	flags;
@@ -394,10 +440,6 @@ static int ohci_pci_suspend (struct usb_hcd *hcd, pm_message_t message)
 	ohci_writel(ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
 	(void)ohci_readl(ohci, &ohci->regs->intrdisable);
 
-	/* make sure snapshot being resumed re-enumerates everything */
-	if (message.event == PM_EVENT_PRETHAW)
-		ohci_usb_reset(ohci);
-
 	clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
  bail:
 	spin_unlock_irqrestore (&ohci->lock, flags);
@@ -406,9 +448,14 @@ static int ohci_pci_suspend (struct usb_hcd *hcd, pm_message_t message)
 }
 
 
-static int ohci_pci_resume (struct usb_hcd *hcd)
+static int ohci_pci_resume(struct usb_hcd *hcd, bool hibernated)
 {
 	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+
+	/* Make sure resume from hibernation re-enumerates everything */
+	if (hibernated)
+		ohci_usb_reset(hcd_to_ohci(hcd));
+
 	ohci_finish_controller_resume(hcd);
 	return 0;
 }
@@ -484,12 +531,11 @@ static struct pci_driver ohci_pci_driver = {
 
 	.probe =	usb_hcd_pci_probe,
 	.remove =	usb_hcd_pci_remove,
-
-#ifdef	CONFIG_PM
-	.suspend =	usb_hcd_pci_suspend,
-	.resume =	usb_hcd_pci_resume,
-#endif
-
 	.shutdown =	usb_hcd_pci_shutdown,
-};
 
+#ifdef CONFIG_PM_SLEEP
+	.driver =	{
+		.pm =	&usb_hcd_pci_pm_ops
+	},
+#endif
+};

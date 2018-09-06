@@ -7,7 +7,6 @@ Copyright 2008 Red Hat Inc.
                (dual licensed under the GPL v2)
 Reviewers:   Elias Oltmanns, Randy Dunlap, Andrew Morton,
 	     John Kacur, and David Teigland.
-
 Written for: 2.6.28-rc2
 
 Introduction
@@ -27,19 +26,38 @@ disabled, and more (ftrace allows for tracer plugins, which
 means that the list of tracers can always grow).
 
 
+Implementation Details
+----------------------
+
+See ftrace-design.txt for details for arch porters and such.
+
+
 The File System
 ---------------
 
 Ftrace uses the debugfs file system to hold the control files as
 well as the files to display output.
 
-To mount the debugfs system:
+When debugfs is configured into the kernel (which selecting any ftrace
+option will do) the directory /sys/kernel/debug will be created. To mount
+this directory, you can add to your /etc/fstab file:
 
-  # mkdir /debug
-  # mount -t debugfs nodev /debug
+ debugfs       /sys/kernel/debug          debugfs defaults        0       0
 
-( Note: it is more common to mount at /sys/kernel/debug, but for
-  simplicity this document will use /debug)
+Or you can mount it at run time with:
+
+ mount -t debugfs nodev /sys/kernel/debug
+
+For quicker access to that directory you may want to make a soft link to
+it:
+
+ ln -s /sys/kernel/debug /debug
+
+Any selected ftrace option will also create a directory called tracing
+within the debugfs. The rest of the document will assume that you are in
+the ftrace directory (cd /sys/kernel/debug/tracing) and will only concentrate
+on the files within that directory and not distract from the content with
+the extended "/sys/kernel/debug/tracing" path name.
 
 That's it! (assuming that you have ftrace configured into your kernel)
 
@@ -73,26 +91,19 @@ of ftrace. Here is a list of some of the key files:
 	This file holds the output of the trace in a human
 	readable format (described below).
 
-  latency_trace:
-
-	This file shows the same trace but the information
-	is organized more to display possible latencies
-	in the system (described below).
-
   trace_pipe:
 
 	The output is the same as the "trace" file but this
 	file is meant to be streamed with live tracing.
-	Reads from this file will block until new data
-	is retrieved. Unlike the "trace" and "latency_trace"
-	files, this file is a consumer. This means reading
-	from this file causes sequential reads to display
-	more current data. Once data is read from this
-	file, it is consumed, and will not be read
-	again with a sequential read. The "trace" and
-	"latency_trace" files are static, and if the
-	tracer is not adding more data, they will display
-	the same information every time they are read.
+	Reads from this file will block until new data is
+	retrieved.  Unlike the "trace" file, this file is a
+	consumer. This means reading from this file causes
+	sequential reads to display more current data. Once
+	data is read from this file, it is consumed, and
+	will not be read again with a sequential read. The
+	"trace" file is static, and if the tracer is not
+	adding more data,they will display the same
+	information every time they are read.
 
   trace_options:
 
@@ -105,10 +116,10 @@ of ftrace. Here is a list of some of the key files:
 	Some of the tracers record the max latency.
 	For example, the time interrupts are disabled.
 	This time is saved in this file. The max trace
-	will also be stored, and displayed by either
-	"trace" or "latency_trace".  A new max trace will
-	only be recorded if the latency is greater than
-	the value in this file. (in microseconds)
+	will also be stored, and displayed by "trace".
+	A new max trace will only be recorded if the
+	latency is greater than the value in this
+	file. (in microseconds)
 
   buffer_size_kb:
 
@@ -122,7 +133,7 @@ of ftrace. Here is a list of some of the key files:
 	than requested, the rest of the page will be used,
 	making the actual allocation bigger than requested.
 	( Note, the size may not be a multiple of the page size
-	  due to buffer managment overhead. )
+	  due to buffer management overhead. )
 
 	This can only be updated when the current_tracer
 	is set to "nop".
@@ -179,7 +190,7 @@ Here is the list of current tracers that may be configured.
 
 	Function call tracer to trace all kernel functions.
 
-  "function_graph_tracer"
+  "function_graph"
 
 	Similar to the function tracer except that the
 	function tracer probes the functions on their entry
@@ -198,7 +209,7 @@ Here is the list of current tracers that may be configured.
 	the trace with the longest max latency.
 	See tracing_max_latency. When a new max is recorded,
 	it replaces the old trace. It is best to view this
-	trace via the latency_trace file.
+	trace with the latency-format option enabled.
 
   "preemptoff"
 
@@ -295,8 +306,8 @@ the lowest priority thread (pid 0).
 Latency trace format
 --------------------
 
-For traces that display latency times, the latency_trace file
-gives somewhat more information to see why a latency happened.
+When the latency-format option is enabled, the trace file gives
+somewhat more information to see why a latency happened.
 Here is a typical trace.
 
 # tracer: irqsoff
@@ -368,9 +379,10 @@ explains which is which.
 
 The above is mostly meaningful for kernel developers.
 
-  time: This differs from the trace file output. The trace file output
-	includes an absolute timestamp. The timestamp used by the
-	latency_trace file is relative to the start of the trace.
+  time: When the latency-format option is enabled, the trace file
+	output includes a timestamp relative to the start of the
+	trace. This differs from the output when latency-format
+	is disabled, which includes an absolute timestamp.
 
   delay: This is just to help catch your eye a bit better. And
 	 needs to be fixed to be only relative to the same CPU.
@@ -389,18 +401,18 @@ trace_options
 The trace_options file is used to control what gets printed in
 the trace output. To see what is available, simply cat the file:
 
-  cat /debug/tracing/trace_options
+  cat trace_options
   print-parent nosym-offset nosym-addr noverbose noraw nohex nobin \
   noblock nostacktrace nosched-tree nouserstacktrace nosym-userobj
 
 To disable one of the options, echo in the option prepended with
 "no".
 
-  echo noprint-parent > /debug/tracing/trace_options
+  echo noprint-parent > trace_options
 
 To enable an option, leave off the "no".
 
-  echo sym-offset > /debug/tracing/trace_options
+  echo sym-offset > trace_options
 
 Here are the available options:
 
@@ -428,7 +440,8 @@ Here are the available options:
   sym-addr:
    bash-4000  [01]  1477.606694: simple_strtoul <c0339346>
 
-  verbose - This deals with the latency_trace file.
+  verbose - This deals with the trace file when the
+            latency-format option is enabled.
 
     bash  4000 1 0 00000000 00010a95 [58127d26] 1720.415ms \
     (+0.000ms): simple_strtoul (strict_strtoul)
@@ -460,7 +473,7 @@ Here are the available options:
 		the app is no longer running
 
 		The lookup is performed when you read
-		trace,trace_pipe,latency_trace. Example:
+		trace,trace_pipe. Example:
 
 		a.out-1623  [000] 40874.465068: /root/a.out[+0x480] <-/root/a.out[+0
 x494] <- /root/a.out[+0x4a8] <- /lib/libc-2.7.so[+0x1e1a6]
@@ -469,6 +482,11 @@ x494] <- /root/a.out[+0x4a8] <- /lib/libc-2.7.so[+0x1e1a6]
 	       every scheduling event. Will add overhead if
 	       there's a lot of tasks running at once.
 
+  latency-format - This option changes the trace. When
+                   it is enabled, the trace displays
+                   additional information about the
+                   latencies, as described in "Latency
+                   trace format".
 
 sched_switch
 ------------
@@ -476,11 +494,11 @@ sched_switch
 This tracer simply records schedule switches. Here is an example
 of how to use it.
 
- # echo sched_switch > /debug/tracing/current_tracer
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo sched_switch > current_tracer
+ # echo 1 > tracing_enabled
  # sleep 1
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/trace
+ # echo 0 > tracing_enabled
+ # cat trace
 
 # tracer: sched_switch
 #
@@ -518,9 +536,18 @@ priority with zero (0) being the highest priority and the nice
 values starting at 100 (nice -20). Below is a quick chart to map
 the kernel priority to user land priorities.
 
-  Kernel priority: 0 to 99    ==> user RT priority 99 to 0
-  Kernel priority: 100 to 139 ==> user nice -20 to 19
-  Kernel priority: 140        ==> idle task priority
+   Kernel Space                     User Space
+ ===============================================================
+   0(high) to  98(low)     user RT priority 99(high) to 1(low)
+                           with SCHED_RR or SCHED_FIFO
+ ---------------------------------------------------------------
+  99                       sched_priority is not used in scheduling
+                           decisions(it must be specified as 0)
+ ---------------------------------------------------------------
+ 100(high) to 139(low)     user nice -20(high) to 19(low)
+ ---------------------------------------------------------------
+ 140                       idle task priority
+ ---------------------------------------------------------------
 
 The task states are:
 
@@ -574,13 +601,14 @@ new trace is saved.
 To reset the maximum, echo 0 into tracing_max_latency. Here is
 an example:
 
- # echo irqsoff > /debug/tracing/current_tracer
- # echo 0 > /debug/tracing/tracing_max_latency
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo irqsoff > current_tracer
+ # echo latency-format > trace_options
+ # echo 0 > tracing_max_latency
+ # echo 1 > tracing_enabled
  # ls -ltr
  [...]
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/latency_trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: irqsoff
 #
 irqsoff latency trace v1.1.5 on 2.6.26
@@ -681,13 +709,14 @@ Like the irqsoff tracer, it records the maximum latency for
 which preemption was disabled. The control of preemptoff tracer
 is much like the irqsoff tracer.
 
- # echo preemptoff > /debug/tracing/current_tracer
- # echo 0 > /debug/tracing/tracing_max_latency
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo preemptoff > current_tracer
+ # echo latency-format > trace_options
+ # echo 0 > tracing_max_latency
+ # echo 1 > tracing_enabled
  # ls -ltr
  [...]
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/latency_trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: preemptoff
 #
 preemptoff latency trace v1.1.5 on 2.6.26-rc8
@@ -828,13 +857,14 @@ tracer.
 Again, using this trace is much like the irqsoff and preemptoff
 tracers.
 
- # echo preemptirqsoff > /debug/tracing/current_tracer
- # echo 0 > /debug/tracing/tracing_max_latency
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo preemptirqsoff > current_tracer
+ # echo latency-format > trace_options
+ # echo 0 > tracing_max_latency
+ # echo 1 > tracing_enabled
  # ls -ltr
  [...]
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/latency_trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: preemptirqsoff
 #
 preemptirqsoff latency trace v1.1.5 on 2.6.26-rc8
@@ -990,12 +1020,13 @@ slightly differently than we did with the previous tracers.
 Instead of performing an 'ls', we will run 'sleep 1' under
 'chrt' which changes the priority of the task.
 
- # echo wakeup > /debug/tracing/current_tracer
- # echo 0 > /debug/tracing/tracing_max_latency
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo wakeup > current_tracer
+ # echo latency-format > trace_options
+ # echo 0 > tracing_max_latency
+ # echo 1 > tracing_enabled
  # chrt -f 5 sleep 1
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/latency_trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: wakeup
 #
 wakeup latency trace v1.1.5 on 2.6.26-rc8
@@ -1105,11 +1136,11 @@ can be done from the debug file system. Make sure the
 ftrace_enabled is set; otherwise this tracer is a nop.
 
  # sysctl kernel.ftrace_enabled=1
- # echo function > /debug/tracing/current_tracer
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo function > current_tracer
+ # echo 1 > tracing_enabled
  # usleep 1
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: function
 #
 #           TASK-PID   CPU#    TIMESTAMP  FUNCTION
@@ -1146,7 +1177,7 @@ int trace_fd;
 [...]
 int main(int argc, char *argv[]) {
 	[...]
-	trace_fd = open("/debug/tracing/tracing_enabled", O_WRONLY);
+	trace_fd = open(tracing_file("tracing_enabled"), O_WRONLY);
 	[...]
 	if (condition_hit()) {
 		write(trace_fd, "0", 1);
@@ -1154,26 +1185,20 @@ int main(int argc, char *argv[]) {
 	[...]
 }
 
-Note: Here we hard coded the path name. The debugfs mount is not
-guaranteed to be at /debug (and is more commonly at
-/sys/kernel/debug). For simple one time traces, the above is
-sufficent. For anything else, a search through /proc/mounts may
-be needed to find where the debugfs file-system is mounted.
-
 
 Single thread tracing
 ---------------------
 
-By writing into /debug/tracing/set_ftrace_pid you can trace a
+By writing into set_ftrace_pid you can trace a
 single thread. For example:
 
-# cat /debug/tracing/set_ftrace_pid
+# cat set_ftrace_pid
 no pid
-# echo 3111 > /debug/tracing/set_ftrace_pid
-# cat /debug/tracing/set_ftrace_pid
+# echo 3111 > set_ftrace_pid
+# cat set_ftrace_pid
 3111
-# echo function > /debug/tracing/current_tracer
-# cat /debug/tracing/trace | head
+# echo function > current_tracer
+# cat trace | head
  # tracer: function
  #
  #           TASK-PID    CPU#    TIMESTAMP  FUNCTION
@@ -1184,8 +1209,8 @@ no pid
      yum-updatesd-3111  [003]  1637.254683: lock_hrtimer_base <-hrtimer_try_to_cancel
      yum-updatesd-3111  [003]  1637.254685: fget_light <-do_sys_poll
      yum-updatesd-3111  [003]  1637.254686: pipe_poll <-do_sys_poll
-# echo -1 > /debug/tracing/set_ftrace_pid
-# cat /debug/tracing/trace |head
+# echo -1 > set_ftrace_pid
+# cat trace |head
  # tracer: function
  #
  #           TASK-PID    CPU#    TIMESTAMP  FUNCTION
@@ -1206,6 +1231,53 @@ something like this simple program:
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
+
+#define _STR(x) #x
+#define STR(x) _STR(x)
+#define MAX_PATH 256
+
+const char *find_debugfs(void)
+{
+       static char debugfs[MAX_PATH+1];
+       static int debugfs_found;
+       char type[100];
+       FILE *fp;
+
+       if (debugfs_found)
+               return debugfs;
+
+       if ((fp = fopen("/proc/mounts","r")) == NULL) {
+               perror("/proc/mounts");
+               return NULL;
+       }
+
+       while (fscanf(fp, "%*s %"
+                     STR(MAX_PATH)
+                     "s %99s %*s %*d %*d\n",
+                     debugfs, type) == 2) {
+               if (strcmp(type, "debugfs") == 0)
+                       break;
+       }
+       fclose(fp);
+
+       if (strcmp(type, "debugfs") != 0) {
+               fprintf(stderr, "debugfs not mounted");
+               return NULL;
+       }
+
+       strcat(debugfs, "/tracing/");
+       debugfs_found = 1;
+
+       return debugfs;
+}
+
+const char *tracing_file(const char *file_name)
+{
+       static char trace_file[MAX_PATH+1];
+       snprintf(trace_file, MAX_PATH, "%s/%s", find_debugfs(), file_name);
+       return trace_file;
+}
 
 int main (int argc, char **argv)
 {
@@ -1217,12 +1289,12 @@ int main (int argc, char **argv)
                 char line[64];
                 int s;
 
-                ffd = open("/debug/tracing/current_tracer", O_WRONLY);
+                ffd = open(tracing_file("current_tracer"), O_WRONLY);
                 if (ffd < 0)
                         exit(-1);
                 write(ffd, "nop", 3);
 
-                fd = open("/debug/tracing/set_ftrace_pid", O_WRONLY);
+                fd = open(tracing_file("set_ftrace_pid"), O_WRONLY);
                 s = sprintf(line, "%d\n", getpid());
                 write(fd, line, s);
 
@@ -1374,22 +1446,22 @@ want, depending on your needs.
   tracing_cpu_mask file) or you might sometimes see unordered
   function calls while cpu tracing switch.
 
-	hide: echo nofuncgraph-cpu > /debug/tracing/trace_options
-	show: echo funcgraph-cpu > /debug/tracing/trace_options
+	hide: echo nofuncgraph-cpu > trace_options
+	show: echo funcgraph-cpu > trace_options
 
 - The duration (function's time of execution) is displayed on
   the closing bracket line of a function or on the same line
   than the current function in case of a leaf one. It is default
   enabled.
 
-	hide: echo nofuncgraph-duration > /debug/tracing/trace_options
-	show: echo funcgraph-duration > /debug/tracing/trace_options
+	hide: echo nofuncgraph-duration > trace_options
+	show: echo funcgraph-duration > trace_options
 
 - The overhead field precedes the duration field in case of
   reached duration thresholds.
 
-	hide: echo nofuncgraph-overhead > /debug/tracing/trace_options
-	show: echo funcgraph-overhead > /debug/tracing/trace_options
+	hide: echo nofuncgraph-overhead > trace_options
+	show: echo funcgraph-overhead > trace_options
 	depends on: funcgraph-duration
 
   ie:
@@ -1418,8 +1490,8 @@ want, depending on your needs.
 - The task/pid field displays the thread cmdline and pid which
   executed the function. It is default disabled.
 
-	hide: echo nofuncgraph-proc > /debug/tracing/trace_options
-	show: echo funcgraph-proc > /debug/tracing/trace_options
+	hide: echo nofuncgraph-proc > trace_options
+	show: echo funcgraph-proc > trace_options
 
   ie:
 
@@ -1442,8 +1514,8 @@ want, depending on your needs.
   system clock since it started. A snapshot of this time is
   given on each entry/exit of functions
 
-	hide: echo nofuncgraph-abstime > /debug/tracing/trace_options
-	show: echo funcgraph-abstime > /debug/tracing/trace_options
+	hide: echo nofuncgraph-abstime > trace_options
+	show: echo funcgraph-abstime > trace_options
 
   ie:
 
@@ -1540,7 +1612,7 @@ listed in:
 
    available_filter_functions
 
- # cat /debug/tracing/available_filter_functions
+ # cat available_filter_functions
 put_prev_task_idle
 kmem_cache_create
 pick_next_task_rt
@@ -1552,12 +1624,12 @@ mutex_lock
 If I am only interested in sys_nanosleep and hrtimer_interrupt:
 
  # echo sys_nanosleep hrtimer_interrupt \
-		> /debug/tracing/set_ftrace_filter
- # echo ftrace > /debug/tracing/current_tracer
- # echo 1 > /debug/tracing/tracing_enabled
+		> set_ftrace_filter
+ # echo ftrace > current_tracer
+ # echo 1 > tracing_enabled
  # usleep 1
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: ftrace
 #
 #           TASK-PID   CPU#    TIMESTAMP  FUNCTION
@@ -1568,7 +1640,7 @@ If I am only interested in sys_nanosleep and hrtimer_interrupt:
 
 To see which functions are being traced, you can cat the file:
 
- # cat /debug/tracing/set_ftrace_filter
+ # cat set_ftrace_filter
 hrtimer_interrupt
 sys_nanosleep
 
@@ -1588,7 +1660,7 @@ Note: It is better to use quotes to enclose the wild cards,
       otherwise the shell may expand the parameters into names
       of files in the local directory.
 
- # echo 'hrtimer_*' > /debug/tracing/set_ftrace_filter
+ # echo 'hrtimer_*' > set_ftrace_filter
 
 Produces:
 
@@ -1609,7 +1681,7 @@ Produces:
 
 Notice that we lost the sys_nanosleep.
 
- # cat /debug/tracing/set_ftrace_filter
+ # cat set_ftrace_filter
 hrtimer_run_queues
 hrtimer_run_pending
 hrtimer_init
@@ -1635,17 +1707,17 @@ To append to the filters, use '>>'
 To clear out a filter so that all functions will be recorded
 again:
 
- # echo > /debug/tracing/set_ftrace_filter
- # cat /debug/tracing/set_ftrace_filter
+ # echo > set_ftrace_filter
+ # cat set_ftrace_filter
  #
 
 Again, now we want to append.
 
- # echo sys_nanosleep > /debug/tracing/set_ftrace_filter
- # cat /debug/tracing/set_ftrace_filter
+ # echo sys_nanosleep > set_ftrace_filter
+ # cat set_ftrace_filter
 sys_nanosleep
- # echo 'hrtimer_*' >> /debug/tracing/set_ftrace_filter
- # cat /debug/tracing/set_ftrace_filter
+ # echo 'hrtimer_*' >> set_ftrace_filter
+ # cat set_ftrace_filter
 hrtimer_run_queues
 hrtimer_run_pending
 hrtimer_init
@@ -1668,7 +1740,7 @@ hrtimer_init_sleeper
 The set_ftrace_notrace prevents those functions from being
 traced.
 
- # echo '*preempt*' '*lock*' > /debug/tracing/set_ftrace_notrace
+ # echo '*preempt*' '*lock*' > set_ftrace_notrace
 
 Produces:
 
@@ -1758,13 +1830,13 @@ the effect on the tracing is different. Every read from
 trace_pipe is consumed. This means that subsequent reads will be
 different. The trace is live.
 
- # echo function > /debug/tracing/current_tracer
- # cat /debug/tracing/trace_pipe > /tmp/trace.out &
+ # echo function > current_tracer
+ # cat trace_pipe > /tmp/trace.out &
 [1] 4153
- # echo 1 > /debug/tracing/tracing_enabled
+ # echo 1 > tracing_enabled
  # usleep 1
- # echo 0 > /debug/tracing/tracing_enabled
- # cat /debug/tracing/trace
+ # echo 0 > tracing_enabled
+ # cat trace
 # tracer: function
 #
 #           TASK-PID   CPU#    TIMESTAMP  FUNCTION
@@ -1800,7 +1872,7 @@ number listed is the number of entries that can be recorded per
 CPU. To know the full size, multiply the number of possible CPUS
 with the number of entries.
 
- # cat /debug/tracing/buffer_size_kb
+ # cat buffer_size_kb
 1408 (units kilobytes)
 
 Note, to modify this, you must have tracing completely disabled.
@@ -1808,21 +1880,21 @@ To do that, echo "nop" into the current_tracer. If the
 current_tracer is not set to "nop", an EINVAL error will be
 returned.
 
- # echo nop > /debug/tracing/current_tracer
- # echo 10000 > /debug/tracing/buffer_size_kb
- # cat /debug/tracing/buffer_size_kb
+ # echo nop > current_tracer
+ # echo 10000 > buffer_size_kb
+ # cat buffer_size_kb
 10000 (units kilobytes)
 
 The number of pages which will be allocated is limited to a
 percentage of available memory. Allocating too much will produce
 an error.
 
- # echo 1000000000000 > /debug/tracing/buffer_size_kb
+ # echo 1000000000000 > buffer_size_kb
 -bash: echo: write error: Cannot allocate memory
- # cat /debug/tracing/buffer_size_kb
+ # cat buffer_size_kb
 85
 
 -----------
 
 More details can be found in the source code, in the
-kernel/tracing/*.c files.
+kernel/trace/*.c files.

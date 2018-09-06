@@ -129,7 +129,7 @@ static int veth_set_tx_csum(struct net_device *dev, u32 data)
 	return 0;
 }
 
-static struct ethtool_ops veth_ethtool_ops = {
+static const struct ethtool_ops veth_ethtool_ops = {
 	.get_settings		= veth_get_settings,
 	.get_drvinfo		= veth_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
@@ -148,7 +148,7 @@ static struct ethtool_ops veth_ethtool_ops = {
  * xmit
  */
 
-static int veth_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t veth_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct net_device *rcv = NULL;
 	struct veth_priv *priv, *rcv_priv;
@@ -171,13 +171,12 @@ static int veth_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (skb->len > (rcv->mtu + MTU_PAD))
 		goto rx_drop;
 
+        skb->tstamp.tv64 = 0;
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, rcv);
 	if (dev->features & NETIF_F_NO_CSUM)
 		skb->ip_summed = rcv_priv->ip_summed;
 
-	dst_release(skb->dst);
-	skb->dst = NULL;
 	skb->mark = 0;
 	secpath_reset(skb);
 	nf_reset(skb);
@@ -191,17 +190,17 @@ static int veth_xmit(struct sk_buff *skb, struct net_device *dev)
 	rcv_stats->rx_packets++;
 
 	netif_rx(skb);
-	return 0;
+	return NETDEV_TX_OK;
 
 tx_drop:
 	kfree_skb(skb);
 	stats->tx_dropped++;
-	return 0;
+	return NETDEV_TX_OK;
 
 rx_drop:
 	kfree_skb(skb);
 	rcv_stats->rx_dropped++;
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 /*
@@ -210,31 +209,30 @@ rx_drop:
 
 static struct net_device_stats *veth_get_stats(struct net_device *dev)
 {
-	struct veth_priv *priv = netdev_priv(dev);
-	struct net_device_stats *dev_stats = &dev->stats;
-	unsigned int cpu;
-	struct veth_net_stats *stats;
+	struct veth_priv *priv;
+	int cpu;
+	struct veth_net_stats *stats, total = {0};
 
-	dev_stats->rx_packets = 0;
-	dev_stats->tx_packets = 0;
-	dev_stats->rx_bytes = 0;
-	dev_stats->tx_bytes = 0;
-	dev_stats->tx_dropped = 0;
-	dev_stats->rx_dropped = 0;
+	priv = netdev_priv(dev);
 
-	if (priv->stats)
-		for_each_online_cpu(cpu) {
-			stats = per_cpu_ptr(priv->stats, cpu);
+	for_each_possible_cpu(cpu) {
+		stats = per_cpu_ptr(priv->stats, cpu);
 
-			dev_stats->rx_packets += stats->rx_packets;
-			dev_stats->tx_packets += stats->tx_packets;
-			dev_stats->rx_bytes += stats->rx_bytes;
-			dev_stats->tx_bytes += stats->tx_bytes;
-			dev_stats->tx_dropped += stats->tx_dropped;
-			dev_stats->rx_dropped += stats->rx_dropped;
-		}
+		total.rx_packets += stats->rx_packets;
+		total.tx_packets += stats->tx_packets;
+		total.rx_bytes   += stats->rx_bytes;
+		total.tx_bytes   += stats->tx_bytes;
+		total.tx_dropped += stats->tx_dropped;
+		total.rx_dropped += stats->rx_dropped;
+	}
+	dev->stats.rx_packets = total.rx_packets;
+	dev->stats.tx_packets = total.tx_packets;
+	dev->stats.rx_bytes   = total.rx_bytes;
+	dev->stats.tx_bytes   = total.tx_bytes;
+	dev->stats.tx_dropped = total.tx_dropped;
+	dev->stats.rx_dropped = total.rx_dropped;
 
-	return dev_stats;
+	return &dev->stats;
 }
 
 static int veth_open(struct net_device *dev)
@@ -259,8 +257,6 @@ static int veth_close(struct net_device *dev)
 	netif_carrier_off(dev);
 	netif_carrier_off(priv->peer);
 
-	free_percpu(priv->stats);
-	priv->stats = NULL;
 	return 0;
 }
 
@@ -291,6 +287,15 @@ static int veth_dev_init(struct net_device *dev)
 	return 0;
 }
 
+static void veth_dev_free(struct net_device *dev)
+{
+	struct veth_priv *priv;
+
+	priv = netdev_priv(dev);
+	free_percpu(priv->stats);
+	free_netdev(dev);
+}
+
 static const struct net_device_ops veth_netdev_ops = {
 	.ndo_init            = veth_dev_init,
 	.ndo_open            = veth_open,
@@ -308,7 +313,7 @@ static void veth_setup(struct net_device *dev)
 	dev->netdev_ops = &veth_netdev_ops;
 	dev->ethtool_ops = &veth_ethtool_ops;
 	dev->features |= NETIF_F_LLTX;
-	dev->destructor = free_netdev;
+	dev->destructor = veth_dev_free;
 }
 
 /*

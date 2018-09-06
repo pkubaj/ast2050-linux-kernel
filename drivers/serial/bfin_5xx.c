@@ -42,6 +42,10 @@
 # undef CONFIG_EARLY_PRINTK
 #endif
 
+#ifdef CONFIG_SERIAL_BFIN_MODULE
+# undef CONFIG_EARLY_PRINTK
+#endif
+
 /* UART name and device definitions */
 #define BFIN_SERIAL_NAME	"ttyBF"
 #define BFIN_SERIAL_MAJOR	204
@@ -140,7 +144,7 @@ static void bfin_serial_stop_tx(struct uart_port *port)
 {
 	struct bfin_serial_port *uart = (struct bfin_serial_port *)port;
 #ifdef CONFIG_SERIAL_BFIN_DMA
-	struct circ_buf *xmit = &uart->port.info->xmit;
+	struct circ_buf *xmit = &uart->port.state->xmit;
 #endif
 
 	while (!(UART_GET_LSR(uart) & TEMT))
@@ -167,7 +171,7 @@ static void bfin_serial_stop_tx(struct uart_port *port)
 static void bfin_serial_start_tx(struct uart_port *port)
 {
 	struct bfin_serial_port *uart = (struct bfin_serial_port *)port;
-	struct tty_struct *tty = uart->port.info->port.tty;
+	struct tty_struct *tty = uart->port.state->port.tty;
 
 #ifdef CONFIG_SERIAL_BFIN_HARD_CTSRTS
 	if (uart->scts && !(bfin_serial_get_mctrl(&uart->port) & TIOCM_CTS)) {
@@ -239,10 +243,10 @@ static void bfin_serial_rx_chars(struct bfin_serial_port *uart)
 			return;
 		}
 
-	if (!uart->port.info || !uart->port.info->port.tty)
+	if (!uart->port.state || !uart->port.state->port.tty)
 		return;
 #endif
-	tty = uart->port.info->port.tty;
+	tty = uart->port.state->port.tty;
 
 	if (ANOMALY_05000363) {
 		/* The BF533 (and BF561) family of processors have a nice anomaly
@@ -327,13 +331,18 @@ static void bfin_serial_rx_chars(struct bfin_serial_port *uart)
 
 static void bfin_serial_tx_chars(struct bfin_serial_port *uart)
 {
-	struct circ_buf *xmit = &uart->port.info->xmit;
+	struct circ_buf *xmit = &uart->port.state->xmit;
 
 	if (uart_circ_empty(xmit) || uart_tx_stopped(&uart->port)) {
 #ifdef CONFIG_BF54x
 		/* Clear TFI bit */
 		UART_PUT_LSR(uart, TFI);
 #endif
+		/* Anomaly notes:
+		 *  05000215 -	we always clear ETBEI within last UART TX
+		 *		interrupt to end a string. It is always set
+		 *		when start a new tx.
+		 */
 		UART_CLEAR_IER(uart, ETBEI);
 		return;
 	}
@@ -389,7 +398,7 @@ static irqreturn_t bfin_serial_tx_int(int irq, void *dev_id)
 #ifdef CONFIG_SERIAL_BFIN_DMA
 static void bfin_serial_dma_tx_chars(struct bfin_serial_port *uart)
 {
-	struct circ_buf *xmit = &uart->port.info->xmit;
+	struct circ_buf *xmit = &uart->port.state->xmit;
 
 	uart->tx_done = 0;
 
@@ -419,6 +428,7 @@ static void bfin_serial_dma_tx_chars(struct bfin_serial_port *uart)
 	set_dma_start_addr(uart->tx_dma_channel, (unsigned long)(xmit->buf+xmit->tail));
 	set_dma_x_count(uart->tx_dma_channel, uart->tx_count);
 	set_dma_x_modify(uart->tx_dma_channel, 1);
+	SSYNC();
 	enable_dma(uart->tx_dma_channel);
 
 	UART_SET_IER(uart, ETBEI);
@@ -426,7 +436,7 @@ static void bfin_serial_dma_tx_chars(struct bfin_serial_port *uart)
 
 static void bfin_serial_dma_rx_chars(struct bfin_serial_port *uart)
 {
-	struct tty_struct *tty = uart->port.info->port.tty;
+	struct tty_struct *tty = uart->port.state->port.tty;
 	int i, flg, status;
 
 	status = UART_GET_LSR(uart);
@@ -477,27 +487,41 @@ static void bfin_serial_dma_rx_chars(struct bfin_serial_port *uart)
 void bfin_serial_rx_dma_timeout(struct bfin_serial_port *uart)
 {
 	int x_pos, pos;
-	unsigned long flags;
 
-	spin_lock_irqsave(&uart->port.lock, flags);
+	dma_disable_irq(uart->rx_dma_channel);
+	spin_lock_bh(&uart->port.lock);
 
+	/* 2D DMA RX buffer ring is used. Because curr_y_count and
+	 * curr_x_count can't be read as an atomic operation,
+	 * curr_y_count should be read before curr_x_count. When
+	 * curr_x_count is read, curr_y_count may already indicate
+	 * next buffer line. But, the position calculated here is
+	 * still indicate the old line. The wrong position data may
+	 * be smaller than current buffer tail, which cause garbages
+	 * are received if it is not prohibit.
+	 */
 	uart->rx_dma_nrows = get_dma_curr_ycount(uart->rx_dma_channel);
 	x_pos = get_dma_curr_xcount(uart->rx_dma_channel);
 	uart->rx_dma_nrows = DMA_RX_YCOUNT - uart->rx_dma_nrows;
-	if (uart->rx_dma_nrows == DMA_RX_YCOUNT)
+	if (uart->rx_dma_nrows == DMA_RX_YCOUNT || x_pos == 0)
 		uart->rx_dma_nrows = 0;
 	x_pos = DMA_RX_XCOUNT - x_pos;
 	if (x_pos == DMA_RX_XCOUNT)
 		x_pos = 0;
 
 	pos = uart->rx_dma_nrows * DMA_RX_XCOUNT + x_pos;
-	if (pos != uart->rx_dma_buf.tail) {
+	/* Ignore receiving data if new position is in the same line of
+	 * current buffer tail and small.
+	 */
+	if (pos > uart->rx_dma_buf.tail ||
+		uart->rx_dma_nrows < (uart->rx_dma_buf.tail/DMA_RX_XCOUNT)) {
 		uart->rx_dma_buf.head = pos;
 		bfin_serial_dma_rx_chars(uart);
 		uart->rx_dma_buf.tail = uart->rx_dma_buf.head;
 	}
 
-	spin_unlock_irqrestore(&uart->port.lock, flags);
+	spin_unlock_bh(&uart->port.lock);
+	dma_enable_irq(uart->rx_dma_channel);
 
 	mod_timer(&(uart->rx_dma_timer), jiffies + DMA_RX_FLUSH_JIFFIES);
 }
@@ -505,7 +529,7 @@ void bfin_serial_rx_dma_timeout(struct bfin_serial_port *uart)
 static irqreturn_t bfin_serial_dma_tx_int(int irq, void *dev_id)
 {
 	struct bfin_serial_port *uart = dev_id;
-	struct circ_buf *xmit = &uart->port.info->xmit;
+	struct circ_buf *xmit = &uart->port.state->xmit;
 
 #ifdef CONFIG_SERIAL_BFIN_HARD_CTSRTS
 	if (uart->scts && !(bfin_serial_get_mctrl(&uart->port)&TIOCM_CTS)) {
@@ -518,6 +542,11 @@ static irqreturn_t bfin_serial_dma_tx_int(int irq, void *dev_id)
 	if (!(get_dma_curr_irqstat(uart->tx_dma_channel)&DMA_RUN)) {
 		disable_dma(uart->tx_dma_channel);
 		clear_dma_irqstat(uart->tx_dma_channel);
+		/* Anomaly notes:
+		 *  05000215 -	we always clear ETBEI within last UART TX
+		 *		interrupt to end a string. It is always set
+		 *		when start a new tx.
+		 */
 		UART_CLEAR_IER(uart, ETBEI);
 		xmit->tail = (xmit->tail + uart->tx_count) & (UART_XMIT_SIZE - 1);
 		uart->port.icount.tx += uart->tx_count;
@@ -536,11 +565,26 @@ static irqreturn_t bfin_serial_dma_rx_int(int irq, void *dev_id)
 {
 	struct bfin_serial_port *uart = dev_id;
 	unsigned short irqstat;
+	int x_pos, pos;
 
 	spin_lock(&uart->port.lock);
 	irqstat = get_dma_curr_irqstat(uart->rx_dma_channel);
 	clear_dma_irqstat(uart->rx_dma_channel);
-	bfin_serial_dma_rx_chars(uart);
+
+	uart->rx_dma_nrows = get_dma_curr_ycount(uart->rx_dma_channel);
+	x_pos = get_dma_curr_xcount(uart->rx_dma_channel);
+	uart->rx_dma_nrows = DMA_RX_YCOUNT - uart->rx_dma_nrows;
+	if (uart->rx_dma_nrows == DMA_RX_YCOUNT || x_pos == 0)
+		uart->rx_dma_nrows = 0;
+
+	pos = uart->rx_dma_nrows * DMA_RX_XCOUNT;
+	if (pos > uart->rx_dma_buf.tail ||
+		uart->rx_dma_nrows < (uart->rx_dma_buf.tail/DMA_RX_XCOUNT)) {
+		uart->rx_dma_buf.head = pos;
+		bfin_serial_dma_rx_chars(uart);
+		uart->rx_dma_buf.tail = uart->rx_dma_buf.head;
+	}
+
 	spin_unlock(&uart->port.lock);
 
 	return IRQ_HANDLED;
@@ -793,8 +837,16 @@ bfin_serial_set_termios(struct uart_port *port, struct ktermios *termios,
 			__func__);
 	}
 
-	if (termios->c_cflag & CSTOPB)
-		lcr |= STB;
+	/* Anomaly notes:
+	 *  05000231 -  STOP bit is always set to 1 whatever the user is set.
+	 */
+	if (termios->c_cflag & CSTOPB) {
+		if (ANOMALY_05000231)
+			printk(KERN_WARNING "STOP bits other than 1 is not "
+				"supported in case of anomaly 05000231.\n");
+		else
+			lcr |= STB;
+	}
 	if (termios->c_cflag & PARENB)
 		lcr |= PEN;
 	if (!(termios->c_cflag & PARODD))
@@ -913,10 +965,10 @@ static void bfin_serial_set_ldisc(struct uart_port *port)
 	int line = port->line;
 	unsigned short val;
 
-	if (line >= port->info->port.tty->driver->num)
+	if (line >= port->state->port.tty->driver->num)
 		return;
 
-	switch (port->info->port.tty->termios->c_line) {
+	switch (port->state->port.tty->termios->c_line) {
 	case N_IRDA:
 		val = UART_GET_GCTL(&bfin_serial_ports[line]);
 		val |= (IREN | RPOLC);
@@ -944,6 +996,10 @@ static void bfin_serial_reset_irda(struct uart_port *port)
 }
 
 #ifdef CONFIG_CONSOLE_POLL
+/* Anomaly notes:
+ *  05000099 -  Because we only use THRE in poll_put and DR in poll_get,
+ *		losing other bits of UART_LSR is not a problem here.
+ */
 static void bfin_serial_poll_put_char(struct uart_port *port, unsigned char chr)
 {
 	struct bfin_serial_port *uart = (struct bfin_serial_port *)port;
@@ -1250,12 +1306,17 @@ static __init void early_serial_write(struct console *con, const char *s,
 	}
 }
 
+/*
+ * This should have a .setup or .early_setup in it, but then things get called
+ * without the command line options, and the baud rate gets messed up - so
+ * don't let the common infrastructure play with things. (see calls to setup
+ * & earlysetup in ./kernel/printk.c:register_console()
+ */
 static struct __initdata console bfin_early_serial_console = {
 	.name = "early_BFuart",
 	.write = early_serial_write,
 	.device = uart_console_device,
 	.flags = CON_PRINTBUFFER,
-	.setup = bfin_serial_console_setup,
 	.index = -1,
 	.data  = &bfin_serial_reg,
 };

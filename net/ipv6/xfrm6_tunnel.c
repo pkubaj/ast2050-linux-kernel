@@ -258,11 +258,11 @@ static int xfrm6_tunnel_rcv(struct sk_buff *skb)
 	__be32 spi;
 
 	spi = xfrm6_tunnel_spi_lookup((xfrm_address_t *)&iph->saddr);
-	return xfrm6_rcv_spi(skb, IPPROTO_IPV6, spi) > 0 ? : 0;
+	return xfrm6_rcv_spi(skb, IPPROTO_IPV6, spi);
 }
 
 static int xfrm6_tunnel_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
-			    int type, int code, int offset, __be32 info)
+			    u8 type, u8 code, int offset, __be32 info)
 {
 	/* xfrm6_tunnel native err handling */
 	switch (type) {
@@ -344,32 +344,38 @@ static struct xfrm6_tunnel xfrm46_tunnel_handler = {
 
 static int __init xfrm6_tunnel_init(void)
 {
-	if (xfrm_register_type(&xfrm6_tunnel_type, AF_INET6) < 0)
+	int rv;
+
+	rv = xfrm6_tunnel_spi_init();
+	if (rv < 0)
 		goto err;
-	if (xfrm6_tunnel_register(&xfrm6_tunnel_handler, AF_INET6))
-		goto unreg;
-	if (xfrm6_tunnel_register(&xfrm46_tunnel_handler, AF_INET))
-		goto dereg6;
-	if (xfrm6_tunnel_spi_init() < 0)
-		goto dereg46;
+	rv = xfrm_register_type(&xfrm6_tunnel_type, AF_INET6);
+	if (rv < 0)
+		goto out_type;
+	rv = xfrm6_tunnel_register(&xfrm6_tunnel_handler, AF_INET6);
+	if (rv < 0)
+		goto out_xfrm6;
+	rv = xfrm6_tunnel_register(&xfrm46_tunnel_handler, AF_INET);
+	if (rv < 0)
+		goto out_xfrm46;
 	return 0;
 
-dereg46:
-	xfrm6_tunnel_deregister(&xfrm46_tunnel_handler, AF_INET);
-dereg6:
+out_xfrm46:
 	xfrm6_tunnel_deregister(&xfrm6_tunnel_handler, AF_INET6);
-unreg:
+out_xfrm6:
 	xfrm_unregister_type(&xfrm6_tunnel_type, AF_INET6);
+out_type:
+	xfrm6_tunnel_spi_fini();
 err:
-	return -EAGAIN;
+	return rv;
 }
 
 static void __exit xfrm6_tunnel_fini(void)
 {
-	xfrm6_tunnel_spi_fini();
 	xfrm6_tunnel_deregister(&xfrm46_tunnel_handler, AF_INET);
 	xfrm6_tunnel_deregister(&xfrm6_tunnel_handler, AF_INET6);
 	xfrm_unregister_type(&xfrm6_tunnel_type, AF_INET6);
+	xfrm6_tunnel_spi_fini();
 }
 
 module_init(xfrm6_tunnel_init);

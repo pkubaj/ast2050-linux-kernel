@@ -253,7 +253,7 @@ static int ep93xx_rx(struct net_device *dev, int processed, int budget)
 		skb = dev_alloc_skb(length + 2);
 		if (likely(skb != NULL)) {
 			skb_reserve(skb, 2);
-			dma_sync_single(NULL, ep->descs->rdesc[entry].buf_addr,
+			dma_sync_single_for_cpu(NULL, ep->descs->rdesc[entry].buf_addr,
 						length, DMA_FROM_DEVICE);
 			skb_copy_to_linear_data(skb, ep->rx_buf[entry], length);
 			skb_put(skb, length);
@@ -331,7 +331,7 @@ static int ep93xx_xmit(struct sk_buff *skb, struct net_device *dev)
 	ep->descs->tdesc[entry].tdesc1 =
 		TDESC1_EOF | (entry << 16) | (skb->len & 0xfff);
 	skb_copy_and_csum_dev(skb, ep->tx_buf[entry]);
-	dma_sync_single(NULL, ep->descs->tdesc[entry].buf_addr,
+	dma_sync_single_for_cpu(NULL, ep->descs->tdesc[entry].buf_addr,
 				skb->len, DMA_TO_DEVICE);
 	dev_kfree_skb(skb);
 
@@ -628,15 +628,6 @@ static int ep93xx_open(struct net_device *dev)
 	if (ep93xx_alloc_buffers(ep))
 		return -ENOMEM;
 
-	if (is_zero_ether_addr(dev->dev_addr)) {
-		random_ether_addr(dev->dev_addr);
-		printk(KERN_INFO "%s: generated random MAC address "
-			"%.2x:%.2x:%.2x:%.2x:%.2x:%.2x.\n", dev->name,
-			dev->dev_addr[0], dev->dev_addr[1],
-			dev->dev_addr[2], dev->dev_addr[3],
-			dev->dev_addr[4], dev->dev_addr[5]);
-	}
-
 	napi_enable(&ep->napi);
 
 	if (ep93xx_start_hw(dev)) {
@@ -762,7 +753,7 @@ static u32 ep93xx_get_link(struct net_device *dev)
 	return mii_link_ok(&ep->mii);
 }
 
-static struct ethtool_ops ep93xx_ethtool_ops = {
+static const struct ethtool_ops ep93xx_ethtool_ops = {
 	.get_drvinfo		= ep93xx_get_drvinfo,
 	.get_settings		= ep93xx_get_settings,
 	.set_settings		= ep93xx_set_settings,
@@ -876,6 +867,9 @@ static int ep93xx_eth_probe(struct platform_device *pdev)
 	ep->mii.mdio_read = ep93xx_mdio_read;
 	ep->mii.mdio_write = ep93xx_mdio_write;
 	ep->mdc_divisor = 40;	/* Max HCLK 100 MHz, min MDIO clk 2.5 MHz.  */
+
+	if (is_zero_ether_addr(dev->dev_addr))
+		random_ether_addr(dev->dev_addr);
 
 	err = register_netdev(dev);
 	if (err) {

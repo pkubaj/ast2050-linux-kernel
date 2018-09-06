@@ -180,6 +180,33 @@ int cx88_i2c_init(struct cx88_core *core, struct pci_dev *pci)
 			do_i2c_scan(core->name,&core->i2c_client);
 	} else
 		printk("%s: i2c register FAILED\n", core->name);
+
+	/* Instantiate the IR receiver device, if present */
+	if (0 == core->i2c_rc) {
+		struct i2c_board_info info;
+		const unsigned short addr_list[] = {
+			0x18, 0x6b, 0x71,
+			I2C_CLIENT_END
+		};
+		const unsigned short *addrp;
+
+		memset(&info, 0, sizeof(struct i2c_board_info));
+		strlcpy(info.type, "ir_video", I2C_NAME_SIZE);
+		/*
+		 * We can't call i2c_new_probed_device() because it uses
+		 * quick writes for probing and at least some R receiver
+		 * devices only reply to reads.
+		 */
+		for (addrp = addr_list; *addrp != I2C_CLIENT_END; addrp++) {
+			if (i2c_smbus_xfer(&core->i2c_adap, *addrp, 0,
+					   I2C_SMBUS_READ, 0,
+					   I2C_SMBUS_QUICK, NULL) >= 0) {
+				info.addr = *addrp;
+				i2c_new_device(&core->i2c_adap, &info);
+				break;
+			}
+		}
+	}
 	return core->i2c_rc;
 }
 

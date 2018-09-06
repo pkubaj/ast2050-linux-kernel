@@ -70,10 +70,8 @@ static int debug;
 /* Function prototypes */
 static int  kobil_startup(struct usb_serial *serial);
 static void kobil_release(struct usb_serial *serial);
-static int  kobil_open(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp);
-static void kobil_close(struct tty_struct *tty, struct usb_serial_port *port,
-			struct file *filp);
+static int  kobil_open(struct tty_struct *tty, struct usb_serial_port *port);
+static void kobil_close(struct usb_serial_port *port);
 static int  kobil_write(struct tty_struct *tty, struct usb_serial_port *port,
 			 const unsigned char *buf, int count);
 static int  kobil_write_room(struct tty_struct *tty);
@@ -86,7 +84,7 @@ static void kobil_read_int_callback(struct urb *urb);
 static void kobil_write_callback(struct urb *purb);
 static void kobil_set_termios(struct tty_struct *tty,
 			struct usb_serial_port *port, struct ktermios *old);
-
+static void kobil_init_termios(struct tty_struct *tty);
 
 static struct usb_device_id id_table [] = {
 	{ USB_DEVICE(KOBIL_VENDOR_ID, KOBIL_ADAPTER_B_PRODUCT_ID) },
@@ -121,6 +119,7 @@ static struct usb_serial_driver kobil_device = {
 	.release =		kobil_release,
 	.ioctl =		kobil_ioctl,
 	.set_termios =		kobil_set_termios,
+	.init_termios =		kobil_init_termios,
 	.tiocmget =		kobil_tiocmget,
 	.tiocmset =		kobil_tiocmset,
 	.open =			kobil_open,
@@ -211,9 +210,17 @@ static void kobil_release(struct usb_serial *serial)
 		kfree(usb_get_serial_port_data(serial->port[i]));
 }
 
+static void kobil_init_termios(struct tty_struct *tty)
+{
+	/* Default to echo off and other sane device settings */
+	tty->termios->c_lflag = 0;
+	tty->termios->c_lflag &= ~(ISIG | ICANON | ECHO | IEXTEN | XCASE);
+	tty->termios->c_iflag = IGNBRK | IGNPAR | IXOFF;
+	/* do NOT translate CR to CR-NL (0x0A -> 0x0A 0x0D) */
+	tty->termios->c_oflag &= ~ONLCR;
+}
 
-static int kobil_open(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static int kobil_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	int result = 0;
 	struct kobil_private *priv;
@@ -227,16 +234,6 @@ static int kobil_open(struct tty_struct *tty,
 	/* someone sets the dev to 0 if the close method has been called */
 	port->interrupt_in_urb->dev = port->serial->dev;
 
-	if (tty) {
-
-		/* Default to echo off and other sane device settings */
-		tty->termios->c_lflag = 0;
-		tty->termios->c_lflag &= ~(ISIG | ICANON | ECHO | IEXTEN |
-								 XCASE);
-		tty->termios->c_iflag = IGNBRK | IGNPAR | IXOFF;
-		/* do NOT translate CR to CR-NL (0x0A -> 0x0A 0x0D) */
-		tty->termios->c_oflag &= ~ONLCR;
-	}
 	/* allocate memory for transfer buffer */
 	transfer_buffer = kzalloc(transfer_buffer_length, GFP_KERNEL);
 	if (!transfer_buffer)
@@ -342,13 +339,14 @@ static int kobil_open(struct tty_struct *tty,
 }
 
 
-static void kobil_close(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *filp)
+static void kobil_close(struct usb_serial_port *port)
 {
 	dbg("%s - port %d", __func__, port->number);
 
+	/* FIXME: Add rts/dtr methods */
 	if (port->write_urb) {
-		usb_kill_urb(port->write_urb);
+		usb_poison_urb(port->write_urb);
+		kfree(port->write_urb->transfer_buffer);
 		usb_free_urb(port->write_urb);
 		port->write_urb = NULL;
 	}
@@ -374,7 +372,7 @@ static void kobil_read_int_callback(struct urb *urb)
 	}
 
 	tty = tty_port_tty_get(&port->port);
-	if (urb->actual_length) {
+	if (tty && urb->actual_length) {
 
 		/* BEGIN DEBUG */
 		/*
@@ -466,7 +464,7 @@ static int kobil_write(struct tty_struct *tty, struct usb_serial_port *port,
 			);
 
 			priv->cur_pos = priv->cur_pos + length;
-			result = usb_submit_urb(port->write_urb, GFP_NOIO);
+			result = usb_submit_urb(port->write_urb, GFP_ATOMIC);
 			dbg("%s - port %d Send write URB returns: %i",
 					__func__, port->number, result);
 			todo = priv->filled - priv->cur_pos;
@@ -490,7 +488,7 @@ static int kobil_write(struct tty_struct *tty, struct usb_serial_port *port,
 			port->interrupt_in_urb->dev = port->serial->dev;
 
 			result = usb_submit_urb(port->interrupt_in_urb,
-								GFP_NOIO);
+								GFP_ATOMIC);
 			dbg("%s - port %d Send read URB returns: %i",
 					__func__, port->number, result);
 		}

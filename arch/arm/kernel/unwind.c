@@ -26,6 +26,15 @@
  * http://infocenter.arm.com/help/topic/com.arm.doc.subset.swdev.abi/index.html
  */
 
+#if !defined (__ARM_EABI__)
+#warning Your compiler does not have EABI support.
+#warning    ARM unwind is known to compile only with EABI compilers.
+#warning    Change compiler or disable ARM_UNWIND option.
+#elif (__GNUC__ == 4 && __GNUC_MINOR__ <= 2)
+#warning Your compiler is too buggy; it is known to not compile ARM unwind support.
+#warning    Change compiler or disable ARM_UNWIND option.
+#endif
+
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -62,7 +71,11 @@ struct unwind_ctrl_block {
 };
 
 enum regs {
+#ifdef CONFIG_THUMB2_KERNEL
+	FP = 7,
+#else
 	FP = 11,
+#endif
 	SP = 13,
 	LR = 14,
 	PC = 15
@@ -212,7 +225,8 @@ static int unwind_exec_insn(struct unwind_ctrl_block *ctrl)
 			ctrl->vrs[14] = *vsp++;
 		ctrl->vrs[SP] = (unsigned long)vsp;
 	} else if (insn == 0xb0) {
-		ctrl->vrs[PC] = ctrl->vrs[LR];
+		if (ctrl->vrs[PC] == 0)
+			ctrl->vrs[PC] = ctrl->vrs[LR];
 		/* no further processing */
 		ctrl->entries = 0;
 	} else if (insn == 0xb1) {
@@ -309,17 +323,19 @@ int unwind_frame(struct stackframe *frame)
 	}
 
 	while (ctrl.entries > 0) {
-		int urc;
-
-		if (ctrl.vrs[SP] < low || ctrl.vrs[SP] >= high)
-			return -URC_FAILURE;
-		urc = unwind_exec_insn(&ctrl);
+		int urc = unwind_exec_insn(&ctrl);
 		if (urc < 0)
 			return urc;
+		if (ctrl.vrs[SP] < low || ctrl.vrs[SP] >= high)
+			return -URC_FAILURE;
 	}
 
 	if (ctrl.vrs[PC] == 0)
 		ctrl.vrs[PC] = ctrl.vrs[LR];
+
+	/* check for infinite loop */
+	if (frame->pc == ctrl.vrs[PC])
+		return -URC_FAILURE;
 
 	frame->fp = ctrl.vrs[FP];
 	frame->sp = ctrl.vrs[SP];
@@ -332,7 +348,6 @@ int unwind_frame(struct stackframe *frame)
 void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 {
 	struct stackframe frame;
-	unsigned long high, low;
 	register unsigned long current_sp asm ("sp");
 
 	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
@@ -361,9 +376,6 @@ void unwind_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		frame.lr = 0;
 		frame.pc = thread_saved_pc(tsk);
 	}
-
-	low = frame.sp & ~(THREAD_SIZE - 1);
-	high = low + THREAD_SIZE;
 
 	while (1) {
 		int urc;

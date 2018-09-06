@@ -1072,23 +1072,34 @@ static int unlink1 (struct usbtest_dev *dev, int pipe, int size, int async)
 	 */
 	msleep (jiffies % (2 * INTERRUPT_RATE));
 	if (async) {
-retry:
-		retval = usb_unlink_urb (urb);
-		if (retval == -EBUSY || retval == -EIDRM) {
-			/* we can't unlink urbs while they're completing.
-			 * or if they've completed, and we haven't resubmitted.
-			 * "normal" drivers would prevent resubmission, but
-			 * since we're testing unlink paths, we can't.
-			 */
-			ERROR(dev,  "unlink retry\n");
-			goto retry;
+		while (!completion_done(&completion)) {
+			retval = usb_unlink_urb(urb);
+
+			switch (retval) {
+			case -EBUSY:
+			case -EIDRM:
+				/* we can't unlink urbs while they're completing
+				 * or if they've completed, and we haven't
+				 * resubmitted. "normal" drivers would prevent
+				 * resubmission, but since we're testing unlink
+				 * paths, we can't.
+				 */
+				ERROR(dev, "unlink retry\n");
+				continue;
+			case 0:
+			case -EINPROGRESS:
+				break;
+
+			default:
+				dev_err(&dev->intf->dev,
+					"unlink fail %d\n", retval);
+				return retval;
+			}
+
+			break;
 		}
 	} else
 		usb_kill_urb (urb);
-	if (!(retval == 0 || retval == -EINPROGRESS)) {
-		dev_err(&dev->intf->dev, "unlink fail %d\n", retval);
-		return retval;
-	}
 
 	wait_for_completion (&completion);
 	retval = urb->status;
@@ -1371,7 +1382,6 @@ static void iso_callback (struct urb *urb)
 			break;
 		}
 	}
-	simple_free_urb (urb);
 
 	ctx->pending--;
 	if (ctx->pending == 0) {
@@ -1488,6 +1498,7 @@ test_iso_queue (struct usbtest_dev *dev, struct usbtest_param *param,
 			}
 
 			simple_free_urb (urbs [i]);
+			urbs[i] = NULL;
 			context.pending--;
 			context.submit_error = 1;
 			break;
@@ -1497,6 +1508,10 @@ test_iso_queue (struct usbtest_dev *dev, struct usbtest_param *param,
 
 	wait_for_completion (&context.done);
 
+	for (i = 0; i < param->sglen; i++) {
+		if (urbs[i])
+			simple_free_urb(urbs[i]);
+	}
 	/*
 	 * Isochronous transfers are expected to fail sometimes.  As an
 	 * arbitrary limit, we will report an error if any submissions

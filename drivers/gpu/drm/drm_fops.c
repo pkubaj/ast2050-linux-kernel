@@ -140,14 +140,16 @@ int drm_open(struct inode *inode, struct file *filp)
 		spin_unlock(&dev->count_lock);
 	}
 out:
-	mutex_lock(&dev->struct_mutex);
-	if (minor->type == DRM_MINOR_LEGACY) {
-		BUG_ON((dev->dev_mapping != NULL) &&
-			(dev->dev_mapping != inode->i_mapping));
-		if (dev->dev_mapping == NULL)
-			dev->dev_mapping = inode->i_mapping;
+	if (!retcode) {
+		mutex_lock(&dev->struct_mutex);
+		if (minor->type == DRM_MINOR_LEGACY) {
+			if (dev->dev_mapping == NULL)
+				dev->dev_mapping = inode->i_mapping;
+			else if (dev->dev_mapping != inode->i_mapping)
+				retcode = -ENODEV;
+		}
+		mutex_unlock(&dev->struct_mutex);
 	}
-	mutex_unlock(&dev->struct_mutex);
 
 	return retcode;
 }
@@ -240,7 +242,7 @@ static int drm_open_helper(struct inode *inode, struct file *filp,
 
 	DRM_DEBUG("pid = %d, minor = %d\n", task_pid_nr(current), minor_id);
 
-	priv = drm_alloc(sizeof(*priv), DRM_MEM_FILES);
+	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
@@ -328,7 +330,7 @@ static int drm_open_helper(struct inode *inode, struct file *filp,
 
 	return 0;
       out_free:
-	drm_free(priv, sizeof(*priv), DRM_MEM_FILES);
+	kfree(priv);
 	filp->private_data = NULL;
 	return ret;
 }
@@ -447,6 +449,11 @@ int drm_release(struct inode *inode, struct file *filp)
 		  (long)old_encode_dev(file_priv->minor->device),
 		  dev->open_count);
 
+	/* Release any auth tokens that might point to this file_priv,
+	   (do that under the drm_global_mutex) */
+	if (file_priv->magic)
+		(void) drm_remove_magic(file_priv->master, file_priv->magic);
+
 	/* if the master has gone away we can't do anything with the lock */
 	if (file_priv->minor->master)
 		drm_master_release(dev, filp);
@@ -471,7 +478,7 @@ int drm_release(struct inode *inode, struct file *filp)
 				drm_ctxbitmap_free(dev, pos->handle);
 
 				list_del(&pos->head);
-				drm_free(pos, sizeof(*pos), DRM_MEM_CTXLIST);
+				kfree(pos);
 				--dev->ctx_count;
 			}
 		}
@@ -516,7 +523,7 @@ int drm_release(struct inode *inode, struct file *filp)
 
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
-	drm_free(file_priv, sizeof(*file_priv), DRM_MEM_FILES);
+	kfree(file_priv);
 
 	/* ========================================================
 	 * End inline drm_release

@@ -125,6 +125,7 @@ void msg_init_ns(struct ipc_namespace *ns)
 void msg_exit_ns(struct ipc_namespace *ns)
 {
 	free_ipcs(ns, &msg_ids(ns), freeque);
+	idr_destroy(&ns->ids[IPC_MSG_IDS].ipcs_idr);
 }
 #endif
 
@@ -198,6 +199,15 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 		return retval;
 	}
 
+	msq->q_stime = msq->q_rtime = 0;
+	msq->q_ctime = get_seconds();
+	msq->q_cbytes = msq->q_qnum = 0;
+	msq->q_qbytes = ns->msg_ctlmnb;
+	msq->q_lspid = msq->q_lrpid = 0;
+	INIT_LIST_HEAD(&msq->q_messages);
+	INIT_LIST_HEAD(&msq->q_receivers);
+	INIT_LIST_HEAD(&msq->q_senders);
+
 	/*
 	 * ipc_addid() locks msq
 	 */
@@ -207,15 +217,6 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 		ipc_rcu_putref(msq);
 		return id;
 	}
-
-	msq->q_stime = msq->q_rtime = 0;
-	msq->q_ctime = get_seconds();
-	msq->q_cbytes = msq->q_qnum = 0;
-	msq->q_qbytes = ns->msg_ctlmnb;
-	msq->q_lspid = msq->q_lrpid = 0;
-	INIT_LIST_HEAD(&msq->q_messages);
-	INIT_LIST_HEAD(&msq->q_receivers);
-	INIT_LIST_HEAD(&msq->q_senders);
 
 	msg_unlock(msq);
 

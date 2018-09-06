@@ -83,34 +83,33 @@
 		TMIO_STAT_CARD_REMOVE | TMIO_STAT_CARD_INSERT)
 #define TMIO_MASK_IRQ     (TMIO_MASK_READOP | TMIO_MASK_WRITEOP | TMIO_MASK_CMD)
 
-#define enable_mmc_irqs(ctl, i) \
+
+#define enable_mmc_irqs(host, i) \
 	do { \
 		u32 mask;\
-		mask  = tmio_ioread32((ctl) + CTL_IRQ_MASK); \
+		mask  = sd_ctrl_read32((host), CTL_IRQ_MASK); \
 		mask &= ~((i) & TMIO_MASK_IRQ); \
-		tmio_iowrite32(mask, (ctl) + CTL_IRQ_MASK); \
+		sd_ctrl_write32((host), CTL_IRQ_MASK, mask); \
 	} while (0)
 
-#define disable_mmc_irqs(ctl, i) \
+#define disable_mmc_irqs(host, i) \
 	do { \
 		u32 mask;\
-		mask  = tmio_ioread32((ctl) + CTL_IRQ_MASK); \
+		mask  = sd_ctrl_read32((host), CTL_IRQ_MASK); \
 		mask |= ((i) & TMIO_MASK_IRQ); \
-		tmio_iowrite32(mask, (ctl) + CTL_IRQ_MASK); \
+		sd_ctrl_write32((host), CTL_IRQ_MASK, mask); \
 	} while (0)
 
-#define ack_mmc_irqs(ctl, i) \
+#define ack_mmc_irqs(host, i) \
 	do { \
-		u32 mask;\
-		mask  = tmio_ioread32((ctl) + CTL_STATUS); \
-		mask &= ~((i) & TMIO_MASK_IRQ); \
-		tmio_iowrite32(mask, (ctl) + CTL_STATUS); \
+		sd_ctrl_write32((host), CTL_STATUS, ~(i)); \
 	} while (0)
 
 
 struct tmio_mmc_host {
 	void __iomem *cnf;
 	void __iomem *ctl;
+	unsigned long bus_shift;
 	struct mmc_command      *cmd;
 	struct mmc_request      *mrq;
 	struct mmc_data         *data;
@@ -122,6 +121,63 @@ struct tmio_mmc_host {
 	unsigned int            sg_len;
 	unsigned int            sg_off;
 };
+
+#include <linux/io.h>
+
+static inline u16 sd_ctrl_read16(struct tmio_mmc_host *host, int addr)
+{
+	return readw(host->ctl + (addr << host->bus_shift));
+}
+
+static inline void sd_ctrl_read16_rep(struct tmio_mmc_host *host, int addr,
+		u16 *buf, int count)
+{
+	readsw(host->ctl + (addr << host->bus_shift), buf, count);
+}
+
+static inline u32 sd_ctrl_read32(struct tmio_mmc_host *host, int addr)
+{
+	return readw(host->ctl + (addr << host->bus_shift)) |
+	       readw(host->ctl + ((addr + 2) << host->bus_shift)) << 16;
+}
+
+static inline void sd_ctrl_write16(struct tmio_mmc_host *host, int addr,
+		u16 val)
+{
+	writew(val, host->ctl + (addr << host->bus_shift));
+}
+
+static inline void sd_ctrl_write16_rep(struct tmio_mmc_host *host, int addr,
+		u16 *buf, int count)
+{
+	writesw(host->ctl + (addr << host->bus_shift), buf, count);
+}
+
+static inline void sd_ctrl_write32(struct tmio_mmc_host *host, int addr,
+		u32 val)
+{
+	writew(val, host->ctl + (addr << host->bus_shift));
+	writew(val >> 16, host->ctl + ((addr + 2) << host->bus_shift));
+}
+
+static inline void sd_config_write8(struct tmio_mmc_host *host, int addr,
+		u8 val)
+{
+	writeb(val, host->cnf + (addr << host->bus_shift));
+}
+
+static inline void sd_config_write16(struct tmio_mmc_host *host, int addr,
+		u16 val)
+{
+	writew(val, host->cnf + (addr << host->bus_shift));
+}
+
+static inline void sd_config_write32(struct tmio_mmc_host *host, int addr,
+		u32 val)
+{
+	writew(val, host->cnf + (addr << host->bus_shift));
+	writew(val >> 16, host->cnf + ((addr + 2) << host->bus_shift));
+}
 
 #include <linux/scatterlist.h>
 #include <linux/blkdev.h>
@@ -141,19 +197,17 @@ static inline int tmio_mmc_next_sg(struct tmio_mmc_host *host)
 	return --host->sg_len;
 }
 
-static inline char *tmio_mmc_kmap_atomic(struct tmio_mmc_host *host,
+static inline char *tmio_mmc_kmap_atomic(struct scatterlist *sg,
 	unsigned long *flags)
 {
-	struct scatterlist *sg = host->sg_ptr;
-
 	local_irq_save(*flags);
 	return kmap_atomic(sg_page(sg), KM_BIO_SRC_IRQ) + sg->offset;
 }
 
-static inline void tmio_mmc_kunmap_atomic(struct tmio_mmc_host *host,
+static inline void tmio_mmc_kunmap_atomic(void *virt,
 	unsigned long *flags)
 {
-	kunmap_atomic(sg_page(host->sg_ptr), KM_BIO_SRC_IRQ);
+	kunmap_atomic(virt, KM_BIO_SRC_IRQ);
 	local_irq_restore(*flags);
 }
 

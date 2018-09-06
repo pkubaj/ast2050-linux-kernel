@@ -12,6 +12,7 @@
 #define KMSG_COMPONENT "cio"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
+#include <linux/ftrace.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -28,7 +29,7 @@
 #include <asm/chpid.h>
 #include <asm/airq.h>
 #include <asm/isc.h>
-#include <asm/cpu.h>
+#include <asm/cputime.h>
 #include <asm/fcx.h>
 #include <asm/nmi.h>
 #include <asm/crw.h>
@@ -138,12 +139,11 @@ cio_start_key (struct subchannel *sch,	/* subchannel structure */
 	       __u8 lpm,		/* logical path mask */
 	       __u8 key)                /* storage key */
 {
-	char dbf_txt[15];
 	int ccode;
 	union orb *orb;
 
-	CIO_TRACE_EVENT(4, "stIO");
-	CIO_TRACE_EVENT(4, dev_name(&sch->dev));
+	CIO_TRACE_EVENT(5, "stIO");
+	CIO_TRACE_EVENT(5, dev_name(&sch->dev));
 
 	orb = &to_io_private(sch)->orb;
 	memset(orb, 0, sizeof(union orb));
@@ -168,8 +168,7 @@ cio_start_key (struct subchannel *sch,	/* subchannel structure */
 	ccode = ssch(sch->schid, orb);
 
 	/* process condition code */
-	sprintf(dbf_txt, "ccode:%d", ccode);
-	CIO_TRACE_EVENT(4, dbf_txt);
+	CIO_HEX_EVENT(5, &ccode, sizeof(ccode));
 
 	switch (ccode) {
 	case 0:
@@ -200,16 +199,14 @@ cio_start (struct subchannel *sch, struct ccw1 *cpa, __u8 lpm)
 int
 cio_resume (struct subchannel *sch)
 {
-	char dbf_txt[15];
 	int ccode;
 
-	CIO_TRACE_EVENT (4, "resIO");
+	CIO_TRACE_EVENT(4, "resIO");
 	CIO_TRACE_EVENT(4, dev_name(&sch->dev));
 
 	ccode = rsch (sch->schid);
 
-	sprintf (dbf_txt, "ccode:%d", ccode);
-	CIO_TRACE_EVENT (4, dbf_txt);
+	CIO_HEX_EVENT(4, &ccode, sizeof(ccode));
 
 	switch (ccode) {
 	case 0:
@@ -234,13 +231,12 @@ cio_resume (struct subchannel *sch)
 int
 cio_halt(struct subchannel *sch)
 {
-	char dbf_txt[15];
 	int ccode;
 
 	if (!sch)
 		return -ENODEV;
 
-	CIO_TRACE_EVENT (2, "haltIO");
+	CIO_TRACE_EVENT(2, "haltIO");
 	CIO_TRACE_EVENT(2, dev_name(&sch->dev));
 
 	/*
@@ -248,8 +244,7 @@ cio_halt(struct subchannel *sch)
 	 */
 	ccode = hsch (sch->schid);
 
-	sprintf (dbf_txt, "ccode:%d", ccode);
-	CIO_TRACE_EVENT (2, dbf_txt);
+	CIO_HEX_EVENT(2, &ccode, sizeof(ccode));
 
 	switch (ccode) {
 	case 0:
@@ -269,13 +264,12 @@ cio_halt(struct subchannel *sch)
 int
 cio_clear(struct subchannel *sch)
 {
-	char dbf_txt[15];
 	int ccode;
 
 	if (!sch)
 		return -ENODEV;
 
-	CIO_TRACE_EVENT (2, "clearIO");
+	CIO_TRACE_EVENT(2, "clearIO");
 	CIO_TRACE_EVENT(2, dev_name(&sch->dev));
 
 	/*
@@ -283,8 +277,7 @@ cio_clear(struct subchannel *sch)
 	 */
 	ccode = csch (sch->schid);
 
-	sprintf (dbf_txt, "ccode:%d", ccode);
-	CIO_TRACE_EVENT (2, dbf_txt);
+	CIO_HEX_EVENT(2, &ccode, sizeof(ccode));
 
 	switch (ccode) {
 	case 0:
@@ -305,19 +298,17 @@ cio_clear(struct subchannel *sch)
 int
 cio_cancel (struct subchannel *sch)
 {
-	char dbf_txt[15];
 	int ccode;
 
 	if (!sch)
 		return -ENODEV;
 
-	CIO_TRACE_EVENT (2, "cancelIO");
+	CIO_TRACE_EVENT(2, "cancelIO");
 	CIO_TRACE_EVENT(2, dev_name(&sch->dev));
 
 	ccode = xsch (sch->schid);
 
-	sprintf (dbf_txt, "ccode:%d", ccode);
-	CIO_TRACE_EVENT (2, dbf_txt);
+	CIO_HEX_EVENT(2, &ccode, sizeof(ccode));
 
 	switch (ccode) {
 	case 0:		/* success */
@@ -428,11 +419,10 @@ EXPORT_SYMBOL_GPL(cio_update_schib);
  */
 int cio_enable_subchannel(struct subchannel *sch, u32 intparm)
 {
-	char dbf_txt[15];
 	int retry;
 	int ret;
 
-	CIO_TRACE_EVENT (2, "ensch");
+	CIO_TRACE_EVENT(2, "ensch");
 	CIO_TRACE_EVENT(2, dev_name(&sch->dev));
 
 	if (sch_is_pseudo_sch(sch))
@@ -459,8 +449,7 @@ int cio_enable_subchannel(struct subchannel *sch, u32 intparm)
 		} else
 			break;
 	}
-	sprintf (dbf_txt, "ret:%d", ret);
-	CIO_TRACE_EVENT (2, dbf_txt);
+	CIO_HEX_EVENT(2, &ret, sizeof(ret));
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cio_enable_subchannel);
@@ -471,11 +460,10 @@ EXPORT_SYMBOL_GPL(cio_enable_subchannel);
  */
 int cio_disable_subchannel(struct subchannel *sch)
 {
-	char dbf_txt[15];
 	int retry;
 	int ret;
 
-	CIO_TRACE_EVENT (2, "dissch");
+	CIO_TRACE_EVENT(2, "dissch");
 	CIO_TRACE_EVENT(2, dev_name(&sch->dev));
 
 	if (sch_is_pseudo_sch(sch))
@@ -494,8 +482,7 @@ int cio_disable_subchannel(struct subchannel *sch)
 		} else
 			break;
 	}
-	sprintf (dbf_txt, "ret:%d", ret);
-	CIO_TRACE_EVENT (2, dbf_txt);
+	CIO_HEX_EVENT(2, &ret, sizeof(ret));
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cio_disable_subchannel);
@@ -577,11 +564,6 @@ int cio_validate_subchannel(struct subchannel *sch, struct subchannel_id schid)
 			goto out;
 	}
 	mutex_init(&sch->reg_mutex);
-	/* Set a name for the subchannel */
-	if (cio_is_console(schid))
-		sch->dev.init_name = cio_get_console_sch_name(schid);
-	else
-		dev_set_name(&sch->dev, "0.%x.%04x", schid.ssid, schid.sch_no);
 
 	/*
 	 * The first subchannel that is not-operational (ccode==3)
@@ -626,8 +608,7 @@ out:
  *	    handlers).
  *
  */
-void
-do_IRQ (struct pt_regs *regs)
+void __irq_entry do_IRQ(struct pt_regs *regs)
 {
 	struct tpi_info *tpi_info;
 	struct subchannel *sch;
@@ -637,6 +618,7 @@ do_IRQ (struct pt_regs *regs)
 	old_regs = set_irq_regs(regs);
 	s390_idle_check();
 	irq_enter();
+	__get_cpu_var(s390_idle).nohz_delay = 1;
 	if (S390_lowcore.int_clock >= S390_lowcore.clock_comparator)
 		/* Serve timer interrupts first. */
 		clock_comparator_work();
@@ -686,7 +668,6 @@ do_IRQ (struct pt_regs *regs)
 
 #ifdef CONFIG_CCW_CONSOLE
 static struct subchannel console_subchannel;
-static char console_sch_name[10] = "0.x.xxxx";
 static struct io_subchannel_private console_priv;
 static int console_subchannel_in_use;
 
@@ -871,12 +852,6 @@ cio_get_console_subchannel(void)
 	if (!console_subchannel_in_use)
 		return NULL;
 	return &console_subchannel;
-}
-
-const char *cio_get_console_sch_name(struct subchannel_id schid)
-{
-	snprintf(console_sch_name, 10, "0.%x.%04x", schid.ssid, schid.sch_no);
-	return (const char *)console_sch_name;
 }
 
 #endif

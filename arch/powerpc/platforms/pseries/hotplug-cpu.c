@@ -66,35 +66,11 @@ static void pseries_mach_cpu_die(void)
 	for(;;);
 }
 
-static int qcss_tok;	/* query-cpu-stopped-state token */
-
-/* Get state of physical CPU.
- * Return codes:
- *	0	- The processor is in the RTAS stopped state
- *	1	- stop-self is in progress
- *	2	- The processor is not in the RTAS stopped state
- *	-1	- Hardware Error
- *	-2	- Hardware Busy, Try again later.
- */
-static int query_cpu_stopped(unsigned int pcpu)
-{
-	int cpu_status, status;
-
-	status = rtas_call(qcss_tok, 1, 2, &cpu_status, pcpu);
-	if (status != 0) {
-		printk(KERN_ERR
-		       "RTAS query-cpu-stopped-state failed: %i\n", status);
-		return status;
-	}
-
-	return cpu_status;
-}
-
 static int pseries_cpu_disable(void)
 {
 	int cpu = smp_processor_id();
 
-	cpu_clear(cpu, cpu_online_map);
+	set_cpu_online(cpu, false);
 	vdso_data->processorCount--;
 
 	/*fix boot_cpuid here*/
@@ -113,8 +89,9 @@ static void pseries_cpu_die(unsigned int cpu)
 	unsigned int pcpu = get_hard_smp_processor_id(cpu);
 
 	for (tries = 0; tries < 25; tries++) {
-		cpu_status = query_cpu_stopped(pcpu);
-		if (cpu_status == 0 || cpu_status == -1)
+		cpu_status = smp_query_cpu_stopped(pcpu);
+		if (cpu_status == QCSS_STOPPED ||
+		    cpu_status == QCSS_HARDWARE_ERROR)
 			break;
 		cpu_relax();
 	}
@@ -185,7 +162,7 @@ static int pseries_add_processor(struct device_node *np)
 
 	for_each_cpu_mask(cpu, tmp) {
 		BUG_ON(cpu_isset(cpu, cpu_present_map));
-		cpu_set(cpu, cpu_present_map);
+		set_cpu_present(cpu, true);
 		set_hard_smp_processor_id(cpu, *intserv++);
 	}
 	err = 0;
@@ -217,7 +194,7 @@ static void pseries_remove_processor(struct device_node *np)
 			if (get_hard_smp_processor_id(cpu) != intserv[i])
 				continue;
 			BUG_ON(cpu_online(cpu));
-			cpu_clear(cpu, cpu_present_map);
+			set_cpu_present(cpu, false);
 			set_hard_smp_processor_id(cpu, -1);
 			break;
 		}
@@ -256,6 +233,7 @@ static int __init pseries_cpu_hotplug_init(void)
 {
 	struct device_node *np;
 	const char *typep;
+	int qcss_tok;
 
 	for_each_node_by_name(np, "interrupt-controller") {
 		typep = of_get_property(np, "compatible", NULL);

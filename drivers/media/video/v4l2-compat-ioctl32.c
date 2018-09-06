@@ -193,17 +193,24 @@ static int put_video_window32(struct video_window *kp, struct video_window32 __u
 struct video_code32 {
 	char		loadwhat[16];	/* name or tag of file being passed */
 	compat_int_t	datasize;
-	unsigned char	*data;
+	compat_uptr_t	data;
 };
 
-static int get_microcode32(struct video_code *kp, struct video_code32 __user *up)
+static struct video_code __user *get_microcode32(struct video_code32 *kp)
 {
-	if (!access_ok(VERIFY_READ, up, sizeof(struct video_code32)) ||
-		copy_from_user(kp->loadwhat, up->loadwhat, sizeof(up->loadwhat)) ||
-		get_user(kp->datasize, &up->datasize) ||
-		copy_from_user(kp->data, up->data, up->datasize))
-			return -EFAULT;
-	return 0;
+	struct video_code __user *up;
+
+	up = compat_alloc_user_space(sizeof(*up));
+
+	/*
+	 * NOTE! We don't actually care if these fail. If the
+	 * user address is invalid, the native ioctl will do
+	 * the error handling for us
+	 */
+	(void) copy_to_user(up->loadwhat, kp->loadwhat, sizeof(up->loadwhat));
+	(void) put_user(kp->datasize, &up->datasize);
+	(void) put_user(compat_ptr(kp->data), &up->data);
+	return up;
 }
 
 #define VIDIOCGTUNER32		_IOWR('v', 4, struct video_tuner32)
@@ -600,9 +607,37 @@ struct v4l2_ext_controls32 {
        compat_caddr_t controls; /* actually struct v4l2_ext_control32 * */
 };
 
+struct v4l2_ext_control32 {
+	__u32 id;
+	__u32 size;
+	__u32 reserved2[1];
+	union {
+		__s32 value;
+		__s64 value64;
+		compat_caddr_t string; /* actually char * */
+	};
+} __attribute__ ((packed));
+
+/* The following function really belong in v4l2-common, but that causes
+   a circular dependency between modules. We need to think about this, but
+   for now this will do. */
+
+/* Return non-zero if this control is a pointer type. Currently only
+   type STRING is a pointer type. */
+static inline int ctrl_is_pointer(u32 id)
+{
+	switch (id) {
+	case V4L2_CID_RDS_TX_PS_NAME:
+	case V4L2_CID_RDS_TX_RADIO_TEXT:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static int get_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext_controls32 __user *up)
 {
-	struct v4l2_ext_control __user *ucontrols;
+	struct v4l2_ext_control32 __user *ucontrols;
 	struct v4l2_ext_control __user *kcontrols;
 	int n;
 	compat_caddr_t p;
@@ -626,15 +661,17 @@ static int get_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext
 	kcontrols = compat_alloc_user_space(n * sizeof(struct v4l2_ext_control));
 	kp->controls = kcontrols;
 	while (--n >= 0) {
-		if (copy_in_user(&kcontrols->id, &ucontrols->id, sizeof(__u32)))
+		if (copy_in_user(kcontrols, ucontrols, sizeof(*kcontrols)))
 			return -EFAULT;
-		if (copy_in_user(&kcontrols->reserved2, &ucontrols->reserved2, sizeof(ucontrols->reserved2)))
-			return -EFAULT;
-		/* Note: if the void * part of the union ever becomes relevant
-		   then we need to know the type of the control in order to do
-		   the right thing here. Luckily, that is not yet an issue. */
-		if (copy_in_user(&kcontrols->value, &ucontrols->value, sizeof(ucontrols->value)))
-			return -EFAULT;
+		if (ctrl_is_pointer(kcontrols->id)) {
+			void __user *s;
+
+			if (get_user(p, &ucontrols->string))
+				return -EFAULT;
+			s = compat_ptr(p);
+			if (put_user(s, &kcontrols->string))
+				return -EFAULT;
+		}
 		ucontrols++;
 		kcontrols++;
 	}
@@ -643,7 +680,7 @@ static int get_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext
 
 static int put_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext_controls32 __user *up)
 {
-	struct v4l2_ext_control __user *ucontrols;
+	struct v4l2_ext_control32 __user *ucontrols;
 	struct v4l2_ext_control __user *kcontrols = kp->controls;
 	int n = kp->count;
 	compat_caddr_t p;
@@ -664,15 +701,14 @@ static int put_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext
 		return -EFAULT;
 
 	while (--n >= 0) {
-		if (copy_in_user(&ucontrols->id, &kcontrols->id, sizeof(__u32)))
-			return -EFAULT;
-		if (copy_in_user(&ucontrols->reserved2, &kcontrols->reserved2,
-					sizeof(ucontrols->reserved2)))
-			return -EFAULT;
-		/* Note: if the void * part of the union ever becomes relevant
-		   then we need to know the type of the control in order to do
-		   the right thing here. Luckily, that is not yet an issue. */
-		if (copy_in_user(&ucontrols->value, &kcontrols->value, sizeof(ucontrols->value)))
+		unsigned size = sizeof(*ucontrols);
+
+		/* Do not modify the pointer when copying a pointer control.
+		   The contents of the pointer was changed, not the pointer
+		   itself. */
+		if (ctrl_is_pointer(kcontrols->id))
+			size -= sizeof(ucontrols->value64);
+		if (copy_in_user(ucontrols, kcontrols, size))
 			return -EFAULT;
 		ucontrols++;
 		kcontrols++;
@@ -712,7 +748,7 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		struct video_tuner vt;
 		struct video_buffer vb;
 		struct video_window vw;
-		struct video_code vc;
+		struct video_code32 vc;
 		struct video_audio va;
 #endif
 		struct v4l2_format v2f;
@@ -791,8 +827,11 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		break;
 
 	case VIDIOCSMICROCODE:
-		err = get_microcode32(&karg.vc, up);
-		compatible_arg = 0;
+		/* Copy the 32-bit "video_code32" to kernel space */
+		if (copy_from_user(&karg.vc, up, sizeof(karg.vc)))
+			return -EFAULT;
+		/* Convert the 32-bit version to a 64-bit version in user space */
+		up = get_microcode32(&karg.vc);
 		break;
 
 	case VIDIOCSFREQ:

@@ -63,12 +63,6 @@
  */
 
 /*
- * PCI Configuration Header
- */
-#define PCI_CONFIG_HEADER_VENDOR	0x0000
-#define PCI_CONFIG_HEADER_DEVICE	0x0002
-
-/*
  * HOST_CMD_CSR: For HOST to interrupt embedded processor
  */
 #define HOST_CMD_CSR			0x0008
@@ -1482,7 +1476,7 @@ struct hw_pairwise_ta_entry {
 #define RXD_W15_RESERVED		FIELD32(0xffffffff)
 
 /*
- * Macro's for converting txpower from EEPROM to mac80211 value
+ * Macros for converting txpower from EEPROM to mac80211 value
  * and from mac80211 value to register value.
  */
 #define MIN_TXPOWER	0

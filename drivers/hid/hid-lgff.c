@@ -50,6 +50,12 @@ static const signed short ff_joystick[] = {
 	-1
 };
 
+static const signed short ff_joystick_ac[] = {
+	FF_CONSTANT,
+	FF_AUTOCENTER,
+	-1
+};
+
 static const signed short ff_wheel[] = {
 	FF_CONSTANT,
 	FF_AUTOCENTER,
@@ -60,8 +66,9 @@ static const struct dev_type devices[] = {
 	{ 0x046d, 0xc211, ff_rumble },
 	{ 0x046d, 0xc219, ff_rumble },
 	{ 0x046d, 0xc283, ff_joystick },
-	{ 0x046d, 0xc286, ff_joystick },
-	{ 0x046d, 0xc294, ff_joystick },
+	{ 0x046d, 0xc286, ff_joystick_ac },
+	{ 0x046d, 0xc293, ff_joystick },
+	{ 0x046d, 0xc294, ff_wheel },
 	{ 0x046d, 0xc295, ff_joystick },
 	{ 0x046d, 0xca03, ff_wheel },
 };
@@ -128,32 +135,14 @@ static void hid_lgff_set_autocenter(struct input_dev *dev, u16 magnitude)
 int lgff_init(struct hid_device* hid)
 {
 	struct hid_input *hidinput = list_entry(hid->inputs.next, struct hid_input, list);
-	struct list_head *report_list = &hid->report_enum[HID_OUTPUT_REPORT].report_list;
 	struct input_dev *dev = hidinput->input;
-	struct hid_report *report;
-	struct hid_field *field;
 	const signed short *ff_bits = ff_joystick;
 	int error;
 	int i;
 
-	/* Find the report to use */
-	if (list_empty(report_list)) {
-		err_hid("No output report found");
-		return -1;
-	}
-
 	/* Check that the report looks ok */
-	report = list_entry(report_list->next, struct hid_report, list);
-	if (!report) {
-		err_hid("NULL output report");
-		return -1;
-	}
-
-	field = report->field[0];
-	if (!field) {
-		err_hid("NULL field");
-		return -1;
-	}
+	if (!hid_validate_values(hid, HID_OUTPUT_REPORT, 0, 0, 7))
+		return -ENODEV;
 
 	for (i = 0; i < ARRAY_SIZE(devices); i++) {
 		if (dev->id.vendor == devices[i].idVendor &&

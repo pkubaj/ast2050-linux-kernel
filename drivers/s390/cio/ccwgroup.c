@@ -1,11 +1,10 @@
 /*
- *  drivers/s390/cio/ccwgroup.c
  *  bus driver for ccwgroup
  *
- *    Copyright (C) 2002 IBM Deutschland Entwicklung GmbH,
- *                       IBM Corporation
- *    Author(s): Arnd Bergmann (arndb@de.ibm.com)
- *               Cornelia Huck (cornelia.huck@de.ibm.com)
+ *  Copyright IBM Corp. 2002, 2009
+ *
+ *  Author(s): Arnd Bergmann (arndb@de.ibm.com)
+ *	       Cornelia Huck (cornelia.huck@de.ibm.com)
  */
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -67,6 +66,12 @@ __ccwgroup_remove_symlinks(struct ccwgroup_device *gdev)
 	
 }
 
+static ssize_t ccwgroup_online_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count);
+static ssize_t ccwgroup_online_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf);
 /*
  * Provide an 'ungroup' attribute so the user can remove group devices no
  * longer needed or accidentially created. Saves memory :)
@@ -113,6 +118,20 @@ out:
 }
 
 static DEVICE_ATTR(ungroup, 0200, NULL, ccwgroup_ungroup_store);
+static DEVICE_ATTR(online, 0644, ccwgroup_online_show, ccwgroup_online_store);
+
+static struct attribute *ccwgroup_attrs[] = {
+	&dev_attr_online.attr,
+	&dev_attr_ungroup.attr,
+	NULL,
+};
+static struct attribute_group ccwgroup_attr_group = {
+	.attrs = ccwgroup_attrs,
+};
+static const struct attribute_group *ccwgroup_attr_groups[] = {
+	&ccwgroup_attr_group,
+	NULL,
+};
 
 static void
 ccwgroup_release (struct device *dev)
@@ -281,25 +300,17 @@ int ccwgroup_create_from_string(struct device *root, unsigned int creator_id,
 	}
 
 	dev_set_name(&gdev->dev, "%s", dev_name(&gdev->cdev[0]->dev));
-
+	gdev->dev.groups = ccwgroup_attr_groups;
 	rc = device_add(&gdev->dev);
 	if (rc)
 		goto error;
 	get_device(&gdev->dev);
-	rc = device_create_file(&gdev->dev, &dev_attr_ungroup);
-
-	if (rc) {
-		device_unregister(&gdev->dev);
-		goto error;
-	}
-
 	rc = __ccwgroup_create_symlinks(gdev);
 	if (!rc) {
 		mutex_unlock(&gdev->reg_mutex);
 		put_device(&gdev->dev);
 		return 0;
 	}
-	device_remove_file(&gdev->dev, &dev_attr_ungroup);
 	device_unregister(&gdev->dev);
 error:
 	for (i = 0; i < num_devices; i++)
@@ -409,7 +420,7 @@ ccwgroup_online_store (struct device *dev, struct device_attribute *attr, const 
 	int ret;
 
 	if (!dev->driver)
-		return -ENODEV;
+		return -EINVAL;
 
 	gdev = to_ccwgroupdev(dev);
 	gdrv = to_ccwgroupdrv(dev->driver);
@@ -442,8 +453,6 @@ ccwgroup_online_show (struct device *dev, struct device_attribute *attr, char *b
 	return sprintf(buf, online ? "1\n" : "0\n");
 }
 
-static DEVICE_ATTR(online, 0644, ccwgroup_online_show, ccwgroup_online_store);
-
 static int
 ccwgroup_probe (struct device *dev)
 {
@@ -455,12 +464,7 @@ ccwgroup_probe (struct device *dev)
 	gdev = to_ccwgroupdev(dev);
 	gdrv = to_ccwgroupdrv(dev->driver);
 
-	if ((ret = device_create_file(dev, &dev_attr_online)))
-		return ret;
-
 	ret = gdrv->probe ? gdrv->probe(gdev) : -ENODEV;
-	if (ret)
-		device_remove_file(dev, &dev_attr_online);
 
 	return ret;
 }
@@ -470,9 +474,6 @@ ccwgroup_remove (struct device *dev)
 {
 	struct ccwgroup_device *gdev;
 	struct ccwgroup_driver *gdrv;
-
-	device_remove_file(dev, &dev_attr_online);
-	device_remove_file(dev, &dev_attr_ungroup);
 
 	if (!dev->driver)
 		return 0;
@@ -501,6 +502,74 @@ static void ccwgroup_shutdown(struct device *dev)
 		gdrv->shutdown(gdev);
 }
 
+static int ccwgroup_pm_prepare(struct device *dev)
+{
+	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
+	struct ccwgroup_driver *gdrv = to_ccwgroupdrv(gdev->dev.driver);
+
+	/* Fail while device is being set online/offline. */
+	if (atomic_read(&gdev->onoff))
+		return -EAGAIN;
+
+	if (!gdev->dev.driver || gdev->state != CCWGROUP_ONLINE)
+		return 0;
+
+	return gdrv->prepare ? gdrv->prepare(gdev) : 0;
+}
+
+static void ccwgroup_pm_complete(struct device *dev)
+{
+	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
+	struct ccwgroup_driver *gdrv = to_ccwgroupdrv(dev->driver);
+
+	if (!gdev->dev.driver || gdev->state != CCWGROUP_ONLINE)
+		return;
+
+	if (gdrv->complete)
+		gdrv->complete(gdev);
+}
+
+static int ccwgroup_pm_freeze(struct device *dev)
+{
+	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
+	struct ccwgroup_driver *gdrv = to_ccwgroupdrv(gdev->dev.driver);
+
+	if (!gdev->dev.driver || gdev->state != CCWGROUP_ONLINE)
+		return 0;
+
+	return gdrv->freeze ? gdrv->freeze(gdev) : 0;
+}
+
+static int ccwgroup_pm_thaw(struct device *dev)
+{
+	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
+	struct ccwgroup_driver *gdrv = to_ccwgroupdrv(gdev->dev.driver);
+
+	if (!gdev->dev.driver || gdev->state != CCWGROUP_ONLINE)
+		return 0;
+
+	return gdrv->thaw ? gdrv->thaw(gdev) : 0;
+}
+
+static int ccwgroup_pm_restore(struct device *dev)
+{
+	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
+	struct ccwgroup_driver *gdrv = to_ccwgroupdrv(gdev->dev.driver);
+
+	if (!gdev->dev.driver || gdev->state != CCWGROUP_ONLINE)
+		return 0;
+
+	return gdrv->restore ? gdrv->restore(gdev) : 0;
+}
+
+static struct dev_pm_ops ccwgroup_pm_ops = {
+	.prepare = ccwgroup_pm_prepare,
+	.complete = ccwgroup_pm_complete,
+	.freeze = ccwgroup_pm_freeze,
+	.thaw = ccwgroup_pm_thaw,
+	.restore = ccwgroup_pm_restore,
+};
+
 static struct bus_type ccwgroup_bus_type = {
 	.name   = "ccwgroup",
 	.match  = ccwgroup_bus_match,
@@ -508,6 +577,7 @@ static struct bus_type ccwgroup_bus_type = {
 	.probe  = ccwgroup_probe,
 	.remove = ccwgroup_remove,
 	.shutdown = ccwgroup_shutdown,
+	.pm = &ccwgroup_pm_ops,
 };
 
 

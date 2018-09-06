@@ -282,14 +282,14 @@ struct snd_soc_dai wm9705_dai[] = {
 			.channels_min = 1,
 			.channels_max = 2,
 			.rates = WM9705_AC97_RATES,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.formats = SND_SOC_STD_AC97_FMTS,
 		},
 		.capture = {
 			.stream_name = "HiFi Capture",
 			.channels_min = 1,
 			.channels_max = 2,
 			.rates = WM9705_AC97_RATES,
-			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.formats = SND_SOC_STD_AC97_FMTS,
 		},
 		.ops = &wm9705_dai_ops,
 	},
@@ -406,7 +406,7 @@ static int wm9705_soc_probe(struct platform_device *pdev)
 	ret = snd_soc_init_card(socdev);
 	if (ret < 0) {
 		printk(KERN_ERR "wm9705: failed to register card\n");
-		goto pcm_err;
+		goto reset_err;
 	}
 
 	return 0;

@@ -254,8 +254,10 @@ do_bus_reset:
 			dev_err(dev, "USB reset failed (%d), giving up!\n",
 				result);
 		}
-	} else
+	} else {
+		result = -EINVAL;	/* shut gcc up in certain arches */
 		BUG();
+	}
 	if (result < 0
 	    && result != -EINVAL	/* device is gone */
 	    && rt != I2400M_RT_BUS) {
@@ -349,6 +351,10 @@ error:
 }
 
 
+static struct device_type i2400mu_type = {
+	.name	= "wimax",
+};
+
 /*
  * Probe a i2400m interface and register it
  *
@@ -386,6 +392,7 @@ int i2400mu_probe(struct usb_interface *iface,
 		goto error_alloc_netdev;
 	}
 	SET_NETDEV_DEV(net_dev, dev);
+	SET_NETDEV_DEVTYPE(net_dev, &i2400mu_type);
 	i2400m = net_dev_to_i2400m(net_dev);
 	i2400mu = container_of(i2400m, struct i2400mu, i2400m);
 	i2400m->wimax_dev.net_dev = net_dev;
@@ -399,6 +406,7 @@ int i2400mu_probe(struct usb_interface *iface,
 	i2400m->bus_dev_stop = i2400mu_bus_dev_stop;
 	i2400m->bus_tx_kick = i2400mu_bus_tx_kick;
 	i2400m->bus_reset = i2400mu_bus_reset;
+	i2400m->bus_bm_retries = I2400M_BOOT_RETRIES;
 	i2400m->bus_bm_cmd_send = i2400mu_bus_bm_cmd_send;
 	i2400m->bus_bm_wait_for_ack = i2400mu_bus_bm_wait_for_ack;
 	i2400m->bus_fw_names = i2400mu_bus_fw_names;

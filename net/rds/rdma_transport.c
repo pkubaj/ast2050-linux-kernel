@@ -34,7 +34,7 @@
 
 #include "rdma_transport.h"
 
-static struct rdma_cm_id *rds_iw_listen_id;
+static struct rdma_cm_id *rds_rdma_listen_id;
 
 int rds_rdma_cm_event_handler(struct rdma_cm_id *cm_id,
 			      struct rdma_cm_event *event)
@@ -101,7 +101,7 @@ int rds_rdma_cm_event_handler(struct rdma_cm_id *cm_id,
 		break;
 
 	case RDMA_CM_EVENT_DISCONNECTED:
-		printk(KERN_WARNING "RDS/IW: DISCONNECT event - dropping connection "
+		printk(KERN_WARNING "RDS/RDMA: DISCONNECT event - dropping connection "
 			"%pI4->%pI4\n", &conn->c_laddr,
 			 &conn->c_faddr);
 		rds_conn_drop(conn);
@@ -132,12 +132,12 @@ static int __init rds_rdma_listen_init(void)
 	cm_id = rdma_create_id(rds_rdma_cm_event_handler, NULL, RDMA_PS_TCP);
 	if (IS_ERR(cm_id)) {
 		ret = PTR_ERR(cm_id);
-		printk(KERN_ERR "RDS/IW: failed to setup listener, "
+		printk(KERN_ERR "RDS/RDMA: failed to setup listener, "
 		       "rdma_create_id() returned %d\n", ret);
 		goto out;
 	}
 
-	sin.sin_family = PF_INET,
+	sin.sin_family = AF_INET,
 	sin.sin_addr.s_addr = (__force u32)htonl(INADDR_ANY);
 	sin.sin_port = (__force u16)htons(RDS_PORT);
 
@@ -147,21 +147,21 @@ static int __init rds_rdma_listen_init(void)
 	 */
 	ret = rdma_bind_addr(cm_id, (struct sockaddr *)&sin);
 	if (ret) {
-		printk(KERN_ERR "RDS/IW: failed to setup listener, "
+		printk(KERN_ERR "RDS/RDMA: failed to setup listener, "
 		       "rdma_bind_addr() returned %d\n", ret);
 		goto out;
 	}
 
 	ret = rdma_listen(cm_id, 128);
 	if (ret) {
-		printk(KERN_ERR "RDS/IW: failed to setup listener, "
+		printk(KERN_ERR "RDS/RDMA: failed to setup listener, "
 		       "rdma_listen() returned %d\n", ret);
 		goto out;
 	}
 
 	rdsdebug("cm %p listening on port %u\n", cm_id, RDS_PORT);
 
-	rds_iw_listen_id = cm_id;
+	rds_rdma_listen_id = cm_id;
 	cm_id = NULL;
 out:
 	if (cm_id)
@@ -171,10 +171,10 @@ out:
 
 static void rds_rdma_listen_stop(void)
 {
-	if (rds_iw_listen_id) {
-		rdsdebug("cm %p\n", rds_iw_listen_id);
-		rdma_destroy_id(rds_iw_listen_id);
-		rds_iw_listen_id = NULL;
+	if (rds_rdma_listen_id) {
+		rdsdebug("cm %p\n", rds_rdma_listen_id);
+		rdma_destroy_id(rds_rdma_listen_id);
+		rds_rdma_listen_id = NULL;
 	}
 }
 
@@ -203,6 +203,7 @@ err_iw_init:
 out:
 	return ret;
 }
+module_init(rds_rdma_init);
 
 void rds_rdma_exit(void)
 {
@@ -211,4 +212,9 @@ void rds_rdma_exit(void)
 	rds_ib_exit();
 	rds_iw_exit();
 }
+module_exit(rds_rdma_exit);
+
+MODULE_AUTHOR("Oracle Corporation <rds-devel@oss.oracle.com>");
+MODULE_DESCRIPTION("RDS: IB/iWARP transport");
+MODULE_LICENSE("Dual BSD/GPL");
 

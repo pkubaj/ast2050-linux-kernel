@@ -464,7 +464,8 @@ static int ac97_write(struct snd_soc_codec *codec, unsigned int reg,
 {
 	u16 *cache = codec->reg_cache;
 
-	soc_ac97_ops.write(codec->ac97, reg, val);
+	if (reg < 0x7c)
+		soc_ac97_ops.write(codec->ac97, reg, val);
 	reg = reg >> 1;
 	if (reg < (ARRAY_SIZE(wm9712_reg)))
 		cache[reg] = val;
@@ -534,13 +535,13 @@ struct snd_soc_dai wm9712_dai[] = {
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = WM9712_AC97_RATES,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE,},
+		.formats = SND_SOC_STD_AC97_FMTS,},
 	.capture = {
 		.stream_name = "HiFi Capture",
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = WM9712_AC97_RATES,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE,},
+		.formats = SND_SOC_STD_AC97_FMTS,},
 	.ops = &wm9712_dai_ops_hifi,
 },
 {
@@ -550,7 +551,7 @@ struct snd_soc_dai wm9712_dai[] = {
 		.channels_min = 1,
 		.channels_max = 1,
 		.rates = WM9712_AC97_RATES,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE,},
+		.formats = SND_SOC_STD_AC97_FMTS,},
 	.ops = &wm9712_dai_ops_aux,
 }
 };
@@ -585,6 +586,8 @@ static int wm9712_reset(struct snd_soc_codec *codec, int try_warm)
 	}
 
 	soc_ac97_ops.reset(codec->ac97);
+	if (soc_ac97_ops.warm_reset)
+		soc_ac97_ops.warm_reset(codec->ac97);
 	if (ac97_read(codec, 0) != wm9712_reg[0])
 		goto err;
 	return 0;

@@ -56,6 +56,7 @@ struct eth_bearer {
 	struct tipc_bearer *bearer;
 	struct net_device *dev;
 	struct packet_type tipc_packet_type;
+	struct work_struct setup;
 };
 
 static struct eth_bearer eth_bearers[MAX_ETH_BEARERS];
@@ -122,6 +123,17 @@ static int recv_msg(struct sk_buff *buf, struct net_device *dev,
 }
 
 /**
+ * setup_bearer - setup association between Ethernet bearer and interface
+ */
+static void setup_bearer(struct work_struct *work)
+{
+	struct eth_bearer *eb_ptr =
+		container_of(work, struct eth_bearer, setup);
+
+	dev_add_pack(&eb_ptr->tipc_packet_type);
+}
+
+/**
  * enable_bearer - attach TIPC bearer to an Ethernet interface
  */
 
@@ -157,7 +169,8 @@ static int enable_bearer(struct tipc_bearer *tb_ptr)
 		eb_ptr->tipc_packet_type.af_packet_priv = eb_ptr;
 		INIT_LIST_HEAD(&(eb_ptr->tipc_packet_type.list));
 		dev_hold(dev);
-		dev_add_pack(&eb_ptr->tipc_packet_type);
+		INIT_WORK(&eb_ptr->setup, setup_bearer);
+		schedule_work(&eb_ptr->setup);
 	}
 
 	/* Associate TIPC bearer with Ethernet bearer */
@@ -167,7 +180,7 @@ static int enable_bearer(struct tipc_bearer *tb_ptr)
 	tb_ptr->mtu = dev->mtu;
 	tb_ptr->blocked = 0;
 	tb_ptr->addr.type = htonl(TIPC_MEDIA_TYPE_ETH);
-	memcpy(&tb_ptr->addr.dev_addr, &dev->dev_addr, ETH_ALEN);
+	memcpy(&tb_ptr->addr.dev_addr, dev->dev_addr, ETH_ALEN);
 	return 0;
 }
 

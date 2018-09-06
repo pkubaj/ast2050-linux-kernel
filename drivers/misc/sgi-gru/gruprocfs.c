@@ -51,9 +51,12 @@ static int statistics_show(struct seq_file *s, void *p)
 	printstat(s, assign_context);
 	printstat(s, assign_context_failed);
 	printstat(s, free_context);
-	printstat(s, load_context);
-	printstat(s, unload_context);
-	printstat(s, steal_context);
+	printstat(s, load_user_context);
+	printstat(s, load_kernel_context);
+	printstat(s, lock_kernel_context);
+	printstat(s, unlock_kernel_context);
+	printstat(s, steal_user_context);
+	printstat(s, steal_kernel_context);
 	printstat(s, steal_context_failed);
 	printstat(s, nopfn);
 	printstat(s, break_cow);
@@ -70,7 +73,7 @@ static int statistics_show(struct seq_file *s, void *p)
 	printstat(s, user_flush_tlb);
 	printstat(s, user_unload_context);
 	printstat(s, user_exception);
-	printstat(s, set_task_slice);
+	printstat(s, set_context_option);
 	printstat(s, migrate_check);
 	printstat(s, migrated_retarget);
 	printstat(s, migrated_unload);
@@ -84,6 +87,9 @@ static int statistics_show(struct seq_file *s, void *p)
 	printstat(s, tlb_dropin_fail_range_active);
 	printstat(s, tlb_dropin_fail_idle);
 	printstat(s, tlb_dropin_fail_fmm);
+	printstat(s, tlb_dropin_fail_no_exception);
+	printstat(s, tlb_dropin_fail_no_exception_war);
+	printstat(s, tfh_stale_on_fault);
 	printstat(s, mmu_invalidate_range);
 	printstat(s, mmu_invalidate_page);
 	printstat(s, mmu_clear_flush_young);
@@ -155,15 +161,15 @@ static int options_show(struct seq_file *s, void *p)
 static ssize_t options_write(struct file *file, const char __user *userbuf,
 			     size_t count, loff_t *data)
 {
-	unsigned long val;
-	char buf[80];
+	char buf[20];
 
-	if (copy_from_user
-	    (buf, userbuf, count < sizeof(buf) ? count : sizeof(buf)))
+	if (count >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, userbuf, count))
 		return -EFAULT;
-	buf[count - 1] = '\0';
-	if (!strict_strtoul(buf, 10, &val))
-		gru_options = val;
+	buf[count] = '\0';
+	if (strict_strtoul(buf, 0, &gru_options))
+		return -EINVAL;
 
 	return count;
 }
@@ -335,10 +341,9 @@ static struct proc_dir_entry *proc_gru __read_mostly;
 
 static int create_proc_file(struct proc_entry *p)
 {
-	p->entry = create_proc_entry(p->name, p->mode, proc_gru);
+	p->entry = proc_create(p->name, p->mode, proc_gru, p->fops);
 	if (!p->entry)
 		return -1;
-	p->entry->proc_fops = p->fops;
 	return 0;
 }
 

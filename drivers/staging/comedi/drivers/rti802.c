@@ -47,13 +47,14 @@ Configuration Options:
 #define RTI802_DATALOW 1
 #define RTI802_DATAHIGH 2
 
-static int rti802_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int rti802_detach(struct comedi_device * dev);
+static int rti802_attach(struct comedi_device *dev,
+			 struct comedi_devconfig *it);
+static int rti802_detach(struct comedi_device *dev);
 static struct comedi_driver driver_rti802 = {
-      driver_name:"rti802",
-      module:THIS_MODULE,
-      attach:rti802_attach,
-      detach:rti802_detach,
+	.driver_name = "rti802",
+	.module = THIS_MODULE,
+	.attach = rti802_attach,
+	.detach = rti802_detach,
 };
 
 COMEDI_INITCLEANUP(driver_rti802);
@@ -68,8 +69,9 @@ struct rti802_private {
 
 #define devpriv ((struct rti802_private *)dev->private)
 
-static int rti802_ao_insn_read(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int rti802_ao_insn_read(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 
@@ -79,8 +81,9 @@ static int rti802_ao_insn_read(struct comedi_device * dev, struct comedi_subdevi
 	return i;
 }
 
-static int rti802_ao_insn_write(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int rti802_ao_insn_write(struct comedi_device *dev,
+				struct comedi_subdevice *s,
+				struct comedi_insn *insn, unsigned int *data)
 {
 	int i, d;
 	int chan = CR_CHAN(insn->chanspec);
@@ -96,7 +99,7 @@ static int rti802_ao_insn_write(struct comedi_device * dev, struct comedi_subdev
 	return i;
 }
 
-static int rti802_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int rti802_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 	int i;
@@ -113,7 +116,7 @@ static int rti802_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	dev->board_name = "rti802";
 
 	if (alloc_subdevices(dev, 1) < 0
-		|| alloc_private(dev, sizeof(struct rti802_private))) {
+	    || alloc_private(dev, sizeof(struct rti802_private))) {
 		return -ENOMEM;
 	}
 
@@ -129,10 +132,10 @@ static int rti802_attach(struct comedi_device * dev, struct comedi_devconfig * i
 
 	for (i = 0; i < 8; i++) {
 		devpriv->dac_coding[i] = (it->options[3 + 2 * i])
-			? (dac_straight)
-			: (dac_2comp);
+		    ? (dac_straight)
+		    : (dac_2comp);
 		devpriv->range_type_list[i] = (it->options[2 + 2 * i])
-			? &range_unipolar10 : &range_bipolar10;
+		    ? &range_unipolar10 : &range_bipolar10;
 	}
 
 	printk("\n");
@@ -140,7 +143,7 @@ static int rti802_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	return 0;
 }
 
-static int rti802_detach(struct comedi_device * dev)
+static int rti802_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: rti802: remove\n", dev->minor);
 

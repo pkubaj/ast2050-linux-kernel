@@ -27,8 +27,6 @@
 #include <linux/buffer_head.h>
 #include <linux/nilfs2_fs.h>
 
-#define NILFS_CPFILE_GFP	NILFS_MDT_GFP
-
 
 int nilfs_cpfile_get_checkpoint(struct inode *, __u64, int,
 				struct nilfs_checkpoint **,
@@ -39,7 +37,7 @@ int nilfs_cpfile_delete_checkpoint(struct inode *, __u64);
 int nilfs_cpfile_change_cpmode(struct inode *, __u64, int);
 int nilfs_cpfile_is_snapshot(struct inode *, __u64);
 int nilfs_cpfile_get_stat(struct inode *, struct nilfs_cpstat *);
-ssize_t nilfs_cpfile_get_cpinfo(struct inode *, __u64 *, int,
-				struct nilfs_cpinfo *, size_t);
+ssize_t nilfs_cpfile_get_cpinfo(struct inode *, __u64 *, int, void *, unsigned,
+				size_t);
 
 #endif	/* _NILFS_CPFILE_H */

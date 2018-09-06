@@ -222,13 +222,13 @@ static __inline__ int atomic_add_unless(atomic_t *v, int a, int u)
 
 #define atomic_inc_not_zero(v) atomic_add_unless((v), 1, 0)
 
-#define atomic_add(i,v)	((void)(__atomic_add_return( ((int)(i)),(v))))
-#define atomic_sub(i,v)	((void)(__atomic_add_return(-((int)(i)),(v))))
+#define atomic_add(i,v)	((void)(__atomic_add_return( (i),(v))))
+#define atomic_sub(i,v)	((void)(__atomic_add_return(-(i),(v))))
 #define atomic_inc(v)	((void)(__atomic_add_return(   1,(v))))
 #define atomic_dec(v)	((void)(__atomic_add_return(  -1,(v))))
 
-#define atomic_add_return(i,v)	(__atomic_add_return( ((int)(i)),(v)))
-#define atomic_sub_return(i,v)	(__atomic_add_return(-((int)(i)),(v)))
+#define atomic_add_return(i,v)	(__atomic_add_return( (i),(v)))
+#define atomic_sub_return(i,v)	(__atomic_add_return(-(i),(v)))
 #define atomic_inc_return(v)	(__atomic_add_return(   1,(v)))
 #define atomic_dec_return(v)	(__atomic_add_return(  -1,(v)))
 
@@ -248,7 +248,7 @@ static __inline__ int atomic_add_unless(atomic_t *v, int a, int u)
 
 #define atomic_sub_and_test(i,v)	(atomic_sub_return((i),(v)) == 0)
 
-#define ATOMIC_INIT(i)	((atomic_t) { (i) })
+#define ATOMIC_INIT(i)	{ (i) }
 
 #define smp_mb__before_atomic_dec()	smp_mb()
 #define smp_mb__after_atomic_dec()	smp_mb()
@@ -257,7 +257,7 @@ static __inline__ int atomic_add_unless(atomic_t *v, int a, int u)
 
 #ifdef CONFIG_64BIT
 
-#define ATOMIC64_INIT(i) ((atomic64_t) { (i) })
+#define ATOMIC64_INIT(i) { (i) }
 
 static __inline__ int
 __atomic64_add_return(s64 i, atomic64_t *v)
@@ -336,8 +336,12 @@ static __inline__ int atomic64_add_unless(atomic64_t *v, long a, long u)
 
 #define atomic64_inc_not_zero(v) atomic64_add_unless((v), 1, 0)
 
-#endif /* CONFIG_64BIT */
+#else /* CONFIG_64BIT */
 
-#include <asm-generic/atomic.h>
+#include <asm-generic/atomic64.h>
+
+#endif /* !CONFIG_64BIT */
+
+#include <asm-generic/atomic-long.h>
 
 #endif /* _ASM_PARISC_ATOMIC_H_ */

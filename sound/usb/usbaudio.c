@@ -627,6 +627,7 @@ static int prepare_playback_urb(struct snd_usb_substream *subs,
 	subs->hwptr_done += offs;
 	if (subs->hwptr_done >= runtime->buffer_size)
 		subs->hwptr_done -= runtime->buffer_size;
+	runtime->delay += offs;
 	spin_unlock_irqrestore(&subs->lock, flags);
 	urb->transfer_buffer_length = offs * stride;
 	if (period_elapsed)
@@ -636,12 +637,22 @@ static int prepare_playback_urb(struct snd_usb_substream *subs,
 
 /*
  * process after playback data complete
- * - nothing to do
+ * - decrease the delay count again
  */
 static int retire_playback_urb(struct snd_usb_substream *subs,
 			       struct snd_pcm_runtime *runtime,
 			       struct urb *urb)
 {
+	unsigned long flags;
+	int stride = runtime->frame_bits >> 3;
+	int processed = urb->transfer_buffer_length / stride;
+
+	spin_lock_irqsave(&subs->lock, flags);
+	if (processed > runtime->delay)
+		runtime->delay = 0;
+	else
+		runtime->delay -= processed;
+	spin_unlock_irqrestore(&subs->lock, flags);
 	return 0;
 }
 
@@ -741,7 +752,7 @@ static int snd_pcm_alloc_vmalloc_buffer(struct snd_pcm_substream *subs, size_t s
 			return 0; /* already large enough */
 		vfree(runtime->dma_area);
 	}
-	runtime->dma_area = vmalloc(size);
+	runtime->dma_area = vmalloc_user(size);
 	if (!runtime->dma_area)
 		return -ENOMEM;
 	runtime->dma_bytes = size;
@@ -1072,6 +1083,8 @@ static int init_substream_urbs(struct snd_usb_substream *subs, unsigned int peri
 	} else
 		urb_packs = 1;
 	urb_packs *= packs_per_ms;
+	if (subs->syncpipe)
+		urb_packs = min(urb_packs, 1U << subs->syncinterval);
 
 	/* decide how many packets to be used */
 	if (is_playback) {
@@ -1520,6 +1533,7 @@ static int snd_usb_pcm_prepare(struct snd_pcm_substream *substream)
 	subs->hwptr_done = 0;
 	subs->transfer_done = 0;
 	subs->phase = 0;
+	runtime->delay = 0;
 
 	/* clear urbs (to be sure) */
 	deactivate_urbs(subs, 0, 1);
@@ -1922,7 +1936,7 @@ static int snd_usb_pcm_close(struct snd_pcm_substream *substream, int direction)
 	struct snd_usb_stream *as = snd_pcm_substream_chip(substream);
 	struct snd_usb_substream *subs = &as->substream[direction];
 
-	if (subs->interface >= 0) {
+	if (!as->chip->shutdown && subs->interface >= 0) {
 		usb_set_interface(subs->dev, subs->interface, 0);
 		subs->interface = -1;
 	}
@@ -2112,8 +2126,8 @@ static void proc_dump_substream_formats(struct snd_usb_substream *subs, struct s
 		fp = list_entry(p, struct audioformat, list);
 		snd_iprintf(buffer, "  Interface %d\n", fp->iface);
 		snd_iprintf(buffer, "    Altset %d\n", fp->altsetting);
-		snd_iprintf(buffer, "    Format: %#x (%d bits)\n",
-			    fp->format, snd_pcm_format_width(fp->format));
+		snd_iprintf(buffer, "    Format: %s\n",
+			    snd_pcm_format_name(fp->format));
 		snd_iprintf(buffer, "    Channels: %d\n", fp->channels);
 		snd_iprintf(buffer, "    Endpoint: %d %s (%s)\n",
 			    fp->endpoint & USB_ENDPOINT_NUMBER_MASK,
@@ -3291,6 +3305,51 @@ static int snd_usb_cm106_boot_quirk(struct usb_device *dev)
 	return snd_usb_cm106_write_int_reg(dev, 2, 0x8004);
 }
 
+/*
+ * C-Media CM6206 is based on CM106 with two additional
+ * registers that are not documented in the data sheet.
+ * Values here are chosen based on sniffing USB traffic
+ * under Windows.
+ */
+static int snd_usb_cm6206_boot_quirk(struct usb_device *dev)
+{
+	int err, reg;
+	int val[] = {0x200c, 0x3000, 0xf800, 0x143f, 0x0000, 0x3000};
+
+	for (reg = 0; reg < ARRAY_SIZE(val); reg++) {
+		err = snd_usb_cm106_write_int_reg(dev, reg, val[reg]);
+		if (err < 0)
+			return err;
+	}
+
+	return err;
+}
+
+/*
+ * This call will put the synth in "USB send" mode, i.e it will send MIDI
+ * messages through USB (this is disabled at startup). The synth will
+ * acknowledge by sending a sysex on endpoint 0x85 and by displaying a USB
+ * sign on its LCD. Values here are chosen based on sniffing USB traffic
+ * under Windows.
+ */
+static int snd_usb_accessmusic_boot_quirk(struct usb_device *dev)
+{
+	int err, actual_length;
+
+	/* "midi send" enable */
+	static const u8 seq[] = { 0x4e, 0x73, 0x52, 0x01 };
+
+	void *buf = kmemdup(seq, ARRAY_SIZE(seq), GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+	err = usb_interrupt_msg(dev, usb_sndintpipe(dev, 0x05), buf,
+			ARRAY_SIZE(seq), &actual_length, 1000);
+	kfree(buf);
+	if (err < 0)
+		return err;
+
+	return 0;
+}
 
 /*
  * Setup quirks
@@ -3574,6 +3633,18 @@ static void *snd_usb_audio_probe(struct usb_device *dev,
 	/* C-Media CM106 / Turtle Beach Audio Advantage Roadie */
 	if (id == USB_ID(0x10f5, 0x0200)) {
 		if (snd_usb_cm106_boot_quirk(dev) < 0)
+			goto __err_val;
+	}
+
+	/* C-Media CM6206 / CM106-Like Sound Device */
+	if (id == USB_ID(0x0d8c, 0x0102)) {
+		if (snd_usb_cm6206_boot_quirk(dev) < 0)
+			goto __err_val;
+	}
+
+	/* Access Music VirusTI Desktop */
+	if (id == USB_ID(0x133e, 0x0815)) {
+		if (snd_usb_accessmusic_boot_quirk(dev) < 0)
 			goto __err_val;
 	}
 

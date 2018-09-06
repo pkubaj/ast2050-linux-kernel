@@ -38,10 +38,6 @@
 #include <linux/jiffies.h>
 #include <asm/uaccess.h>
 
-#ifdef CONFIG_AST_I2C_SLAVE_RDWR
-#include <plat/ast_i2c.h>
-#endif
-
 static struct i2c_driver i2cdev_driver;
 
 /*
@@ -246,7 +242,8 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 	for (i = 0; i < rdwr_arg.nmsgs; i++) {
 		/* Limit the size of the message to a sane amount;
 		 * and don't let length change either. */
-		if (rdwr_pa[i].len > 8192) {
+		if ((rdwr_pa[i].len > 8192) ||
+		    (rdwr_pa[i].flags & I2C_M_RECV_LEN)) {
 			res = -EINVAL;
 			break;
 		}
@@ -262,31 +259,6 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 				res = -EFAULT;
 			break;
 		}
-
-		/* From Linux 3.5: */
-		/*
-		 * If the message length is received from the slave (similar
-		 * to SMBus block read), we must ensure that the buffer will
-		 * be large enough to cope with a message length of
-		 * I2C_SMBUS_BLOCK_MAX as this is the maximum underlying bus
-		 * drivers allow. The first byte in the buffer must be
-		 * pre-filled with the number of extra bytes, which must be
-		 * at least one to hold the message length, but can be
-		 * greater (for example to account for a checksum byte at
-		 * the end of the message.)
-		 */
-	       if (rdwr_pa[i].flags & I2C_M_RECV_LEN) {
-		       if (!(rdwr_pa[i].flags & I2C_M_RD) ||
-			   rdwr_pa[i].buf[0] < 1 ||
-			   rdwr_pa[i].len < rdwr_pa[i].buf[0] +
-					    I2C_SMBUS_BLOCK_MAX) {
-			       res = -EINVAL;
-			       break;
-		       }
-
-		       rdwr_pa[i].len = rdwr_pa[i].buf[0];
-	       }
-
 	}
 	if (res < 0) {
 		int j;
@@ -311,118 +283,11 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 	return res;
 }
 
-static noinline int i2cdev_ioctl_slave_rdrw(struct i2c_client *client,
-    unsigned long arg)
-{
-  struct i2c_rdwr_ioctl_data rdwr_arg;
-  struct i2c_msg *rdwr_pa;
-  u8 __user **data_ptrs;
-  int i, res;
-
-  if (copy_from_user(&rdwr_arg,
-         (struct i2c_rdwr_ioctl_data __user *)arg,
-         sizeof(rdwr_arg)))
-    return -EFAULT;
-
-  /* Put an arbitrary limit on the number of messages that can
-   * be sent at once */
-  if (rdwr_arg.nmsgs > I2C_RDRW_IOCTL_MAX_MSGS)
-    return -EINVAL;
-
-  rdwr_pa = (struct i2c_msg *)
-    kmalloc(rdwr_arg.nmsgs * sizeof(struct i2c_msg),
-    GFP_KERNEL);
-  if (!rdwr_pa)
-    return -ENOMEM;
-
-  if (copy_from_user(rdwr_pa, rdwr_arg.msgs,
-         rdwr_arg.nmsgs * sizeof(struct i2c_msg))) {
-    kfree(rdwr_pa);
-    return -EFAULT;
-  }
-
-  data_ptrs = kmalloc(rdwr_arg.nmsgs * sizeof(u8 __user *), GFP_KERNEL);
-  if (data_ptrs == NULL) {
-    kfree(rdwr_pa);
-    return -ENOMEM;
-  }
-
-  res = 0;
-  for (i = 0; i < rdwr_arg.nmsgs; i++) {
-    /* Limit the size of the message to a sane amount;
-     * and don't let length change either. */
-    if (rdwr_pa[i].len > 8192) {
-      res = -EINVAL;
-      break;
-    }
-    data_ptrs[i] = (u8 __user *)rdwr_pa[i].buf;
-    rdwr_pa[i].buf = kmalloc(rdwr_pa[i].len, GFP_KERNEL);
-    if (rdwr_pa[i].buf == NULL) {
-      res = -ENOMEM;
-      break;
-    }
-    if (copy_from_user(rdwr_pa[i].buf, data_ptrs[i],
-           rdwr_pa[i].len)) {
-        ++i; /* Needs to be kfreed too */
-        res = -EFAULT;
-      break;
-    }
-
-    /* From Linux 3.5: */
-    /*
-     * If the message length is received from the slave (similar
-     * to SMBus block read), we must ensure that the buffer will
-     * be large enough to cope with a message length of
-     * I2C_SMBUS_BLOCK_MAX as this is the maximum underlying bus
-     * drivers allow. The first byte in the buffer must be
-     * pre-filled with the number of extra bytes, which must be
-     * at least one to hold the message length, but can be
-     * greater (for example to account for a checksum byte at
-     * the end of the message.)
-     */
-         if (rdwr_pa[i].flags & I2C_M_RECV_LEN) {
-           if (!(rdwr_pa[i].flags & I2C_M_RD) ||
-         rdwr_pa[i].buf[0] < 1 ||
-         rdwr_pa[i].len < rdwr_pa[i].buf[0] +
-              I2C_SMBUS_BLOCK_MAX) {
-             res = -EINVAL;
-             break;
-           }
-
-           rdwr_pa[i].len = rdwr_pa[i].buf[0];
-         }
-
-  }
-  if (res < 0) {
-    int j;
-    for (j = 0; j < i; ++j)
-      kfree(rdwr_pa[j].buf);
-    kfree(data_ptrs);
-    kfree(rdwr_pa);
-    return res;
-  }
-
-  res = i2c_slave_transfer(client->adapter, rdwr_pa, rdwr_arg.nmsgs);
-  while (i-- > 0) {
-    if (res >= 0 ) {
-      if (copy_to_user(data_ptrs[i], rdwr_pa[i].buf,
-           rdwr_pa[i].len))
-        res = -EFAULT;
-
-      rdwr_arg.msgs[i].len = rdwr_pa[i].len;
-    }
-    kfree(rdwr_pa[i].buf);
-  }
-  kfree(data_ptrs);
-  kfree(rdwr_pa);
-  return res;
-}
-
 static noinline int i2cdev_ioctl_smbus(struct i2c_client *client,
 		unsigned long arg)
 {
 	struct i2c_smbus_ioctl_data data_arg;
-	union i2c_smbus_large_data temp;
+	union i2c_smbus_data temp;
 	int datasize, res;
 
 	if (copy_from_user(&data_arg,
@@ -435,7 +300,6 @@ static noinline int i2cdev_ioctl_smbus(struct i2c_client *client,
 	    (data_arg.size != I2C_SMBUS_WORD_DATA) &&
 	    (data_arg.size != I2C_SMBUS_PROC_CALL) &&
 	    (data_arg.size != I2C_SMBUS_BLOCK_DATA) &&
-	    (data_arg.size != I2C_SMBUS_BLOCK_LARGE_DATA) &&
 	    (data_arg.size != I2C_SMBUS_I2C_BLOCK_BROKEN) &&
 	    (data_arg.size != I2C_SMBUS_I2C_BLOCK_DATA) &&
 	    (data_arg.size != I2C_SMBUS_BLOCK_PROC_CALL)) {
@@ -476,8 +340,6 @@ static noinline int i2cdev_ioctl_smbus(struct i2c_client *client,
 	else if ((data_arg.size == I2C_SMBUS_WORD_DATA) ||
 		 (data_arg.size == I2C_SMBUS_PROC_CALL))
 		datasize = sizeof(data_arg.data->word);
-  else if (data_arg.size == I2C_SMBUS_BLOCK_LARGE_DATA)
-    datasize = sizeof(union i2c_smbus_large_data);
 	else /* size == smbus block, i2c block, or block proc. call */
 		datasize = sizeof(data_arg.data->block);
 
@@ -553,11 +415,6 @@ static long i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case I2C_RDWR:
 		return i2cdev_ioctl_rdrw(client, arg);
-
-#ifdef CONFIG_AST_I2C_SLAVE_RDWR
-	case I2C_SLAVE_RDWR:
-		return i2cdev_ioctl_slave_rdrw(client, arg);
-#endif
 
 	case I2C_SMBUS:
 		return i2cdev_ioctl_smbus(client, arg);

@@ -101,9 +101,9 @@ struct dm_exception_store {
 	struct dm_dev *cow;
 
 	/* Size of data blocks saved - must be a power of 2 */
-	chunk_t chunk_size;
-	chunk_t chunk_mask;
-	chunk_t chunk_shift;
+	unsigned chunk_size;
+	unsigned chunk_mask;
+	unsigned chunk_shift;
 
 	void *context;
 };
@@ -111,7 +111,7 @@ struct dm_exception_store {
 /*
  * Funtions to manipulate consecutive chunks
  */
-#  if defined(CONFIG_LBD) || (BITS_PER_LONG == 64)
+#  if defined(CONFIG_LBDAF) || (BITS_PER_LONG == 64)
 #    define DM_CHUNK_CONSECUTIVE_BITS 8
 #    define DM_CHUNK_NUMBER_BITS 56
 
@@ -162,14 +162,14 @@ static inline sector_t get_dev_size(struct block_device *bdev)
 static inline chunk_t sector_to_chunk(struct dm_exception_store *store,
 				      sector_t sector)
 {
-	return (sector & ~store->chunk_mask) >> store->chunk_shift;
+	return sector >> store->chunk_shift;
 }
 
 int dm_exception_store_type_register(struct dm_exception_store_type *type);
 int dm_exception_store_type_unregister(struct dm_exception_store_type *type);
 
 int dm_exception_store_set_chunk_size(struct dm_exception_store *store,
-				      unsigned long chunk_size_ulong,
+				      unsigned chunk_size,
 				      char **error);
 
 int dm_exception_store_create(struct dm_target *ti, int argc, char **argv,

@@ -77,7 +77,7 @@ int sysctl_tcp_window_scaling __read_mostly = 1;
 int sysctl_tcp_sack __read_mostly = 1;
 int sysctl_tcp_fack __read_mostly = 1;
 int sysctl_tcp_reordering __read_mostly = TCP_FASTRETRANS_THRESH;
-int sysctl_tcp_ecn __read_mostly;
+int sysctl_tcp_ecn __read_mostly = 2;
 int sysctl_tcp_dsack __read_mostly = 1;
 int sysctl_tcp_app_win __read_mostly = 31;
 int sysctl_tcp_adv_win_scale __read_mostly = 2;
@@ -685,7 +685,7 @@ static inline void tcp_set_rto(struct sock *sk)
 	 *    is invisible. Actually, Linux-2.4 also generates erratic
 	 *    ACKs in some circumstances.
 	 */
-	inet_csk(sk)->icsk_rto = (tp->srtt >> 3) + tp->rttvar;
+	inet_csk(sk)->icsk_rto = __tcp_set_rto(tp);
 
 	/* 2. Fixups made earlier cannot be right.
 	 *    If we do not estimate RTO correctly without them,
@@ -696,8 +696,7 @@ static inline void tcp_set_rto(struct sock *sk)
 	/* NOTE: clamping at TCP_RTO_MIN is not required, current algo
 	 * guarantees that rto is higher.
 	 */
-	if (inet_csk(sk)->icsk_rto > TCP_RTO_MAX)
-		inet_csk(sk)->icsk_rto = TCP_RTO_MAX;
+	tcp_bound_rto(sk);
 }
 
 /* Save metrics learned by this TCP session.
@@ -762,7 +761,7 @@ void tcp_update_metrics(struct sock *sk)
 			set_dst_metric_rtt(dst, RTAX_RTTVAR, var);
 		}
 
-		if (tp->snd_ssthresh >= 0xFFFF) {
+		if (tcp_in_initial_slowstart(tp)) {
 			/* Slow start still did not finish. */
 			if (dst_metric(dst, RTAX_SSTHRESH) &&
 			    !dst_metric_locked(dst, RTAX_SSTHRESH) &&
@@ -1281,7 +1280,7 @@ static int tcp_match_skb_to_sack(struct sock *sk, struct sk_buff *skb,
 			unsigned int new_len = (pkt_len / mss) * mss;
 			if (!in_sack && new_len < pkt_len) {
 				new_len += mss;
-				if (new_len > skb->len)
+				if (new_len >= skb->len)
 					return 0;
 			}
 			pkt_len = new_len;
@@ -3970,6 +3969,8 @@ static void tcp_reset(struct sock *sk)
 	default:
 		sk->sk_err = ECONNRESET;
 	}
+	/* This barrier is coupled with smp_rmb() in tcp_poll() */
+	smp_wmb();
 
 	if (!sock_flag(sk, SOCK_DEAD))
 		sk->sk_error_report(sk);
@@ -4426,7 +4427,7 @@ drop:
 		}
 		__skb_queue_head(&tp->out_of_order_queue, skb);
 	} else {
-		struct sk_buff *skb1 = tp->out_of_order_queue.prev;
+		struct sk_buff *skb1 = skb_peek_tail(&tp->out_of_order_queue);
 		u32 seq = TCP_SKB_CB(skb)->seq;
 		u32 end_seq = TCP_SKB_CB(skb)->end_seq;
 
@@ -4443,15 +4444,18 @@ drop:
 		}
 
 		/* Find place to insert this segment. */
-		do {
+		while (1) {
 			if (!after(TCP_SKB_CB(skb1)->seq, seq))
 				break;
-		} while ((skb1 = skb1->prev) !=
-			 (struct sk_buff *)&tp->out_of_order_queue);
+			if (skb_queue_is_first(&tp->out_of_order_queue, skb1)) {
+				skb1 = NULL;
+				break;
+			}
+			skb1 = skb_queue_prev(&tp->out_of_order_queue, skb1);
+		}
 
 		/* Do skb overlap to previous one? */
-		if (skb1 != (struct sk_buff *)&tp->out_of_order_queue &&
-		    before(seq, TCP_SKB_CB(skb1)->end_seq)) {
+		if (skb1 && before(seq, TCP_SKB_CB(skb1)->end_seq)) {
 			if (!after(end_seq, TCP_SKB_CB(skb1)->end_seq)) {
 				/* All the bits are present. Drop. */
 				__kfree_skb(skb);
@@ -4463,15 +4467,26 @@ drop:
 				tcp_dsack_set(sk, seq,
 					      TCP_SKB_CB(skb1)->end_seq);
 			} else {
-				skb1 = skb1->prev;
+				if (skb_queue_is_first(&tp->out_of_order_queue,
+						       skb1))
+					skb1 = NULL;
+				else
+					skb1 = skb_queue_prev(
+						&tp->out_of_order_queue,
+						skb1);
 			}
 		}
-		__skb_queue_after(&tp->out_of_order_queue, skb1, skb);
+		if (!skb1)
+			__skb_queue_head(&tp->out_of_order_queue, skb);
+		else
+			__skb_queue_after(&tp->out_of_order_queue, skb1, skb);
 
 		/* And clean segments covered by new one as whole. */
-		while ((skb1 = skb->next) !=
-		       (struct sk_buff *)&tp->out_of_order_queue &&
-		       after(end_seq, TCP_SKB_CB(skb1)->seq)) {
+		while (!skb_queue_is_last(&tp->out_of_order_queue, skb)) {
+			skb1 = skb_queue_next(&tp->out_of_order_queue, skb);
+
+			if (!after(end_seq, TCP_SKB_CB(skb1)->seq))
+				break;
 			if (before(end_seq, TCP_SKB_CB(skb1)->end_seq)) {
 				tcp_dsack_extend(sk, TCP_SKB_CB(skb1)->seq,
 						 end_seq);
@@ -4492,7 +4507,10 @@ add_sack:
 static struct sk_buff *tcp_collapse_one(struct sock *sk, struct sk_buff *skb,
 					struct sk_buff_head *list)
 {
-	struct sk_buff *next = skb->next;
+	struct sk_buff *next = NULL;
+
+	if (!skb_queue_is_last(list, skb))
+		next = skb_queue_next(list, skb);
 
 	__skb_unlink(skb, list);
 	__kfree_skb(skb);
@@ -4503,6 +4521,9 @@ static struct sk_buff *tcp_collapse_one(struct sock *sk, struct sk_buff *skb,
 
 /* Collapse contiguous sequence of skbs head..tail with
  * sequence numbers start..end.
+ *
+ * If tail is NULL, this means until the end of the list.
+ *
  * Segments with FIN/SYN are not collapsed (only because this
  * simplifies code)
  */
@@ -4511,15 +4532,23 @@ tcp_collapse(struct sock *sk, struct sk_buff_head *list,
 	     struct sk_buff *head, struct sk_buff *tail,
 	     u32 start, u32 end)
 {
-	struct sk_buff *skb;
+	struct sk_buff *skb, *n;
+	bool end_of_skbs;
 
 	/* First, check that queue is collapsible and find
 	 * the point where collapsing can be useful. */
-	for (skb = head; skb != tail;) {
+	skb = head;
+restart:
+	end_of_skbs = true;
+	skb_queue_walk_from_safe(list, skb, n) {
+		if (skb == tail)
+			break;
 		/* No new bits? It is possible on ofo queue. */
 		if (!before(start, TCP_SKB_CB(skb)->end_seq)) {
 			skb = tcp_collapse_one(sk, skb, list);
-			continue;
+			if (!skb)
+				break;
+			goto restart;
 		}
 
 		/* The first skb to collapse is:
@@ -4529,16 +4558,24 @@ tcp_collapse(struct sock *sk, struct sk_buff_head *list,
 		 */
 		if (!tcp_hdr(skb)->syn && !tcp_hdr(skb)->fin &&
 		    (tcp_win_from_space(skb->truesize) > skb->len ||
-		     before(TCP_SKB_CB(skb)->seq, start) ||
-		     (skb->next != tail &&
-		      TCP_SKB_CB(skb)->end_seq != TCP_SKB_CB(skb->next)->seq)))
+		     before(TCP_SKB_CB(skb)->seq, start))) {
+			end_of_skbs = false;
 			break;
+		}
+
+		if (!skb_queue_is_last(list, skb)) {
+			struct sk_buff *next = skb_queue_next(list, skb);
+			if (next != tail &&
+			    TCP_SKB_CB(skb)->end_seq != TCP_SKB_CB(next)->seq) {
+				end_of_skbs = false;
+				break;
+			}
+		}
 
 		/* Decided to skip this, advance start seq. */
 		start = TCP_SKB_CB(skb)->end_seq;
-		skb = skb->next;
 	}
-	if (skb == tail || tcp_hdr(skb)->syn || tcp_hdr(skb)->fin)
+	if (end_of_skbs || tcp_hdr(skb)->syn || tcp_hdr(skb)->fin)
 		return;
 
 	while (before(start, end)) {
@@ -4583,7 +4620,8 @@ tcp_collapse(struct sock *sk, struct sk_buff_head *list,
 			}
 			if (!before(start, TCP_SKB_CB(skb)->end_seq)) {
 				skb = tcp_collapse_one(sk, skb, list);
-				if (skb == tail ||
+				if (!skb ||
+				    skb == tail ||
 				    tcp_hdr(skb)->syn ||
 				    tcp_hdr(skb)->fin)
 					return;
@@ -4610,17 +4648,21 @@ static void tcp_collapse_ofo_queue(struct sock *sk)
 	head = skb;
 
 	for (;;) {
-		skb = skb->next;
+		struct sk_buff *next = NULL;
+
+		if (!skb_queue_is_last(&tp->out_of_order_queue, skb))
+			next = skb_queue_next(&tp->out_of_order_queue, skb);
+		skb = next;
 
 		/* Segment is terminated when we see gap or when
 		 * we are at the end of all the queue. */
-		if (skb == (struct sk_buff *)&tp->out_of_order_queue ||
+		if (!skb ||
 		    after(TCP_SKB_CB(skb)->seq, end) ||
 		    before(TCP_SKB_CB(skb)->end_seq, start)) {
 			tcp_collapse(sk, &tp->out_of_order_queue,
 				     head, skb, start, end);
 			head = skb;
-			if (skb == (struct sk_buff *)&tp->out_of_order_queue)
+			if (!skb)
 				break;
 			/* Start new segment */
 			start = TCP_SKB_CB(skb)->seq;
@@ -4681,10 +4723,11 @@ static int tcp_prune_queue(struct sock *sk)
 		tp->rcv_ssthresh = min(tp->rcv_ssthresh, 4U * tp->advmss);
 
 	tcp_collapse_ofo_queue(sk);
-	tcp_collapse(sk, &sk->sk_receive_queue,
-		     sk->sk_receive_queue.next,
-		     (struct sk_buff *)&sk->sk_receive_queue,
-		     tp->copied_seq, tp->rcv_nxt);
+	if (!skb_queue_empty(&sk->sk_receive_queue))
+		tcp_collapse(sk, &sk->sk_receive_queue,
+			     skb_peek(&sk->sk_receive_queue),
+			     NULL,
+			     tp->copied_seq, tp->rcv_nxt);
 	sk_mem_reclaim(sk);
 
 	if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf)
@@ -5196,7 +5239,9 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			if (tp->copied_seq == tp->rcv_nxt &&
 			    len - tcp_header_len <= tp->ucopy.len) {
 #ifdef CONFIG_NET_DMA
-				if (tcp_dma_try_early_copy(sk, skb, tcp_header_len)) {
+				if (tp->ucopy.task == current &&
+				    sock_owned_by_user(sk) &&
+				    tcp_dma_try_early_copy(sk, skb, tcp_header_len)) {
 					copied_early = 1;
 					eaten = 1;
 				}
@@ -5514,6 +5559,7 @@ discard:
 		}
 
 		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
+		tp->copied_seq = tp->rcv_nxt;
 		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
 
 		/* RFC1323: The window in SYN & SYN/ACK segments is
@@ -5589,6 +5635,8 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 			goto discard;
 
 		if (th->syn) {
+			if (th->fin)
+				goto discard;
 			if (icsk->icsk_af_ops->conn_request(sk, skb) < 0)
 				return 1;
 
@@ -5658,11 +5706,9 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 
 				/* tcp_ack considers this ACK as duplicate
 				 * and does not calculate rtt.
-				 * Fix it at least with timestamps.
+				 * Force it here.
 				 */
-				if (tp->rx_opt.saw_tstamp &&
-				    tp->rx_opt.rcv_tsecr && !tp->srtt)
-					tcp_ack_saw_tstamp(sk, 0);
+				tcp_ack_update_rtt(sk, 0, 0);
 
 				if (tp->rx_opt.tstamp_ok)
 					tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;

@@ -71,9 +71,6 @@
 #include <linux/if_ether.h>
 #include <linux/bitops.h>
 
-/*================================================================*/
-/* Project Includes */
-
 #include "p80211types.h"
 #include "p80211hdr.h"
 #include "p80211mgmt.h"
@@ -115,7 +112,7 @@ static wlandevice_t *create_wlan(void);
 int prism2_reset_holdtime = 30;	/* Reset hold time in ms */
 int prism2_reset_settletime = 100;	/* Reset settle time in ms */
 
-static int prism2_doreset = 0;	/* Do a reset at init? */
+static int prism2_doreset;	/* Do a reset at init? */
 
 module_param(prism2_doreset, int, 0644);
 MODULE_PARM_DESC(prism2_doreset, "Issue a reset on initialization");
@@ -401,12 +398,9 @@ static int prism2sta_mlmerequest(wlandevice_t *wlandev, p80211msg_t *msg)
 			qualmsg->noise.status =
 			    P80211ENUM_msgitem_status_data_ok;
 
-			qualmsg->link.data =
-			    le16_to_cpu(hw->qual.CQ_currBSS);
-			qualmsg->level.data =
-			    le16_to_cpu(hw->qual.ASL_currBSS);
-			qualmsg->noise.data =
-			    le16_to_cpu(hw->qual.ANL_currFC);
+			qualmsg->link.data = le16_to_cpu(hw->qual.CQ_currBSS);
+			qualmsg->level.data = le16_to_cpu(hw->qual.ASL_currBSS);
+			qualmsg->noise.data = le16_to_cpu(hw->qual.ANL_currFC);
 
 			break;
 		}
@@ -448,7 +442,7 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 	result = P80211ENUM_resultcode_implementation_failure;
 
 	pr_debug("Current MSD state(%d), requesting(%d)\n",
-	       wlandev->msdstate, ifstate);
+		 wlandev->msdstate, ifstate);
 	switch (ifstate) {
 	case P80211ENUM_ifstate_fwload:
 		switch (wlandev->msdstate) {
@@ -458,7 +452,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 			 * Initialize the device+driver sufficiently
 			 * for firmware loading.
 			 */
-			if ((result = hfa384x_drvr_start(hw))) {
+			result = hfa384x_drvr_start(hw);
+			if (result) {
 				printk(KERN_ERR
 				       "hfa384x_drvr_start() failed,"
 				       "result=%d\n", (int)result);
@@ -502,7 +497,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 			 * can't make any assumptions about the state
 			 * of the hardware or a previous firmware load.
 			 */
-			if ((result = hfa384x_drvr_start(hw))) {
+			result = hfa384x_drvr_start(hw);
+			if (result) {
 				printk(KERN_ERR
 				       "hfa384x_drvr_start() failed,"
 				       "result=%d\n", (int)result);
@@ -512,7 +508,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 				break;
 			}
 
-			if ((result = prism2sta_getcardinfo(wlandev))) {
+			result = prism2sta_getcardinfo(wlandev);
+			if (result) {
 				printk(KERN_ERR
 				       "prism2sta_getcardinfo() failed,"
 				       "result=%d\n", (int)result);
@@ -522,7 +519,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 				wlandev->msdstate = WLAN_MSD_HWPRESENT;
 				break;
 			}
-			if ((result = prism2sta_globalsetup(wlandev))) {
+			result = prism2sta_globalsetup(wlandev);
+			if (result) {
 				printk(KERN_ERR
 				       "prism2sta_globalsetup() failed,"
 				       "result=%d\n", (int)result);
@@ -811,10 +809,8 @@ static int prism2sta_getcardinfo(wlandevice_t *wlandev)
 	   fields in byte order */
 	hw->cap_act_pri_cfi.role = le16_to_cpu(hw->cap_act_pri_cfi.role);
 	hw->cap_act_pri_cfi.id = le16_to_cpu(hw->cap_act_pri_cfi.id);
-	hw->cap_act_pri_cfi.variant =
-	    le16_to_cpu(hw->cap_act_pri_cfi.variant);
-	hw->cap_act_pri_cfi.bottom =
-	    le16_to_cpu(hw->cap_act_pri_cfi.bottom);
+	hw->cap_act_pri_cfi.variant = le16_to_cpu(hw->cap_act_pri_cfi.variant);
+	hw->cap_act_pri_cfi.bottom = le16_to_cpu(hw->cap_act_pri_cfi.bottom);
 	hw->cap_act_pri_cfi.top = le16_to_cpu(hw->cap_act_pri_cfi.top);
 
 	printk(KERN_INFO
@@ -836,10 +832,8 @@ static int prism2sta_getcardinfo(wlandevice_t *wlandev)
 	   fields in byte order */
 	hw->cap_act_sta_cfi.role = le16_to_cpu(hw->cap_act_sta_cfi.role);
 	hw->cap_act_sta_cfi.id = le16_to_cpu(hw->cap_act_sta_cfi.id);
-	hw->cap_act_sta_cfi.variant =
-	    le16_to_cpu(hw->cap_act_sta_cfi.variant);
-	hw->cap_act_sta_cfi.bottom =
-	    le16_to_cpu(hw->cap_act_sta_cfi.bottom);
+	hw->cap_act_sta_cfi.variant = le16_to_cpu(hw->cap_act_sta_cfi.variant);
+	hw->cap_act_sta_cfi.bottom = le16_to_cpu(hw->cap_act_sta_cfi.bottom);
 	hw->cap_act_sta_cfi.top = le16_to_cpu(hw->cap_act_sta_cfi.top);
 
 	printk(KERN_INFO
@@ -861,10 +855,8 @@ static int prism2sta_getcardinfo(wlandevice_t *wlandev)
 	   fields in byte order */
 	hw->cap_act_sta_mfi.role = le16_to_cpu(hw->cap_act_sta_mfi.role);
 	hw->cap_act_sta_mfi.id = le16_to_cpu(hw->cap_act_sta_mfi.id);
-	hw->cap_act_sta_mfi.variant =
-	    le16_to_cpu(hw->cap_act_sta_mfi.variant);
-	hw->cap_act_sta_mfi.bottom =
-	    le16_to_cpu(hw->cap_act_sta_mfi.bottom);
+	hw->cap_act_sta_mfi.variant = le16_to_cpu(hw->cap_act_sta_mfi.variant);
+	hw->cap_act_sta_mfi.bottom = le16_to_cpu(hw->cap_act_sta_mfi.bottom);
 	hw->cap_act_sta_mfi.top = le16_to_cpu(hw->cap_act_sta_mfi.top);
 
 	printk(KERN_INFO
@@ -1031,13 +1023,13 @@ static void prism2sta_inf_tallies(wlandevice_t *wlandev,
 
 	cnt = sizeof(hfa384x_CommTallies32_t) / sizeof(u32);
 	if (inf->framelen > 22) {
-		dst = (u32 *)&hw->tallies;
-		src32 = (u32 *)&inf->info.commtallies32;
+		dst = (u32 *) & hw->tallies;
+		src32 = (u32 *) & inf->info.commtallies32;
 		for (i = 0; i < cnt; i++, dst++, src32++)
 			*dst += le32_to_cpu(*src32);
 	} else {
-		dst = (u32 *)&hw->tallies;
-		src16 = (u16 *)&inf->info.commtallies16;
+		dst = (u32 *) & hw->tallies;
+		src16 = (u16 *) & inf->info.commtallies16;
 		for (i = 0; i < cnt; i++, dst++, src16++)
 			*dst += le16_to_cpu(*src16);
 	}
@@ -1080,14 +1072,14 @@ static void prism2sta_inf_scanresults(wlandevice_t *wlandev,
 
 	/* Print em */
 	pr_debug("rx scanresults, reason=%d, nbss=%d:\n",
-	       inf->info.scanresult.scanreason, nbss);
+		 inf->info.scanresult.scanreason, nbss);
 	for (i = 0; i < nbss; i++) {
 		pr_debug("chid=%d anl=%d sl=%d bcnint=%d\n",
-		       sr->result[i].chid,
-		       sr->result[i].anl,
-		       sr->result[i].sl, sr->result[i].bcnint);
+			 sr->result[i].chid,
+			 sr->result[i].anl,
+			 sr->result[i].sl, sr->result[i].bcnint);
 		pr_debug("  capinfo=0x%04x proberesp_rate=%d\n",
-		       sr->result[i].capinfo, sr->result[i].proberesp_rate);
+			 sr->result[i].capinfo, sr->result[i].proberesp_rate);
 	}
 	/* issue a join request */
 	joinreq.channel = sr->result[0].chid;
@@ -1174,29 +1166,26 @@ static void prism2sta_inf_chinforesults(wlandevice_t *wlandev,
 	for (i = 0, n = 0; i < HFA384x_CHINFORESULT_MAX; i++) {
 		if (hw->channel_info.results.scanchannels & (1 << i)) {
 			int channel =
-			    le16_to_cpu(inf->info.chinforesult.result[n].
-					    chid) - 1;
+			    le16_to_cpu(inf->info.chinforesult.result[n].chid) -
+			    1;
 			hfa384x_ChInfoResultSub_t *chinforesult =
 			    &hw->channel_info.results.result[channel];
 			chinforesult->chid = channel;
 			chinforesult->anl =
-			    le16_to_cpu(inf->info.chinforesult.result[n].
-					    anl);
+			    le16_to_cpu(inf->info.chinforesult.result[n].anl);
 			chinforesult->pnl =
-			    le16_to_cpu(inf->info.chinforesult.result[n].
-					    pnl);
+			    le16_to_cpu(inf->info.chinforesult.result[n].pnl);
 			chinforesult->active =
 			    le16_to_cpu(inf->info.chinforesult.result[n].
-					    active);
-			printk(KERN_DEBUG
-			       "chinfo: channel %d, %s level (avg/peak)=%d/%d dB, pcf %d\n",
-			       channel + 1,
-			       chinforesult->
-			       active & HFA384x_CHINFORESULT_BSSACTIVE ?
-			       "signal" : "noise", chinforesult->anl,
-			       chinforesult->pnl,
-			       chinforesult->
-			       active & HFA384x_CHINFORESULT_PCFACTIVE ? 1 : 0);
+					active);
+			pr_debug
+			    ("chinfo: channel %d, %s level (avg/peak)=%d/%d dB, pcf %d\n",
+			     channel + 1,
+			     chinforesult->
+			     active & HFA384x_CHINFORESULT_BSSACTIVE ? "signal"
+			     : "noise", chinforesult->anl, chinforesult->pnl,
+			     chinforesult->
+			     active & HFA384x_CHINFORESULT_PCFACTIVE ? 1 : 0);
 			n++;
 		}
 	}
@@ -1276,9 +1265,9 @@ void prism2sta_processing_defer(struct work_struct *data)
 							wlandev->bssid,
 							WLAN_BSSID_LEN);
 			if (result) {
-				printk(KERN_DEBUG
-				       "getconfig(0x%02x) failed, result = %d\n",
-				       HFA384x_RID_CURRENTBSSID, result);
+				pr_debug
+				    ("getconfig(0x%02x) failed, result = %d\n",
+				     HFA384x_RID_CURRENTBSSID, result);
 				goto failed;
 			}
 
@@ -1286,23 +1275,23 @@ void prism2sta_processing_defer(struct work_struct *data)
 							HFA384x_RID_CURRENTSSID,
 							&ssid, sizeof(ssid));
 			if (result) {
-				printk(KERN_DEBUG
-				       "getconfig(0x%02x) failed, result = %d\n",
-				       HFA384x_RID_CURRENTSSID, result);
+				pr_debug
+				    ("getconfig(0x%02x) failed, result = %d\n",
+				     HFA384x_RID_CURRENTSSID, result);
 				goto failed;
 			}
-			prism2mgmt_bytestr2pstr((hfa384x_bytestr_t *)&ssid,
-						(p80211pstrd_t *)&wlandev->
-						ssid);
+			prism2mgmt_bytestr2pstr((hfa384x_bytestr_t *) & ssid,
+						(p80211pstrd_t *) &
+						wlandev->ssid);
 
 			/* Collect the port status */
 			result = hfa384x_drvr_getconfig16(hw,
 							  HFA384x_RID_PORTSTATUS,
 							  &portstatus);
 			if (result) {
-				printk(KERN_DEBUG
-				       "getconfig(0x%02x) failed, result = %d\n",
-				       HFA384x_RID_PORTSTATUS, result);
+				pr_debug
+				    ("getconfig(0x%02x) failed, result = %d\n",
+				     HFA384x_RID_PORTSTATUS, result);
 				goto failed;
 			}
 			wlandev->macmode =
@@ -1366,9 +1355,8 @@ void prism2sta_processing_defer(struct work_struct *data)
 						HFA384x_RID_CURRENTBSSID,
 						wlandev->bssid, WLAN_BSSID_LEN);
 		if (result) {
-			printk(KERN_DEBUG
-			       "getconfig(0x%02x) failed, result = %d\n",
-			       HFA384x_RID_CURRENTBSSID, result);
+			pr_debug("getconfig(0x%02x) failed, result = %d\n",
+				 HFA384x_RID_CURRENTBSSID, result);
 			goto failed;
 		}
 
@@ -1376,13 +1364,12 @@ void prism2sta_processing_defer(struct work_struct *data)
 						HFA384x_RID_CURRENTSSID,
 						&ssid, sizeof(ssid));
 		if (result) {
-			printk(KERN_DEBUG
-			       "getconfig(0x%02x) failed, result = %d\n",
-			       HFA384x_RID_CURRENTSSID, result);
+			pr_debug("getconfig(0x%02x) failed, result = %d\n",
+				 HFA384x_RID_CURRENTSSID, result);
 			goto failed;
 		}
-		prism2mgmt_bytestr2pstr((hfa384x_bytestr_t *)&ssid,
-					(p80211pstrd_t *)&wlandev->ssid);
+		prism2mgmt_bytestr2pstr((hfa384x_bytestr_t *) & ssid,
+					(p80211pstrd_t *) & wlandev->ssid);
 
 		hw->link_status = HFA384x_LINK_CONNECTED;
 		netif_carrier_on(wlandev->netdev);
@@ -1457,9 +1444,7 @@ void prism2sta_processing_defer(struct work_struct *data)
 	}
 
 	wlandev->linkstatus = (hw->link_status == HFA384x_LINK_CONNECTED);
-#ifdef WIRELESS_EXT
 	p80211wext_event_associated(wlandev, wlandev->linkstatus);
-#endif
 
 failed:
 	return;
@@ -2020,9 +2005,9 @@ void prism2sta_commsqual_defer(struct work_struct *data)
 		}
 
 		pr_debug("commsqual %d %d %d\n",
-		       le16_to_cpu(hw->qual.CQ_currBSS),
-		       le16_to_cpu(hw->qual.ASL_currBSS),
-		       le16_to_cpu(hw->qual.ANL_currFC));
+			 le16_to_cpu(hw->qual.CQ_currBSS),
+			 le16_to_cpu(hw->qual.ASL_currBSS),
+			 le16_to_cpu(hw->qual.ANL_currFC));
 	}
 
 	/* Lastly, we need to make sure the BSSID didn't change on us */
@@ -2030,9 +2015,8 @@ void prism2sta_commsqual_defer(struct work_struct *data)
 					HFA384x_RID_CURRENTBSSID,
 					wlandev->bssid, WLAN_BSSID_LEN);
 	if (result) {
-		printk(KERN_DEBUG
-		       "getconfig(0x%02x) failed, result = %d\n",
-		       HFA384x_RID_CURRENTBSSID, result);
+		pr_debug("getconfig(0x%02x) failed, result = %d\n",
+			 HFA384x_RID_CURRENTBSSID, result);
 		goto done;
 	}
 
@@ -2040,13 +2024,12 @@ void prism2sta_commsqual_defer(struct work_struct *data)
 					HFA384x_RID_CURRENTSSID,
 					&ssid, sizeof(ssid));
 	if (result) {
-		printk(KERN_DEBUG
-		       "getconfig(0x%02x) failed, result = %d\n",
-		       HFA384x_RID_CURRENTSSID, result);
+		pr_debug("getconfig(0x%02x) failed, result = %d\n",
+			 HFA384x_RID_CURRENTSSID, result);
 		goto done;
 	}
-	prism2mgmt_bytestr2pstr((hfa384x_bytestr_t *)&ssid,
-				(p80211pstrd_t *)&wlandev->ssid);
+	prism2mgmt_bytestr2pstr((hfa384x_bytestr_t *) & ssid,
+				(p80211pstrd_t *) & wlandev->ssid);
 
 	/* Reschedule timer */
 	mod_timer(&hw->commsqual_timer, jiffies + HZ);

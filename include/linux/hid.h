@@ -238,6 +238,42 @@ struct hid_item {
 #define HID_GD_RIGHT		0x00010092
 #define HID_GD_LEFT		0x00010093
 
+#define HID_DG_DIGITIZER	0x000d0001
+#define HID_DG_PEN		0x000d0002
+#define HID_DG_LIGHTPEN		0x000d0003
+#define HID_DG_TOUCHSCREEN	0x000d0004
+#define HID_DG_TOUCHPAD		0x000d0005
+#define HID_DG_STYLUS		0x000d0020
+#define HID_DG_PUCK		0x000d0021
+#define HID_DG_FINGER		0x000d0022
+#define HID_DG_TIPPRESSURE	0x000d0030
+#define HID_DG_BARRELPRESSURE	0x000d0031
+#define HID_DG_INRANGE		0x000d0032
+#define HID_DG_TOUCH		0x000d0033
+#define HID_DG_UNTOUCH		0x000d0034
+#define HID_DG_TAP		0x000d0035
+#define HID_DG_TABLETFUNCTIONKEY	0x000d0039
+#define HID_DG_PROGRAMCHANGEKEY	0x000d003a
+#define HID_DG_INVERT		0x000d003c
+#define HID_DG_TIPSWITCH	0x000d0042
+#define HID_DG_TIPSWITCH2	0x000d0043
+#define HID_DG_BARRELSWITCH	0x000d0044
+#define HID_DG_ERASER		0x000d0045
+#define HID_DG_TABLETPICK	0x000d0046
+/*
+ * as of May 20, 2009 the usages below are not yet in the official USB spec
+ * but are being pushed by Microsft as described in their paper "Digitizer
+ * Drivers for Windows Touch and Pen-Based Computers"
+ */
+#define HID_DG_CONFIDENCE	0x000d0047
+#define HID_DG_WIDTH		0x000d0048
+#define HID_DG_HEIGHT		0x000d0049
+#define HID_DG_CONTACTID	0x000d0051
+#define HID_DG_INPUTMODE	0x000d0052
+#define HID_DG_DEVICEINDEX	0x000d0053
+#define HID_DG_CONTACTCOUNT	0x000d0054
+#define HID_DG_CONTACTMAX	0x000d0055
+
 /*
  * HID report types --- Ouch! HID spec says 1 2 3!
  */
@@ -276,6 +312,7 @@ struct hid_item {
 #define HID_QUIRK_MULTI_INPUT			0x00000040
 #define HID_QUIRK_SKIP_OUTPUT_REPORTS		0x00010000
 #define HID_QUIRK_FULLSPEED_INTERVAL		0x10000000
+#define HID_QUIRK_NO_INIT_REPORTS		0x20000000
 
 /*
  * This is the global environment of the parser. This information is
@@ -373,10 +410,12 @@ struct hid_report {
 	struct hid_device *device;			/* associated device */
 };
 
+#define HID_MAX_IDS 256
+
 struct hid_report_enum {
 	unsigned numbered;
 	struct list_head report_list;
-	struct hid_report *report_id_hash[256];
+	struct hid_report *report_id_hash[HID_MAX_IDS];
 };
 
 #define HID_REPORT_TYPES 3
@@ -458,12 +497,21 @@ struct hid_device {							/* device report descriptor */
 
 	/* hiddev event handler */
 	int (*hiddev_connect)(struct hid_device *, unsigned int);
+	void (*hiddev_disconnect)(struct hid_device *);
 	void (*hiddev_hid_event) (struct hid_device *, struct hid_field *field,
 				  struct hid_usage *, __s32);
 	void (*hiddev_report_event) (struct hid_device *, struct hid_report *);
 
 	/* handler for raw output data, used by hidraw */
 	int (*hid_output_raw_report) (struct hid_device *, __u8 *, size_t);
+
+	/* debugging support via debugfs */
+	unsigned short debug;
+	struct dentry *debug_dir;
+	struct dentry *debug_rdesc;
+	struct dentry *debug_events;
+	struct list_head debug_list;
+	wait_queue_head_t debug_wait;
 };
 
 static inline void *hid_get_drvdata(struct hid_device *hdev)
@@ -621,9 +669,7 @@ struct hid_ll_driver {
 
 /* HID core API */
 
-#ifdef CONFIG_HID_DEBUG
 extern int hid_debug;
-#endif
 
 extern int hid_add_device(struct hid_device *);
 extern void hid_destroy_device(struct hid_device *);
@@ -647,8 +693,13 @@ int hidinput_find_field(struct hid_device *hid, unsigned int type, unsigned int 
 void hid_output_report(struct hid_report *report, __u8 *data);
 struct hid_device *hid_allocate_device(void);
 int hid_parse_report(struct hid_device *hid, __u8 *start, unsigned size);
+struct hid_report *hid_validate_values(struct hid_device *hid,
+				       unsigned int type, unsigned int id,
+				       unsigned int field_index,
+				       unsigned int report_counts);
 int hid_check_keys_pressed(struct hid_device *hid);
 int hid_connect(struct hid_device *hid, unsigned int connect_mask);
+void hid_disconnect(struct hid_device *hid);
 
 /**
  * hid_map_usage - map usage input bits
@@ -758,6 +809,7 @@ static inline int __must_check hid_hw_start(struct hid_device *hdev,
  */
 static inline void hid_hw_stop(struct hid_device *hdev)
 {
+	hid_disconnect(hdev);
 	hdev->ll_driver->stop(hdev);
 }
 
@@ -779,21 +831,9 @@ int hid_pidff_init(struct hid_device *hid);
 #define hid_pidff_init NULL
 #endif
 
-#ifdef CONFIG_HID_DEBUG
 #define dbg_hid(format, arg...) if (hid_debug) \
 				printk(KERN_DEBUG "%s: " format ,\
 				__FILE__ , ## arg)
-#define dbg_hid_line(format, arg...) if (hid_debug) \
-				printk(format, ## arg)
-#else
-static inline int __attribute__((format(printf, 1, 2)))
-dbg_hid(const char *fmt, ...)
-{
-	return 0;
-}
-#define dbg_hid_line dbg_hid
-#endif /* HID_DEBUG */
-
 #define err_hid(format, arg...) printk(KERN_ERR "%s: " format "\n" , \
 		__FILE__ , ## arg)
 #endif /* HID_FF */

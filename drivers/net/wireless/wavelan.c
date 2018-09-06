@@ -2841,7 +2841,8 @@ static int wv_packet_write(struct net_device * dev, void *buf, short length)
  * the packet.  We also prevent reentrance.  Then we call the function
  * to send the packet.
  */
-static int wavelan_packet_xmit(struct sk_buff *skb, struct net_device * dev)
+static netdev_tx_t wavelan_packet_xmit(struct sk_buff *skb,
+					     struct net_device * dev)
 {
 	net_local *lp = netdev_priv(dev);
 	unsigned long flags;
@@ -2867,12 +2868,8 @@ static int wavelan_packet_xmit(struct sk_buff *skb, struct net_device * dev)
 		spin_unlock_irqrestore(&lp->spinlock, flags);
 		/* Check that we can continue */
 		if (lp->tx_n_in_use == (NTXBLOCKS - 1))
-			return 1;
+			return NETDEV_TX_BUSY;
 	}
-#ifdef DEBUG_TX_ERROR
-	if (skb->next)
-		printk(KERN_INFO "skb has next\n");
-#endif
 
 	/* Do we need some padding? */
 	/* Note : on wireless the propagation time is in the order of 1us,
@@ -2884,10 +2881,10 @@ static int wavelan_packet_xmit(struct sk_buff *skb, struct net_device * dev)
 		skb_copy_from_linear_data(skb, data, skb->len);
 		/* Write packet on the card */
 		if(wv_packet_write(dev, data, ETH_ZLEN))
-			return 1;	/* We failed */
+			return NETDEV_TX_BUSY;	/* We failed */
 	}
 	else if(wv_packet_write(dev, skb->data, skb->len))
-		return 1;	/* We failed */
+		return NETDEV_TX_BUSY;	/* We failed */
 
 
 	dev_kfree_skb(skb);
@@ -2895,7 +2892,7 @@ static int wavelan_packet_xmit(struct sk_buff *skb, struct net_device * dev)
 #ifdef DEBUG_TX_TRACE
 	printk(KERN_DEBUG "%s: <-wavelan_packet_xmit()\n", dev->name);
 #endif
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 /*********************** HARDWARE CONFIGURATION ***********************/

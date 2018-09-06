@@ -6,9 +6,10 @@
  */
 
 
-#include <trace/workqueue.h>
+#include <trace/events/workqueue.h>
 #include <linux/list.h>
 #include <linux/percpu.h>
+#include <linux/kref.h>
 #include "trace_stat.h"
 #include "trace.h"
 
@@ -16,8 +17,7 @@
 /* A cpu workqueue thread */
 struct cpu_workqueue_stats {
 	struct list_head            list;
-/* Useful to know if we print the cpu headers */
-	bool		            first_entry;
+	struct kref                 kref;
 	int		            cpu;
 	pid_t			    pid;
 /* Can be inserted from interrupt or user context, need to be atomic */
@@ -41,18 +41,22 @@ struct workqueue_global_stats {
 static DEFINE_PER_CPU(struct workqueue_global_stats, all_workqueue_stat);
 #define workqueue_cpu_stat(cpu) (&per_cpu(all_workqueue_stat, cpu))
 
+static void cpu_workqueue_stat_free(struct kref *kref)
+{
+	kfree(container_of(kref, struct cpu_workqueue_stats, kref));
+}
+
 /* Insertion of a work */
 static void
 probe_workqueue_insertion(struct task_struct *wq_thread,
 			  struct work_struct *work)
 {
 	int cpu = cpumask_first(&wq_thread->cpus_allowed);
-	struct cpu_workqueue_stats *node, *next;
+	struct cpu_workqueue_stats *node;
 	unsigned long flags;
 
 	spin_lock_irqsave(&workqueue_cpu_stat(cpu)->lock, flags);
-	list_for_each_entry_safe(node, next, &workqueue_cpu_stat(cpu)->list,
-							list) {
+	list_for_each_entry(node, &workqueue_cpu_stat(cpu)->list, list) {
 		if (node->pid == wq_thread->pid) {
 			atomic_inc(&node->inserted);
 			goto found;
@@ -69,12 +73,11 @@ probe_workqueue_execution(struct task_struct *wq_thread,
 			  struct work_struct *work)
 {
 	int cpu = cpumask_first(&wq_thread->cpus_allowed);
-	struct cpu_workqueue_stats *node, *next;
+	struct cpu_workqueue_stats *node;
 	unsigned long flags;
 
 	spin_lock_irqsave(&workqueue_cpu_stat(cpu)->lock, flags);
-	list_for_each_entry_safe(node, next, &workqueue_cpu_stat(cpu)->list,
-							list) {
+	list_for_each_entry(node, &workqueue_cpu_stat(cpu)->list, list) {
 		if (node->pid == wq_thread->pid) {
 			node->executed++;
 			goto found;
@@ -100,13 +103,11 @@ static void probe_workqueue_creation(struct task_struct *wq_thread, int cpu)
 		return;
 	}
 	INIT_LIST_HEAD(&cws->list);
+	kref_init(&cws->kref);
 	cws->cpu = cpu;
-
 	cws->pid = wq_thread->pid;
 
 	spin_lock_irqsave(&workqueue_cpu_stat(cpu)->lock, flags);
-	if (list_empty(&workqueue_cpu_stat(cpu)->list))
-		cws->first_entry = true;
 	list_add_tail(&cws->list, &workqueue_cpu_stat(cpu)->list);
 	spin_unlock_irqrestore(&workqueue_cpu_stat(cpu)->lock, flags);
 }
@@ -124,7 +125,7 @@ static void probe_workqueue_destruction(struct task_struct *wq_thread)
 							list) {
 		if (node->pid == wq_thread->pid) {
 			list_del(&node->list);
-			kfree(node);
+			kref_put(&node->kref, cpu_workqueue_stat_free);
 			goto found;
 		}
 	}
@@ -143,16 +144,18 @@ static struct cpu_workqueue_stats *workqueue_stat_start_cpu(int cpu)
 
 	spin_lock_irqsave(&workqueue_cpu_stat(cpu)->lock, flags);
 
-	if (!list_empty(&workqueue_cpu_stat(cpu)->list))
+	if (!list_empty(&workqueue_cpu_stat(cpu)->list)) {
 		ret = list_entry(workqueue_cpu_stat(cpu)->list.next,
 				 struct cpu_workqueue_stats, list);
+		kref_get(&ret->kref);
+	}
 
 	spin_unlock_irqrestore(&workqueue_cpu_stat(cpu)->lock, flags);
 
 	return ret;
 }
 
-static void *workqueue_stat_start(void)
+static void *workqueue_stat_start(struct tracer_stat *trace)
 {
 	int cpu;
 	void *ret = NULL;
@@ -168,9 +171,9 @@ static void *workqueue_stat_start(void)
 static void *workqueue_stat_next(void *prev, int idx)
 {
 	struct cpu_workqueue_stats *prev_cws = prev;
+	struct cpu_workqueue_stats *ret;
 	int cpu = prev_cws->cpu;
 	unsigned long flags;
-	void *ret = NULL;
 
 	spin_lock_irqsave(&workqueue_cpu_stat(cpu)->lock, flags);
 	if (list_is_last(&prev_cws->list, &workqueue_cpu_stat(cpu)->list)) {
@@ -181,25 +184,21 @@ static void *workqueue_stat_next(void *prev, int idx)
 				return NULL;
 		} while (!(ret = workqueue_stat_start_cpu(cpu)));
 		return ret;
+	} else {
+		ret = list_entry(prev_cws->list.next,
+				 struct cpu_workqueue_stats, list);
+		kref_get(&ret->kref);
 	}
 	spin_unlock_irqrestore(&workqueue_cpu_stat(cpu)->lock, flags);
 
-	return list_entry(prev_cws->list.next, struct cpu_workqueue_stats,
-			  list);
+	return ret;
 }
 
 static int workqueue_stat_show(struct seq_file *s, void *p)
 {
 	struct cpu_workqueue_stats *cws = p;
-	unsigned long flags;
-	int cpu = cws->cpu;
 	struct pid *pid;
 	struct task_struct *tsk;
-
-	spin_lock_irqsave(&workqueue_cpu_stat(cpu)->lock, flags);
-	if (&cws->list == workqueue_cpu_stat(cpu)->list.next)
-		seq_printf(s, "\n");
-	spin_unlock_irqrestore(&workqueue_cpu_stat(cpu)->lock, flags);
 
 	pid = find_get_pid(cws->pid);
 	if (pid) {
@@ -216,6 +215,13 @@ static int workqueue_stat_show(struct seq_file *s, void *p)
 	return 0;
 }
 
+static void workqueue_stat_release(void *stat)
+{
+	struct cpu_workqueue_stats *node = stat;
+
+	kref_put(&node->kref, cpu_workqueue_stat_free);
+}
+
 static int workqueue_stat_headers(struct seq_file *s)
 {
 	seq_printf(s, "# CPU  INSERTED  EXECUTED   NAME\n");
@@ -228,6 +234,7 @@ struct tracer_stat workqueue_stats __read_mostly = {
 	.stat_start = workqueue_stat_start,
 	.stat_next = workqueue_stat_next,
 	.stat_show = workqueue_stat_show,
+	.stat_release = workqueue_stat_release,
 	.stat_headers = workqueue_stat_headers
 };
 

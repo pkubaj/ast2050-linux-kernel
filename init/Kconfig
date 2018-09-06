@@ -16,6 +16,11 @@ config DEFCONFIG_LIST
 	default "$ARCH_DEFCONFIG"
 	default "arch/$ARCH/defconfig"
 
+config CONSTRUCTORS
+	bool
+	depends on !UML
+	default y
+
 menu "General setup"
 
 config EXPERIMENTAL
@@ -161,56 +166,6 @@ config KERNEL_LZMA
 
 endchoice
 
-choice
-        prompt "Kernel compression mode"
-        default KERNEL_GZIP
-        help
-	  The linux kernel is a kind of self-extracting executable.
-	  Several compression algorithms are available, which differ
-	  in efficiency, compression and decompression speed.
-	  Compression speed is only relevant when building a kernel.
-	  Decompression speed is relevant at each boot.
-
-	  If you have any problems with bzip2 or lzma compressed
-	  kernels, mail me (Alain Knaff) <alain@knaff.lu>. (An older
-	  version of this functionality (bzip2 only), for 2.4, was
-	  supplied by Christian Ludwig)
-
-	  High compression options are mostly useful for users, who
-	  are low on disk space (embedded systems), but for whom ram
-	  size matters less.
-
-	  If in doubt, select 'gzip'
-
-config KERNEL_GZIP
-       bool "Gzip"
-       help
-         The old and tried gzip compression. Its compression ratio is
-	 the poorest among the 3 choices; however its speed (both
-	 compression and decompression) is the fastest.
-
-config KERNEL_BZIP2
-	bool "Bzip2"
-	help
-	  Its compression ratio and speed is intermediate.
-	  Decompression speed is slowest among the 3.
-	  The kernel size is about 10 per cent smaller with bzip2,
-	  in comparison to gzip.
-	  Bzip2 uses a large amount of memory. For modern kernels
-	  you will need at least 8MB RAM or more for booting.
-
-config KERNEL_LZMA
-       bool "LZMA"
-       help
-         The most recent compression algorithm.
-	 Its ratio is best, decompression speed is between the other
-	 2. Compression is slowest.
-	 The kernel size is about 33 per cent smaller with lzma,
-	 in comparison to gzip.
-
-endchoice
-
-
 config SWAP
 	bool "Support for paging of anonymous memory (swap)"
 	depends on MMU && BLOCK
@@ -342,7 +297,7 @@ config AUDIT
 
 config AUDITSYSCALL
 	bool "Enable system-call auditing support"
-	depends on AUDIT && (X86 || PPC || PPC64 || S390 || IA64 || UML || SPARC64|| SUPERH)
+	depends on AUDIT && (X86 || PPC || S390 || IA64 || UML || SPARC64 || SUPERH)
 	default y if SECURITY_SELINUX
 	help
 	  Enable low-overhead system-call auditing infrastructure that
@@ -352,46 +307,38 @@ config AUDITSYSCALL
 
 config AUDIT_TREE
 	def_bool y
-	depends on AUDITSYSCALL && INOTIFY
+	depends on AUDITSYSCALL
+	select INOTIFY
 
 menu "RCU Subsystem"
 
 choice
 	prompt "RCU Implementation"
-	default CLASSIC_RCU
-
-config CLASSIC_RCU
-	bool "Classic RCU"
-	help
-	  This option selects the classic RCU implementation that is
-	  designed for best read-side performance on non-realtime
-	  systems.
-
-	  Select this option if you are unsure.
+	default TREE_RCU
 
 config TREE_RCU
 	bool "Tree-based hierarchical RCU"
 	help
 	  This option selects the RCU implementation that is
 	  designed for very large SMP system with hundreds or
-	  thousands of CPUs.
+	  thousands of CPUs.  It also scales down nicely to
+	  smaller systems.
 
-config PREEMPT_RCU
-	bool "Preemptible RCU"
+config TREE_PREEMPT_RCU
+	bool "Preemptable tree-based hierarchical RCU"
 	depends on PREEMPT
 	help
-	  This option reduces the latency of the kernel by making certain
-	  RCU sections preemptible. Normally RCU code is non-preemptible, if
-	  this option is selected then read-only RCU sections become
-	  preemptible. This helps latency, but may expose bugs due to
-	  now-naive assumptions about each RCU read-side critical section
-	  remaining on a given CPU through its execution.
+	  This option selects the RCU implementation that is
+	  designed for very large SMP systems with hundreds or
+	  thousands of CPUs, but for which real-time response
+	  is also required.  It also scales down nicely to
+	  smaller systems.
 
 endchoice
 
 config RCU_TRACE
 	bool "Enable tracing for RCU"
-	depends on TREE_RCU || PREEMPT_RCU
+	depends on TREE_RCU || TREE_PREEMPT_RCU
 	help
 	  This option provides tracing in RCU which presents stats
 	  in debugfs for debugging RCU implementation.
@@ -403,7 +350,7 @@ config RCU_FANOUT
 	int "Tree-based hierarchical RCU fanout value"
 	range 2 64 if 64BIT
 	range 2 32 if !64BIT
-	depends on TREE_RCU
+	depends on TREE_RCU || TREE_PREEMPT_RCU
 	default 64 if 64BIT
 	default 32 if !64BIT
 	help
@@ -418,7 +365,7 @@ config RCU_FANOUT
 
 config RCU_FANOUT_EXACT
 	bool "Disable tree-based hierarchical RCU auto-balancing"
-	depends on TREE_RCU
+	depends on TREE_RCU || TREE_PREEMPT_RCU
 	default n
 	help
 	  This option forces use of the exact RCU_FANOUT value specified,
@@ -431,18 +378,12 @@ config RCU_FANOUT_EXACT
 	  Say N if unsure.
 
 config TREE_RCU_TRACE
-	def_bool RCU_TRACE && TREE_RCU
+	def_bool RCU_TRACE && ( TREE_RCU || TREE_PREEMPT_RCU )
 	select DEBUG_FS
 	help
-	  This option provides tracing for the TREE_RCU implementation,
-	  permitting Makefile to trivially select kernel/rcutree_trace.c.
-
-config PREEMPT_RCU_TRACE
-	def_bool RCU_TRACE && PREEMPT_RCU
-	select DEBUG_FS
-	help
-	  This option provides tracing for the PREEMPT_RCU implementation,
-	  permitting Makefile to trivially select kernel/rcupreempt_trace.c.
+	  This option provides tracing for the TREE_RCU and
+	  TREE_PREEMPT_RCU implementations, permitting Makefile to
+	  trivially select kernel/rcutree_trace.c.
 
 endmenu # "RCU Subsystem"
 
@@ -484,57 +425,6 @@ config LOG_BUF_SHIFT
 #
 config HAVE_UNSTABLE_SCHED_CLOCK
 	bool
-
-config GROUP_SCHED
-	bool "Group CPU scheduler"
-	depends on EXPERIMENTAL
-	default n
-	help
-	  This feature lets CPU scheduler recognize task groups and control CPU
-	  bandwidth allocation to such task groups.
-	  In order to create a group from arbitrary set of processes, use
-	  CONFIG_CGROUPS. (See Control Group support.)
-
-config FAIR_GROUP_SCHED
-	bool "Group scheduling for SCHED_OTHER"
-	depends on GROUP_SCHED
-	default GROUP_SCHED
-
-config RT_GROUP_SCHED
-	bool "Group scheduling for SCHED_RR/FIFO"
-	depends on EXPERIMENTAL
-	depends on GROUP_SCHED
-	default n
-	help
-	  This feature lets you explicitly allocate real CPU bandwidth
-	  to users or control groups (depending on the "Basis for grouping tasks"
-	  setting below. If enabled, it will also make it impossible to
-	  schedule realtime tasks for non-root users until you allocate
-	  realtime bandwidth for them.
-	  See Documentation/scheduler/sched-rt-group.txt for more information.
-
-choice
-	depends on GROUP_SCHED
-	prompt "Basis for grouping tasks"
-	default USER_SCHED
-
-config USER_SCHED
-	bool "user id"
-	help
-	  This option will choose userid as the basis for grouping
-	  tasks, thus providing equal CPU bandwidth to each user.
-
-config CGROUP_SCHED
-	bool "Control groups"
- 	depends on CGROUPS
- 	help
-	  This option allows you to create arbitrary task groups
-	  using the "cgroup" pseudo filesystem and control
-	  the cpu bandwidth allocated to each such task group.
-	  Refer to Documentation/cgroups/cgroups.txt for more
-	  information on "cgroup" pseudo filesystem.
-
-endchoice
 
 menuconfig CGROUPS
 	boolean "Control Group support"
@@ -656,6 +546,35 @@ config CGROUP_MEM_RES_CTLR_SWAP
 	  Now, memory usage of swap_cgroup is 2 bytes per entry. If swap page
 	  size is 4096bytes, 512k per 1Gbytes of swap.
 
+menuconfig CGROUP_SCHED
+	bool "Group CPU scheduler"
+	depends on EXPERIMENTAL && CGROUPS
+	default n
+	help
+	  This feature lets CPU scheduler recognize task groups and control CPU
+	  bandwidth allocation to such task groups. It uses cgroups to group
+	  tasks.
+
+if CGROUP_SCHED
+config FAIR_GROUP_SCHED
+	bool "Group scheduling for SCHED_OTHER"
+	depends on CGROUP_SCHED
+	default CGROUP_SCHED
+
+config RT_GROUP_SCHED
+	bool "Group scheduling for SCHED_RR/FIFO"
+	depends on EXPERIMENTAL
+	depends on CGROUP_SCHED
+	default n
+	help
+	  This feature lets you explicitly allocate real CPU bandwidth
+	  to task groups. If enabled, it will also make it impossible to
+	  schedule realtime tasks for non-root users until you allocate
+	  realtime bandwidth for them.
+	  See Documentation/scheduler/sched-rt-group.txt for more information.
+
+endif #CGROUP_SCHED
+
 endif # CGROUPS
 
 config MM_OWNER
@@ -665,13 +584,13 @@ config SYSFS_DEPRECATED
 	bool
 
 config SYSFS_DEPRECATED_V2
-	bool "Create deprecated sysfs layout for older userspace tools"
+	bool "enable deprecated sysfs features which may confuse old userspace tools"
 	depends on SYSFS
-	default y
+	default n
 	select SYSFS_DEPRECATED
 	help
 	  This option switches the layout of sysfs to the deprecated
-	  version.
+	  version. Do not use it on recent distributions.
 
 	  The current sysfs layout features a unified device tree at
 	  /sys/devices/, which is able to express a hierarchy between
@@ -858,14 +777,6 @@ config KALLSYMS_EXTRA_PASS
 	   you wait for kallsyms to be fixed.
 
 
-config STRIP_ASM_SYMS
-	bool "Strip assembler-generated symbols during link"
-	default n
-	help
-	  Strip internal assembler-generated symbols during a link (symbols
-	  that look like '.Lxxx') so they don't pollute the output of
-	  get_wchan() and suchlike.
-
 config HOTPLUG
 	bool "Support for hot-pluggable devices" if EMBEDDED
 	default y
@@ -983,6 +894,86 @@ config AIO
           by some high performance threaded applications. Disabling
           this option saves about 7k.
 
+config HAVE_PERF_EVENTS
+	bool
+	help
+	  See tools/perf/design.txt for details.
+
+config PERF_USE_VMALLOC
+	bool
+	help
+	  See tools/perf/design.txt for details
+
+menu "Kernel Performance Events And Counters"
+
+config PERF_EVENTS
+	bool "Kernel performance events and counters"
+	default y if (PROFILING || PERF_COUNTERS)
+	depends on HAVE_PERF_EVENTS
+	select ANON_INODES
+	help
+	  Enable kernel support for various performance events provided
+	  by software and hardware.
+
+	  Software events are supported either built-in or via the
+	  use of generic tracepoints.
+
+	  Most modern CPUs support performance events via performance
+	  counter registers. These registers count the number of certain
+	  types of hw events: such as instructions executed, cachemisses
+	  suffered, or branches mis-predicted - without slowing down the
+	  kernel or applications. These registers can also trigger interrupts
+	  when a threshold number of events have passed - and can thus be
+	  used to profile the code that runs on that CPU.
+
+	  The Linux Performance Event subsystem provides an abstraction of
+	  these software and hardware event capabilities, available via a
+	  system call and used by the "perf" utility in tools/perf/. It
+	  provides per task and per CPU counters, and it provides event
+	  capabilities on top of those.
+
+	  Say Y if unsure.
+
+config EVENT_PROFILE
+	bool "Tracepoint profiling sources"
+	depends on PERF_EVENTS && EVENT_TRACING
+	default y
+	help
+	 Allow the use of tracepoints as software performance events.
+
+	 When this is enabled, you can create perf events based on
+	 tracepoints using PERF_TYPE_TRACEPOINT and the tracepoint ID
+	 found in debugfs://tracing/events/*/*/id. (The -e/--events
+	 option to the perf tool can parse and interpret symbolic
+	 tracepoints, in the subsystem:tracepoint_name format.)
+
+config PERF_COUNTERS
+	bool "Kernel performance counters (old config option)"
+	depends on HAVE_PERF_EVENTS
+	help
+	  This config has been obsoleted by the PERF_EVENTS
+	  config option - please see that one for details.
+
+	  It has no effect on the kernel whether you enable
+	  it or not, it is a compatibility placeholder.
+
+	  Say N if unsure.
+
+config DEBUG_PERF_USE_VMALLOC
+	default n
+	bool "Debug: use vmalloc to back perf mmap() buffers"
+	depends on PERF_EVENTS && DEBUG_KERNEL
+	select PERF_USE_VMALLOC
+	help
+	 Use vmalloc memory to back perf mmap() buffers.
+
+	 Mostly useful for debugging the vmalloc code on platforms
+	 that don't require it.
+
+	 Say N if unsure.
+
+endmenu
+
 config VM_EVENT_COUNTERS
 	default y
 	bool "Enable VM event counters for /proc/vmstat" if EMBEDDED
@@ -1037,6 +1028,7 @@ config SLAB
 	  per cpu and per node queues.
 
 config SLUB
+	depends on BROKEN || NUMA || !DISCONTIGMEM
 	bool "SLUB (Unqueued Allocator)"
 	help
 	   SLUB is a slab allocator that minimizes cache line usage
@@ -1069,13 +1061,6 @@ config PROFILING
 config TRACEPOINTS
 	bool
 
-config MARKERS
-	bool "Activate markers"
-	select TRACEPOINTS
-	help
-	  Place an empty function call at each marker site. Can be
-	  dynamically changed for a probe function.
-
 source "arch/Kconfig"
 
 config SLOW_WORK
@@ -1089,6 +1074,16 @@ config SLOW_WORK
 	  An example of this would be CacheFiles doing a path lookup followed
 	  by a series of mkdirs and a create call, all of which have to touch
 	  disk.
+
+	  See Documentation/slow-work.txt.
+
+config SLOW_WORK_DEBUG
+	bool "Slow work debugging through debugfs"
+	default n
+	depends on SLOW_WORK && DEBUG_FS
+	help
+	  Display the contents of the slow work run queue through debugfs,
+	  including items currently executing.
 
 	  See Documentation/slow-work.txt.
 

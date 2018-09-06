@@ -31,7 +31,6 @@
  * SOFTWARE.
  */
 
-#include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/mm.h>
 #include <linux/scatterlist.h>
@@ -175,9 +174,10 @@ struct mlx4_icm *mlx4_alloc_icm(struct mlx4_dev *dev, int npages,
 
 				if (chunk->nsg <= 0)
 					goto fail;
-
-				chunk = NULL;
 			}
+
+			if (chunk->npages == MLX4_ICM_CHUNK_LEN)
+				chunk = NULL;
 
 			npages -= 1 << cur_order;
 		} else {

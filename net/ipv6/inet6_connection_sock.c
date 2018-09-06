@@ -57,7 +57,7 @@ EXPORT_SYMBOL_GPL(inet6_csk_bind_conflict);
  * request_sock (formerly open request) hash tables.
  */
 static u32 inet6_synq_hash(const struct in6_addr *raddr, const __be16 rport,
-			   const u32 rnd, const u16 synq_hsize)
+			   const u32 rnd, const u32 synq_hsize)
 {
 	u32 a = (__force u32)raddr->s6_addr32[0];
 	u32 b = (__force u32)raddr->s6_addr32[1];
@@ -228,7 +228,7 @@ int inet6_csk_xmit(struct sk_buff *skb, int ipfragok)
 		__inet6_csk_dst_store(sk, dst, NULL, NULL);
 	}
 
-	skb->dst = dst_clone(dst);
+	skb_dst_set(skb, dst_clone(dst));
 
 	/* Restore final destination back after routing done */
 	ipv6_addr_copy(&fl.fl6_dst, &np->daddr);

@@ -245,7 +245,7 @@ static int uml_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_kfree_skb(skb);
 
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 static void uml_net_set_multicast_list(struct net_device *dev)
@@ -285,7 +285,7 @@ static void uml_net_get_drvinfo(struct net_device *dev,
 	strcpy(info->version, "42");
 }
 
-static struct ethtool_ops uml_net_ethtool_ops = {
+static const struct ethtool_ops uml_net_ethtool_ops = {
 	.get_drvinfo	= uml_net_get_drvinfo,
 	.get_link	= ethtool_op_get_link,
 };
@@ -360,7 +360,7 @@ static struct platform_driver uml_net_driver = {
 
 static void net_device_release(struct device *dev)
 {
-	struct uml_net *device = dev->driver_data;
+	struct uml_net *device = dev_get_drvdata(dev);
 	struct net_device *netdev = device->dev;
 	struct uml_net_private *lp = netdev_priv(netdev);
 
@@ -440,7 +440,7 @@ static void eth_configure(int n, void *init, char *mac,
 	device->pdev.id = n;
 	device->pdev.name = DRIVER_NAME;
 	device->pdev.dev.release = net_device_release;
-	device->pdev.dev.driver_data = device;
+	dev_set_drvdata(&device->pdev.dev, device);
 	if (platform_device_register(&device->pdev))
 		goto out_free_netdev;
 	SET_NETDEV_DEV(dev,&device->pdev.dev);
@@ -533,7 +533,7 @@ static int eth_parse(char *str, int *index_out, char **str_out,
 		     char **error_out)
 {
 	char *end;
-	int n, err = -EINVAL;;
+	int n, err = -EINVAL;
 
 	n = simple_strtoul(str, &end, 0);
 	if (end == str) {

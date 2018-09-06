@@ -196,9 +196,13 @@ struct tulip_chip_table tulip_tbl[] = {
 	| HAS_NWAY | HAS_PCI_MWI, tulip_timer, tulip_media_task },
 
   /* DM910X */
+#ifdef CONFIG_TULIP_DM910X
   { "Davicom DM9102/DM9102A", 128, 0x0001ebef,
 	HAS_MII | HAS_MEDIA_TABLE | CSR12_IN_SROM | HAS_ACPI,
 	tulip_timer, tulip_media_task },
+#else
+  { NULL },
+#endif
 
   /* RS7112 */
   { "Conexant LANfinity", 256, 0x0001ebef,
@@ -228,8 +232,10 @@ static struct pci_device_id tulip_pci_tbl[] = {
 	{ 0x1259, 0xa120, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET },
 	{ 0x11F6, 0x9881, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMPEX9881 },
 	{ 0x8086, 0x0039, PCI_ANY_ID, PCI_ANY_ID, 0, 0, I21145 },
+#ifdef CONFIG_TULIP_DM910X
 	{ 0x1282, 0x9100, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DM910X },
 	{ 0x1282, 0x9102, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DM910X },
+#endif
 	{ 0x1113, 0x1216, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET },
 	{ 0x1113, 0x1217, PCI_ANY_ID, PCI_ANY_ID, 0, 0, MX98715 },
 	{ 0x1113, 0x9511, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET },
@@ -243,6 +249,7 @@ static struct pci_device_id tulip_pci_tbl[] = {
 	{ 0x17B3, 0xAB08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET },
 	{ 0x10b7, 0x9300, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET }, /* 3Com 3CSOHO100B-TX */
 	{ 0x14ea, 0xab08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET }, /* Planex FNW-3602-TX */
+	{ 0x1414, 0x0001, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET }, /* Microsoft MN-120 */
 	{ 0x1414, 0x0002, PCI_ANY_ID, PCI_ANY_ID, 0, 0, COMET },
 	{ } /* terminate list */
 };
@@ -256,7 +263,8 @@ const char tulip_media_cap[32] =
 static void tulip_tx_timeout(struct net_device *dev);
 static void tulip_init_ring(struct net_device *dev);
 static void tulip_free_ring(struct net_device *dev);
-static int tulip_start_xmit(struct sk_buff *skb, struct net_device *dev);
+static netdev_tx_t tulip_start_xmit(struct sk_buff *skb,
+					  struct net_device *dev);
 static int tulip_open(struct net_device *dev);
 static int tulip_close(struct net_device *dev);
 static void tulip_up(struct net_device *dev);
@@ -570,16 +578,18 @@ static void tulip_tx_timeout(struct net_device *dev)
 				   (unsigned int)tp->rx_ring[i].buffer2,
 				   buf[0], buf[1], buf[2]);
 			for (j = 0; buf[j] != 0xee && j < 1600; j++)
-				if (j < 100) printk(" %2.2x", buf[j]);
-			printk(" j=%d.\n", j);
+				if (j < 100)
+					printk(KERN_CONT " %2.2x", buf[j]);
+			printk(KERN_CONT " j=%d.\n", j);
 		}
 		printk(KERN_DEBUG "  Rx ring %8.8x: ", (int)tp->rx_ring);
 		for (i = 0; i < RX_RING_SIZE; i++)
-			printk(" %8.8x", (unsigned int)tp->rx_ring[i].status);
-		printk("\n" KERN_DEBUG "  Tx ring %8.8x: ", (int)tp->tx_ring);
+			printk(KERN_CONT " %8.8x",
+			       (unsigned int)tp->rx_ring[i].status);
+		printk(KERN_DEBUG "  Tx ring %8.8x: ", (int)tp->tx_ring);
 		for (i = 0; i < TX_RING_SIZE; i++)
-			printk(" %8.8x", (unsigned int)tp->tx_ring[i].status);
-		printk("\n");
+			printk(KERN_CONT " %8.8x", (unsigned int)tp->tx_ring[i].status);
+		printk(KERN_CONT "\n");
 	}
 #endif
 
@@ -643,15 +653,16 @@ static void tulip_init_ring(struct net_device *dev)
 	tp->tx_ring[i-1].buffer2 = cpu_to_le32(tp->tx_ring_dma);
 }
 
-static int
+static netdev_tx_t
 tulip_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct tulip_private *tp = netdev_priv(dev);
 	int entry;
 	u32 flag;
 	dma_addr_t mapping;
+	unsigned long flags;
 
-	spin_lock_irq(&tp->lock);
+	spin_lock_irqsave(&tp->lock, flags);
 
 	/* Calculate the next Tx descriptor entry. */
 	entry = tp->cur_tx % TX_RING_SIZE;
@@ -686,11 +697,11 @@ tulip_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	/* Trigger an immediate transmit demand. */
 	iowrite32(0, tp->base_addr + CSR1);
 
-	spin_unlock_irq(&tp->lock);
+	spin_unlock_irqrestore(&tp->lock, flags);
 
 	dev->trans_start = jiffies;
 
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 static void tulip_clean_tx_ring(struct tulip_private *tp)
@@ -919,8 +930,6 @@ static int private_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
 		return 0;
 
 	case SIOCSMIIREG:		/* Write MII PHY register. */
-		if (!capable (CAP_NET_ADMIN))
-			return -EPERM;
 		if (regnum & ~0x1f)
 			return -EINVAL;
 		if (data->phy_id == phy) {
@@ -1297,18 +1306,30 @@ static int __devinit tulip_init_one (struct pci_dev *pdev,
 	}
 
 	/*
-	 *	Early DM9100's need software CRC and the DMFE driver
+	 *	DM910x chips should be handled by the dmfe driver, except
+	 *	on-board chips on SPARC systems.  Also, early DM9100s need
+	 *	software CRC which only the dmfe driver supports.
 	 */
 
-	if (pdev->vendor == 0x1282 && pdev->device == 0x9100)
-	{
-		/* Read Chip revision */
-		if (pdev->revision < 0x30)
-		{
-			printk(KERN_ERR PFX "skipping early DM9100 with Crc bug (use dmfe)\n");
+#ifdef CONFIG_TULIP_DM910X
+	if (chip_idx == DM910X) {
+		struct device_node *dp;
+
+		if (pdev->vendor == 0x1282 && pdev->device == 0x9100 &&
+		    pdev->revision < 0x30) {
+			printk(KERN_INFO PFX
+			       "skipping early DM9100 with Crc bug (use dmfe)\n");
+			return -ENODEV;
+		}
+
+		dp = pci_device_to_OF_node(pdev);
+		if (!(dp && of_get_property(dp, "local-mac-address", NULL))) {
+			printk(KERN_INFO PFX
+			       "skipping DM910x expansion card (use dmfe)\n");
 			return -ENODEV;
 		}
 	}
+#endif
 
 	/*
 	 *	Looks for early PCI chipsets where people report hangs

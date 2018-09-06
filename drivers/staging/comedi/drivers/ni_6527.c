@@ -41,6 +41,7 @@ Updated: Sat, 25 Jan 2003 13:24:40 -0800
 #define DEBUG 1
 #define DEBUG_FLAGS
 
+#include <linux/interrupt.h>
 #include "../comedidev.h"
 
 #include "mite.h"
@@ -75,13 +76,14 @@ Updated: Sat, 25 Jan 2003 13:24:40 -0800
 #define Rising_Edge_Detection_Enable(x)		(0x018+(x))
 #define Falling_Edge_Detection_Enable(x)	(0x020+(x))
 
-static int ni6527_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int ni6527_detach(struct comedi_device * dev);
+static int ni6527_attach(struct comedi_device *dev,
+			 struct comedi_devconfig *it);
+static int ni6527_detach(struct comedi_device *dev);
 static struct comedi_driver driver_ni6527 = {
-      driver_name:"ni6527",
-      module:THIS_MODULE,
-      attach:ni6527_attach,
-      detach:ni6527_detach,
+	.driver_name = "ni6527",
+	.module = THIS_MODULE,
+	.attach = ni6527_attach,
+	.detach = ni6527_detach,
 };
 
 struct ni6527_board {
@@ -92,22 +94,23 @@ struct ni6527_board {
 
 static const struct ni6527_board ni6527_boards[] = {
 	{
-	      dev_id:	0x2b20,
-	      name:	"pci-6527",
-		},
+	 .dev_id = 0x2b20,
+	 .name = "pci-6527",
+	 },
 	{
-	      dev_id:	0x2b10,
-	      name:	"pxi-6527",
-		},
+	 .dev_id = 0x2b10,
+	 .name = "pxi-6527",
+	 },
 };
 
-#define n_ni6527_boards (sizeof(ni6527_boards)/sizeof(ni6527_boards[0]))
+#define n_ni6527_boards ARRAY_SIZE(ni6527_boards)
 #define this_board ((const struct ni6527_board *)dev->board_ptr)
 
 static DEFINE_PCI_DEVICE_TABLE(ni6527_pci_table) = {
-	{PCI_VENDOR_ID_NATINST, 0x2b10, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_NATINST, 0x2b20, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{0}
+	{
+	PCI_VENDOR_ID_NATINST, 0x2b10, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0}, {
+	PCI_VENDOR_ID_NATINST, 0x2b20, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0}, {
+	0}
 };
 
 MODULE_DEVICE_TABLE(pci, ni6527_pci_table);
@@ -120,10 +123,11 @@ struct ni6527_private {
 
 #define devpriv ((struct ni6527_private *)dev->private)
 
-static int ni6527_find_device(struct comedi_device * dev, int bus, int slot);
+static int ni6527_find_device(struct comedi_device *dev, int bus, int slot);
 
-static int ni6527_di_insn_config(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ni6527_di_insn_config(struct comedi_device *dev,
+				 struct comedi_subdevice *s,
+				 struct comedi_insn *insn, unsigned int *data)
 {
 	int chan = CR_CHAN(insn->chanspec);
 	unsigned int interval;
@@ -140,17 +144,14 @@ static int ni6527_di_insn_config(struct comedi_device * dev, struct comedi_subde
 
 		if (interval != devpriv->filter_interval) {
 			writeb(interval & 0xff,
-				devpriv->mite->daq_io_addr +
-				Filter_Interval(0));
+			       devpriv->mite->daq_io_addr + Filter_Interval(0));
 			writeb((interval >> 8) & 0xff,
-				devpriv->mite->daq_io_addr +
-				Filter_Interval(1));
+			       devpriv->mite->daq_io_addr + Filter_Interval(1));
 			writeb((interval >> 16) & 0x0f,
-				devpriv->mite->daq_io_addr +
-				Filter_Interval(2));
+			       devpriv->mite->daq_io_addr + Filter_Interval(2));
 
 			writeb(ClrInterval,
-				devpriv->mite->daq_io_addr + Clear_Register);
+			       devpriv->mite->daq_io_addr + Clear_Register);
 
 			devpriv->filter_interval = interval;
 		}
@@ -161,17 +162,18 @@ static int ni6527_di_insn_config(struct comedi_device * dev, struct comedi_subde
 	}
 
 	writeb(devpriv->filter_enable,
-		devpriv->mite->daq_io_addr + Filter_Enable(0));
+	       devpriv->mite->daq_io_addr + Filter_Enable(0));
 	writeb(devpriv->filter_enable >> 8,
-		devpriv->mite->daq_io_addr + Filter_Enable(1));
+	       devpriv->mite->daq_io_addr + Filter_Enable(1));
 	writeb(devpriv->filter_enable >> 16,
-		devpriv->mite->daq_io_addr + Filter_Enable(2));
+	       devpriv->mite->daq_io_addr + Filter_Enable(2));
 
 	return 2;
 }
 
-static int ni6527_di_insn_bits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ni6527_di_insn_bits(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -183,8 +185,9 @@ static int ni6527_di_insn_bits(struct comedi_device * dev, struct comedi_subdevi
 	return 2;
 }
 
-static int ni6527_do_insn_bits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ni6527_do_insn_bits(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -196,15 +199,15 @@ static int ni6527_do_insn_bits(struct comedi_device * dev, struct comedi_subdevi
 		 * but in Comedi, it is represented by 0. */
 		if (data[0] & 0x0000ff) {
 			writeb((s->state ^ 0xff),
-				devpriv->mite->daq_io_addr + Port_Register(3));
+			       devpriv->mite->daq_io_addr + Port_Register(3));
 		}
 		if (data[0] & 0x00ff00) {
 			writeb((s->state >> 8) ^ 0xff,
-				devpriv->mite->daq_io_addr + Port_Register(4));
+			       devpriv->mite->daq_io_addr + Port_Register(4));
 		}
 		if (data[0] & 0xff0000) {
 			writeb((s->state >> 16) ^ 0xff,
-				devpriv->mite->daq_io_addr + Port_Register(5));
+			       devpriv->mite->daq_io_addr + Port_Register(5));
 		}
 	}
 	data[1] = s->state;
@@ -212,7 +215,7 @@ static int ni6527_do_insn_bits(struct comedi_device * dev, struct comedi_subdevi
 	return 2;
 }
 
-static irqreturn_t ni6527_interrupt(int irq, void *d PT_REGS_ARG)
+static irqreturn_t ni6527_interrupt(int irq, void *d)
 {
 	struct comedi_device *dev = d;
 	struct comedi_subdevice *s = dev->subdevices + 2;
@@ -225,7 +228,7 @@ static irqreturn_t ni6527_interrupt(int irq, void *d PT_REGS_ARG)
 		return IRQ_NONE;
 
 	writeb(ClrEdge | ClrOverflow,
-		devpriv->mite->daq_io_addr + Clear_Register);
+	       devpriv->mite->daq_io_addr + Clear_Register);
 
 	comedi_buf_put(s->async, 0);
 	s->async->events |= COMEDI_CB_EOS;
@@ -233,8 +236,9 @@ static irqreturn_t ni6527_interrupt(int irq, void *d PT_REGS_ARG)
 	return IRQ_HANDLED;
 }
 
-static int ni6527_intr_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd)
+static int ni6527_intr_cmdtest(struct comedi_device *dev,
+			       struct comedi_subdevice *s,
+			       struct comedi_cmd *cmd)
 {
 	int err = 0;
 	int tmp;
@@ -309,28 +313,31 @@ static int ni6527_intr_cmdtest(struct comedi_device * dev, struct comedi_subdevi
 	return 0;
 }
 
-static int ni6527_intr_cmd(struct comedi_device * dev, struct comedi_subdevice * s)
+static int ni6527_intr_cmd(struct comedi_device *dev,
+			   struct comedi_subdevice *s)
 {
-	//struct comedi_cmd *cmd = &s->async->cmd;
+	/* struct comedi_cmd *cmd = &s->async->cmd; */
 
 	writeb(ClrEdge | ClrOverflow,
-		devpriv->mite->daq_io_addr + Clear_Register);
+	       devpriv->mite->daq_io_addr + Clear_Register);
 	writeb(FallingEdgeIntEnable | RisingEdgeIntEnable |
-		MasterInterruptEnable | EdgeIntEnable,
-		devpriv->mite->daq_io_addr + Master_Interrupt_Control);
+	       MasterInterruptEnable | EdgeIntEnable,
+	       devpriv->mite->daq_io_addr + Master_Interrupt_Control);
 
 	return 0;
 }
 
-static int ni6527_intr_cancel(struct comedi_device * dev, struct comedi_subdevice * s)
+static int ni6527_intr_cancel(struct comedi_device *dev,
+			      struct comedi_subdevice *s)
 {
 	writeb(0x00, devpriv->mite->daq_io_addr + Master_Interrupt_Control);
 
 	return 0;
 }
 
-static int ni6527_intr_insn_bits(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ni6527_intr_insn_bits(struct comedi_device *dev,
+				 struct comedi_subdevice *s,
+				 struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n < 1)
 		return -EINVAL;
@@ -339,8 +346,9 @@ static int ni6527_intr_insn_bits(struct comedi_device * dev, struct comedi_subde
 	return 2;
 }
 
-static int ni6527_intr_insn_config(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int ni6527_intr_insn_config(struct comedi_device *dev,
+				   struct comedi_subdevice *s,
+				   struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n < 1)
 		return -EINVAL;
@@ -348,30 +356,31 @@ static int ni6527_intr_insn_config(struct comedi_device * dev, struct comedi_sub
 		return -EINVAL;
 
 	writeb(data[1],
-		devpriv->mite->daq_io_addr + Rising_Edge_Detection_Enable(0));
+	       devpriv->mite->daq_io_addr + Rising_Edge_Detection_Enable(0));
 	writeb(data[1] >> 8,
-		devpriv->mite->daq_io_addr + Rising_Edge_Detection_Enable(1));
+	       devpriv->mite->daq_io_addr + Rising_Edge_Detection_Enable(1));
 	writeb(data[1] >> 16,
-		devpriv->mite->daq_io_addr + Rising_Edge_Detection_Enable(2));
+	       devpriv->mite->daq_io_addr + Rising_Edge_Detection_Enable(2));
 
 	writeb(data[2],
-		devpriv->mite->daq_io_addr + Falling_Edge_Detection_Enable(0));
+	       devpriv->mite->daq_io_addr + Falling_Edge_Detection_Enable(0));
 	writeb(data[2] >> 8,
-		devpriv->mite->daq_io_addr + Falling_Edge_Detection_Enable(1));
+	       devpriv->mite->daq_io_addr + Falling_Edge_Detection_Enable(1));
 	writeb(data[2] >> 16,
-		devpriv->mite->daq_io_addr + Falling_Edge_Detection_Enable(2));
+	       devpriv->mite->daq_io_addr + Falling_Edge_Detection_Enable(2));
 
 	return 2;
 }
 
-static int ni6527_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int ni6527_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 	int ret;
 
 	printk("comedi%d: ni6527:", dev->minor);
 
-	if ((ret = alloc_private(dev, sizeof(struct ni6527_private))) < 0)
+	ret = alloc_private(dev, sizeof(struct ni6527_private));
+	if (ret < 0)
 		return ret;
 
 	ret = ni6527_find_device(dev, it->options[0], it->options[1]);
@@ -389,7 +398,8 @@ static int ni6527_attach(struct comedi_device * dev, struct comedi_devconfig * i
 
 	printk(" ID=0x%02x", readb(devpriv->mite->daq_io_addr + ID_Register));
 
-	if ((ret = alloc_subdevices(dev, 3)) < 0)
+	ret = alloc_subdevices(dev, 3);
+	if (ret < 0)
 		return ret;
 
 	s = dev->subdevices + 0;
@@ -427,11 +437,11 @@ static int ni6527_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	writeb(0x00, devpriv->mite->daq_io_addr + Filter_Enable(2));
 
 	writeb(ClrEdge | ClrOverflow | ClrFilter | ClrInterval,
-		devpriv->mite->daq_io_addr + Clear_Register);
+	       devpriv->mite->daq_io_addr + Clear_Register);
 	writeb(0x00, devpriv->mite->daq_io_addr + Master_Interrupt_Control);
 
-	ret = comedi_request_irq(mite_irq(devpriv->mite), ni6527_interrupt,
-		IRQF_SHARED, "ni6527", dev);
+	ret = request_irq(mite_irq(devpriv->mite), ni6527_interrupt,
+			  IRQF_SHARED, "ni6527", dev);
 	if (ret < 0) {
 		printk(" irq not available");
 	} else
@@ -442,15 +452,15 @@ static int ni6527_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	return 0;
 }
 
-static int ni6527_detach(struct comedi_device * dev)
+static int ni6527_detach(struct comedi_device *dev)
 {
 	if (devpriv && devpriv->mite && devpriv->mite->daq_io_addr) {
 		writeb(0x00,
-			devpriv->mite->daq_io_addr + Master_Interrupt_Control);
+		       devpriv->mite->daq_io_addr + Master_Interrupt_Control);
 	}
 
 	if (dev->irq) {
-		comedi_free_irq(dev->irq, dev);
+		free_irq(dev->irq, dev);
 	}
 
 	if (devpriv && devpriv->mite) {
@@ -460,7 +470,7 @@ static int ni6527_detach(struct comedi_device * dev)
 	return 0;
 }
 
-static int ni6527_find_device(struct comedi_device * dev, int bus, int slot)
+static int ni6527_find_device(struct comedi_device *dev, int bus, int slot)
 {
 	struct mite_struct *mite;
 	int i;
@@ -470,7 +480,7 @@ static int ni6527_find_device(struct comedi_device * dev, int bus, int slot)
 			continue;
 		if (bus || slot) {
 			if (bus != mite->pcidev->bus->number ||
-				slot != PCI_SLOT(mite->pcidev->devfn))
+			    slot != PCI_SLOT(mite->pcidev->devfn))
 				continue;
 		}
 		for (i = 0; i < n_ni6527_boards; i++) {

@@ -58,11 +58,11 @@ struct ima_iint_cache *ima_iint_insert(struct inode *inode)
 
 	if (!ima_initialized)
 		return iint;
-	iint = kmem_cache_alloc(iint_cache, GFP_KERNEL);
+	iint = kmem_cache_alloc(iint_cache, GFP_NOFS);
 	if (!iint)
 		return iint;
 
-	rc = radix_tree_preload(GFP_KERNEL);
+	rc = radix_tree_preload(GFP_NOFS);
 	if (rc < 0)
 		goto out;
 
@@ -196,7 +196,7 @@ static void init_once(void *foo)
 	kref_set(&iint->refcount, 1);
 }
 
-void ima_iintcache_init(void)
+void __init ima_iintcache_init(void)
 {
 	iint_cache =
 	    kmem_cache_create("iint_cache", sizeof(struct ima_iint_cache), 0,

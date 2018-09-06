@@ -37,6 +37,7 @@
 #include <asm/irq.h>
 #include <asm/time.h>
 #include <asm/prom.h>
+#include <asm/machdep.h>
 #include <sysdev/fsl_soc.h>
 #include <mm/mmu_decl.h>
 #include <asm/cpm2.h>
@@ -379,18 +380,13 @@ static int __init setup_rstcr(void)
 	struct device_node *np;
 	np = of_find_node_by_name(NULL, "global-utilities");
 	if ((np && of_get_property(np, "fsl,has-rstcr", NULL))) {
-		const u32 *prop = of_get_property(np, "reg", NULL);
-		if (prop) {
-			/* map reset control register
-			 * 0xE00B0 is offset of reset control register
-			 */
-			rstcr = ioremap(get_immrbase() + *prop + 0xB0, 0xff);
-			if (!rstcr)
-				printk (KERN_EMERG "Error: reset control "
-						"register not mapped!\n");
-		}
-	} else
-		printk (KERN_INFO "rstcr compatible register does not exist!\n");
+		rstcr = of_iomap(np, 0) + 0xb0;
+		if (!rstcr)
+			printk (KERN_EMERG "Error: reset control register "
+					"not mapped!\n");
+	} else if (ppc_md.restart == fsl_rstcr_restart)
+		printk(KERN_ERR "No RSTCR register, warm reboot won't work\n");
+
 	if (np)
 		of_node_put(np);
 	return 0;

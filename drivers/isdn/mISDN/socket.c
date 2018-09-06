@@ -115,7 +115,6 @@ mISDN_sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 {
 	struct sk_buff		*skb;
 	struct sock		*sk = sock->sk;
-	struct sockaddr_mISDN	*maddr;
 
 	int		copied, err;
 
@@ -133,9 +132,9 @@ mISDN_sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (!skb)
 		return err;
 
-	if (msg->msg_namelen >= sizeof(struct sockaddr_mISDN)) {
-		msg->msg_namelen = sizeof(struct sockaddr_mISDN);
-		maddr = (struct sockaddr_mISDN *)msg->msg_name;
+	if (msg->msg_name) {
+		struct sockaddr_mISDN *maddr = msg->msg_name;
+
 		maddr->family = AF_ISDN;
 		maddr->dev = _pms(sk)->dev->id;
 		if ((sk->sk_protocol == ISDN_P_LAPD_TE) ||
@@ -148,11 +147,7 @@ mISDN_sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 			maddr->sapi = _pms(sk)->ch.addr & 0xFF;
 			maddr->tei =  (_pms(sk)->ch.addr >> 8) & 0xFF;
 		}
-	} else {
-		if (msg->msg_namelen)
-			printk(KERN_WARNING "%s: too small namelen %d\n",
-			    __func__, msg->msg_namelen);
-		msg->msg_namelen = 0;
+		msg->msg_namelen = sizeof(*maddr);
 	}
 
 	copied = skb->len + MISDN_HEADER_LEN;
@@ -209,7 +204,7 @@ mISDN_sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 
 	if (memcpy_fromiovec(skb_put(skb, len), msg->msg_iov, len)) {
 		err = -EFAULT;
-		goto drop;
+		goto done;
 	}
 
 	memcpy(mISDN_HEAD_P(skb), skb->data, MISDN_HEADER_LEN);
@@ -222,7 +217,7 @@ mISDN_sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 	} else { /* use default for L2 messages */
 		if ((sk->sk_protocol == ISDN_P_LAPD_TE) ||
 		    (sk->sk_protocol == ISDN_P_LAPD_NT))
-		    mISDN_HEAD_ID(skb) = _pms(sk)->ch.nr;
+			mISDN_HEAD_ID(skb) = _pms(sk)->ch.nr;
 	}
 
 	if (*debug & DEBUG_SOCKET)
@@ -230,19 +225,21 @@ mISDN_sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 		     __func__, mISDN_HEAD_ID(skb));
 
 	err = -ENODEV;
-	if (!_pms(sk)->ch.peer ||
-	    (err = _pms(sk)->ch.recv(_pms(sk)->ch.peer, skb)))
-		goto drop;
-
-	err = len;
+	if (!_pms(sk)->ch.peer)
+		goto done;
+	err = _pms(sk)->ch.recv(_pms(sk)->ch.peer, skb);
+	if (err)
+		goto done;
+	else {
+		skb = NULL;
+		err = len;
+	}
 
 done:
+	if (skb)
+		kfree_skb(skb);
 	release_sock(sk);
 	return err;
-
-drop:
-	kfree_skb(skb);
-	goto done;
 }
 
 static int
@@ -292,7 +289,7 @@ static int
 data_sock_ioctl_bound(struct sock *sk, unsigned int cmd, void __user *p)
 {
 	struct mISDN_ctrl_req	cq;
-	int			err = -EINVAL, val;
+	int			err = -EINVAL, val[2];
 	struct mISDNchannel	*bchan, *next;
 
 	lock_sock(sk);
@@ -328,12 +325,27 @@ data_sock_ioctl_bound(struct sock *sk, unsigned int cmd, void __user *p)
 			err = -EINVAL;
 			break;
 		}
-		if (get_user(val, (int __user *)p)) {
+		val[0] = cmd;
+		if (get_user(val[1], (int __user *)p)) {
 			err = -EFAULT;
 			break;
 		}
 		err = _pms(sk)->dev->teimgr->ctrl(_pms(sk)->dev->teimgr,
-		    CONTROL_CHANNEL, &val);
+		    CONTROL_CHANNEL, val);
+		break;
+	case IMHOLD_L1:
+		if (sk->sk_protocol != ISDN_P_LAPD_NT
+		 && sk->sk_protocol != ISDN_P_LAPD_TE) {
+			err = -EINVAL;
+			break;
+		}
+		val[0] = cmd;
+		if (get_user(val[1], (int __user *)p)) {
+			err = -EFAULT;
+			break;
+		}
+		err = _pms(sk)->dev->teimgr->ctrl(_pms(sk)->dev->teimgr,
+		    CONTROL_CHANNEL, val);
 		break;
 	default:
 		err = -EINVAL;
@@ -398,7 +410,7 @@ data_sock_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 }
 
 static int data_sock_setsockopt(struct socket *sock, int level, int optname,
-	char __user *optval, int len)
+	char __user *optval, unsigned int len)
 {
 	struct sock *sk = sock->sk;
 	int err = 0, opt = 0;

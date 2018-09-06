@@ -1,7 +1,7 @@
 config COMEDI
 	tristate "Data acquisition support (comedi)"
 	default N
-	depends on m
+	depends on m && (PCI || PCMCIA || PCCARD || USB)
 	---help---
 	  Enable support a wide range of data acquisition devices
 	  for Linux.
@@ -13,26 +13,21 @@ config COMEDI_DEBUG
 	  This is an option for use by developers; most people should
 	  say N here. This enables comedi core and driver debugging.
 
-config COMEDI_RT
-	tristate "Comedi Real-time support"
-	depends on COMEDI && RT
-	default N
-	---help---
-	  Enable Real time support for the Comedi core.
-
 config COMEDI_PCI_DRIVERS
 	tristate "Comedi PCI drivers"
 	depends on COMEDI && PCI
+	select COMEDI_8255
 	default N
 	---help---
 	  Enable lots of comedi PCI drivers to be built
 
 config COMEDI_PCMCIA_DRIVERS
 	tristate "Comedi PCMCIA drivers"
-	depends on COMEDI && PCMCIAI
+	depends on COMEDI && PCMCIA && PCCARD
+	select COMEDI_8255
 	default N
 	---help---
-	  Enable lots of comedi PCMCIA drivers to be built
+	  Enable lots of comedi PCMCIA and PCCARD drivers to be built
 
 config COMEDI_USB_DRIVERS
 	tristate "Comedi USB drivers"
@@ -40,3 +35,6 @@ config COMEDI_USB_DRIVERS
 	default N
 	---help---
 	  Enable lots of comedi USB drivers to be built
+
+config COMEDI_8255
+	tristate

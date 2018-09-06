@@ -5,6 +5,7 @@
 
 #include "linux/irqreturn.h"
 #include "linux/kd.h"
+#include "linux/sched.h"
 #include "chan_kern.h"
 #include "irq_kern.h"
 #include "irq_user.h"
@@ -726,6 +727,9 @@ struct winch {
 
 static void free_winch(struct winch *winch, int free_irq_ok)
 {
+	if (free_irq_ok)
+		free_irq(WINCH_IRQ, winch);
+
 	list_del(&winch->list);
 
 	if (winch->pid != -1)
@@ -734,8 +738,6 @@ static void free_winch(struct winch *winch, int free_irq_ok)
 		os_close_file(winch->fd);
 	if (winch->stack != 0)
 		free_stack(winch->stack, 0);
-	if (free_irq_ok)
-		free_irq(WINCH_IRQ, winch);
 	kfree(winch);
 }
 

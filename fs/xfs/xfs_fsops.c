@@ -56,6 +56,9 @@ xfs_fs_geometry(
 	xfs_fsop_geom_t		*geo,
 	int			new_version)
 {
+
+	memset(geo, 0, sizeof(*geo));
+
 	geo->blocksize = mp->m_sb.sb_blocksize;
 	geo->rtextsize = mp->m_sb.sb_rextsize;
 	geo->agblocks = mp->m_sb.sb_agblocks;
@@ -167,17 +170,25 @@ xfs_growfs_data_private(
 	new = nb - mp->m_sb.sb_dblocks;
 	oagcount = mp->m_sb.sb_agcount;
 	if (nagcount > oagcount) {
+		void *new_perag, *old_perag;
+
 		xfs_filestream_flush(mp);
+
+		new_perag = kmem_zalloc(sizeof(xfs_perag_t) * nagcount,
+					KM_MAYFAIL);
+		if (!new_perag)
+			return XFS_ERROR(ENOMEM);
+
 		down_write(&mp->m_peraglock);
-		mp->m_perag = kmem_realloc(mp->m_perag,
-			sizeof(xfs_perag_t) * nagcount,
-			sizeof(xfs_perag_t) * oagcount,
-			KM_SLEEP);
-		memset(&mp->m_perag[oagcount], 0,
-			(nagcount - oagcount) * sizeof(xfs_perag_t));
+		memcpy(new_perag, mp->m_perag, sizeof(xfs_perag_t) * oagcount);
+		old_perag = mp->m_perag;
+		mp->m_perag = new_perag;
+
 		mp->m_flags |= XFS_MOUNT_32BITINODES;
 		nagimax = xfs_initialize_perag(mp, nagcount);
 		up_write(&mp->m_peraglock);
+
+		kmem_free(old_perag);
 	}
 	tp = xfs_trans_alloc(mp, XFS_TRANS_GROWFS);
 	tp->t_flags |= XFS_TRANS_RESERVE;
@@ -603,7 +614,7 @@ xfs_fs_log_dummy(
 	xfs_inode_t	*ip;
 	int		error;
 
-	tp = _xfs_trans_alloc(mp, XFS_TRANS_DUMMY1);
+	tp = _xfs_trans_alloc(mp, XFS_TRANS_DUMMY1, KM_SLEEP);
 	error = xfs_trans_reserve(tp, 0, XFS_ICHANGE_LOG_RES(mp), 0, 0, 0);
 	if (error) {
 		xfs_trans_cancel(tp, 0);

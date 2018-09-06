@@ -466,9 +466,8 @@ asmlinkage void do_be(struct pt_regs *regs)
  * The ll_bit is cleared by r*_switch.S
  */
 
-unsigned long ll_bit;
-
-static struct task_struct *ll_task = NULL;
+unsigned int ll_bit;
+struct task_struct *ll_task;
 
 static inline int simulate_ll(struct pt_regs *regs, unsigned int opcode)
 {
@@ -1502,17 +1501,13 @@ void __cpuinit per_cpu_trap_init(void)
 			 status_set);
 
 	if (cpu_has_mips_r2) {
-		unsigned int enable = 0x0000000f;
+		unsigned int enable = 0x0000000f | cpu_hwrena_impl_bits;
 
 		if (!noulri && cpu_has_userlocal)
 			enable |= (1 << 29);
 
 		write_c0_hwrena(enable);
 	}
-
-#ifdef CONFIG_CPU_CAVIUM_OCTEON
-	write_c0_hwrena(0xc000000f); /* Octeon has register 30 and 31 */
-#endif
 
 #ifdef CONFIG_MIPS_MT_SMTC
 	if (!secondaryTC) {

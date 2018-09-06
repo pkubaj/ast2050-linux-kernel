@@ -108,6 +108,8 @@ static void bitmap_free_page(struct bitmap *bitmap, unsigned char *page)
  * allocated while we're using it
  */
 static int bitmap_checkpage(struct bitmap *bitmap, unsigned long page, int create)
+__releases(bitmap->lock)
+__acquires(bitmap->lock)
 {
 	unsigned char *mappage;
 
@@ -232,7 +234,7 @@ static struct page *read_sb_page(mddev_t *mddev, long offset,
 		target = rdev->sb_start + offset + index * (PAGE_SIZE/512);
 
 		if (sync_page_io(rdev->bdev, target,
-				 roundup(size, bdev_hardsect_size(rdev->bdev)),
+				 roundup(size, bdev_logical_block_size(rdev->bdev)),
 				 page, READ)) {
 			page->index = index;
 			attach_page_buffers(page, NULL); /* so that free_buffer will
@@ -287,7 +289,7 @@ static int write_sb_page(struct bitmap *bitmap, struct page *page, int wait)
 			int size = PAGE_SIZE;
 			if (page->index == bitmap->file_pages-1)
 				size = roundup(bitmap->last_page_size,
-					       bdev_hardsect_size(rdev->bdev));
+					       bdev_logical_block_size(rdev->bdev));
 			/* Just make sure we aren't corrupting data or
 			 * metadata
 			 */
@@ -325,7 +327,6 @@ static int write_sb_page(struct bitmap *bitmap, struct page *page, int wait)
 	return 0;
 
  bad_alignment:
-	rcu_read_unlock();
 	return -EINVAL;
 }
 
@@ -1077,23 +1078,31 @@ static bitmap_counter_t *bitmap_get_counter(struct bitmap *bitmap,
  *			out to disk
  */
 
-void bitmap_daemon_work(struct bitmap *bitmap)
+void bitmap_daemon_work(mddev_t *mddev)
 {
+	struct bitmap *bitmap;
 	unsigned long j;
 	unsigned long flags;
 	struct page *page = NULL, *lastpage = NULL;
 	int blocks;
 	void *paddr;
 
-	if (bitmap == NULL)
+	/* Use a mutex to guard daemon_work against
+	 * bitmap_destroy.
+	 */
+	mutex_lock(&mddev->bitmap_mutex);
+	bitmap = mddev->bitmap;
+	if (bitmap == NULL) {
+		mutex_unlock(&mddev->bitmap_mutex);
 		return;
+	}
 	if (time_before(jiffies, bitmap->daemon_lastrun + bitmap->daemon_sleep*HZ))
 		goto done;
 
 	bitmap->daemon_lastrun = jiffies;
 	if (bitmap->allclean) {
 		bitmap->mddev->thread->timeout = MAX_SCHEDULE_TIMEOUT;
-		return;
+		goto done;
 	}
 	bitmap->allclean = 1;
 
@@ -1202,11 +1211,14 @@ void bitmap_daemon_work(struct bitmap *bitmap)
  done:
 	if (bitmap->allclean == 0)
 		bitmap->mddev->thread->timeout = bitmap->daemon_sleep * HZ;
+	mutex_unlock(&mddev->bitmap_mutex);
 }
 
 static bitmap_counter_t *bitmap_get_counter(struct bitmap *bitmap,
 					    sector_t offset, int *blocks,
 					    int create)
+__releases(bitmap->lock)
+__acquires(bitmap->lock)
 {
 	/* If 'create', we might release the lock and reclaim it.
 	 * The lock must have been taken with interrupts enabled.
@@ -1305,7 +1317,8 @@ void bitmap_endwrite(struct bitmap *bitmap, sector_t offset, unsigned long secto
 {
 	if (!bitmap) return;
 	if (behind) {
-		atomic_dec(&bitmap->behind_writes);
+		if (atomic_dec_and_test(&bitmap->behind_writes))
+			wake_up(&bitmap->behind_wait);
 		PRINTK(KERN_DEBUG "dec write-behind count %d/%d\n",
 		  atomic_read(&bitmap->behind_writes), bitmap->max_write_behind);
 	}
@@ -1538,9 +1551,9 @@ void bitmap_flush(mddev_t *mddev)
 	 */
 	sleep = bitmap->daemon_sleep;
 	bitmap->daemon_sleep = 0;
-	bitmap_daemon_work(bitmap);
-	bitmap_daemon_work(bitmap);
-	bitmap_daemon_work(bitmap);
+	bitmap_daemon_work(mddev);
+	bitmap_daemon_work(mddev);
+	bitmap_daemon_work(mddev);
 	bitmap->daemon_sleep = sleep;
 	bitmap_update_sb(bitmap);
 }
@@ -1571,6 +1584,7 @@ static void bitmap_free(struct bitmap *bitmap)
 	kfree(bp);
 	kfree(bitmap);
 }
+
 void bitmap_destroy(mddev_t *mddev)
 {
 	struct bitmap *bitmap = mddev->bitmap;
@@ -1578,7 +1592,9 @@ void bitmap_destroy(mddev_t *mddev)
 	if (!bitmap) /* there was no bitmap */
 		return;
 
+	mutex_lock(&mddev->bitmap_mutex);
 	mddev->bitmap = NULL; /* disconnect from the md device */
+	mutex_unlock(&mddev->bitmap_mutex);
 	if (mddev->thread)
 		mddev->thread->timeout = MAX_SCHEDULE_TIMEOUT;
 
@@ -1614,6 +1630,7 @@ int bitmap_create(mddev_t *mddev)
 	atomic_set(&bitmap->pending_writes, 0);
 	init_waitqueue_head(&bitmap->write_wait);
 	init_waitqueue_head(&bitmap->overflow_wait);
+	init_waitqueue_head(&bitmap->behind_wait);
 
 	bitmap->mddev = mddev;
 
@@ -1621,10 +1638,11 @@ int bitmap_create(mddev_t *mddev)
 	bitmap->offset = mddev->bitmap_offset;
 	if (file) {
 		get_file(file);
-		do_sync_mapping_range(file->f_mapping, 0, LLONG_MAX,
-				      SYNC_FILE_RANGE_WAIT_BEFORE |
-				      SYNC_FILE_RANGE_WRITE |
-				      SYNC_FILE_RANGE_WAIT_AFTER);
+		/* As future accesses to this file will use bmap,
+		 * and bypass the page cache, we must sync the file
+		 * first.
+		 */
+		vfs_fsync(file, file->f_dentry, 1);
 	}
 	/* read superblock from bitmap file (this sets bitmap->chunksize) */
 	err = bitmap_read_sb(bitmap);

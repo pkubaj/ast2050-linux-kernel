@@ -38,7 +38,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/version.h>
 
 #include <linux/uaccess.h>
 #include <linux/input.h>
@@ -203,7 +202,7 @@ static void usb_tranzport_abort_transfers(struct usb_tranzport *dev)
     t->value = temp;							\
     return count;							\
   }									\
-  static DEVICE_ATTR(value, S_IWUGO | S_IRUGO, show_##value, set_##value);
+  static DEVICE_ATTR(value, S_IWUSR | S_IRUGO, show_##value, set_##value);
 
 show_int(enable);
 show_int(offline);

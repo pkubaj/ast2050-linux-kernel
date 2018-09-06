@@ -440,8 +440,8 @@ void iscsi_tcp_cleanup_task(struct iscsi_task *task)
 	struct iscsi_tcp_task *tcp_task = task->dd_data;
 	struct iscsi_r2t_info *r2t;
 
-	/* nothing to do for mgmt or pending tasks */
-	if (!task->sc || task->state == ISCSI_TASK_PENDING)
+	/* nothing to do for mgmt */
+	if (!task->sc)
 		return;
 
 	/* flush task's r2t queues */
@@ -473,7 +473,13 @@ static int iscsi_tcp_data_in(struct iscsi_conn *conn, struct iscsi_task *task)
 	int datasn = be32_to_cpu(rhdr->datasn);
 	unsigned total_in_length = scsi_in(task->sc)->length;
 
-	iscsi_update_cmdsn(conn->session, (struct iscsi_nopin*)rhdr);
+	/*
+	 * lib iscsi will update this in the completion handling if there
+	 * is status.
+	 */
+	if (!(rhdr->flags & ISCSI_FLAG_DATA_STATUS))
+		iscsi_update_cmdsn(conn->session, (struct iscsi_nopin*)rhdr);
+
 	if (tcp_conn->in.datalen == 0)
 		return 0;
 
@@ -680,6 +686,7 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 				     "offset=%d, datalen=%d)\n",
 				      tcp_task->data_offset,
 				      tcp_conn->in.datalen);
+			task->last_xfer = jiffies;
 			rc = iscsi_segment_seek_sg(&tcp_conn->in.segment,
 						   sdb->table.sgl,
 						   sdb->table.nents,
@@ -707,9 +714,10 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 			rc = ISCSI_ERR_BAD_ITT;
 		else if (ahslen)
 			rc = ISCSI_ERR_AHSLEN;
-		else if (task->sc->sc_data_direction == DMA_TO_DEVICE)
+		else if (task->sc->sc_data_direction == DMA_TO_DEVICE) {
+			task->last_xfer = jiffies;
 			rc = iscsi_tcp_r2t_rsp(conn, task);
-		else
+		} else
 			rc = ISCSI_ERR_PROTO;
 		spin_unlock(&conn->session->lock);
 		break;
@@ -857,6 +865,12 @@ int iscsi_tcp_recv_skb(struct iscsi_conn *conn, struct sk_buff *skb,
 	int rc = 0;
 
 	ISCSI_DBG_TCP(conn, "in %d bytes\n", skb->len - offset);
+	/*
+	 * Update for each skb instead of pdu, because over slow networks a
+	 * data_in's data could take a while to read in. We also want to
+	 * account for r2ts.
+	 */
+	conn->last_recv = jiffies;
 
 	if (unlikely(conn->suspend_rx)) {
 		ISCSI_DBG_TCP(conn, "Rx suspended!\n");
@@ -1055,7 +1069,8 @@ iscsi_tcp_conn_setup(struct iscsi_cls_session *cls_session, int dd_data_size,
 	struct iscsi_cls_conn *cls_conn;
 	struct iscsi_tcp_conn *tcp_conn;
 
-	cls_conn = iscsi_conn_setup(cls_session, sizeof(*tcp_conn), conn_idx);
+	cls_conn = iscsi_conn_setup(cls_session,
+				    sizeof(*tcp_conn) + dd_data_size, conn_idx);
 	if (!cls_conn)
 		return NULL;
 	conn = cls_conn->dd_data;
@@ -1067,22 +1082,13 @@ iscsi_tcp_conn_setup(struct iscsi_cls_session *cls_session, int dd_data_size,
 
 	tcp_conn = conn->dd_data;
 	tcp_conn->iscsi_conn = conn;
-
-	tcp_conn->dd_data = kzalloc(dd_data_size, GFP_KERNEL);
-	if (!tcp_conn->dd_data) {
-		iscsi_conn_teardown(cls_conn);
-		return NULL;
-	}
+	tcp_conn->dd_data = conn->dd_data + sizeof(*tcp_conn);
 	return cls_conn;
 }
 EXPORT_SYMBOL_GPL(iscsi_tcp_conn_setup);
 
 void iscsi_tcp_conn_teardown(struct iscsi_cls_conn *cls_conn)
 {
-	struct iscsi_conn *conn = cls_conn->dd_data;
-	struct iscsi_tcp_conn *tcp_conn = conn->dd_data;
-
-	kfree(tcp_conn->dd_data);
 	iscsi_conn_teardown(cls_conn);
 }
 EXPORT_SYMBOL_GPL(iscsi_tcp_conn_teardown);

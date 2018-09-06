@@ -49,7 +49,6 @@
 * --------------------------------------------------------------------
 */
 
-#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -76,9 +75,6 @@
 
 #include <net/iw_handler.h>
 #include <net/net_namespace.h>
-
-/*================================================================*/
-/* Project Includes */
 
 #include "p80211types.h"
 #include "p80211hdr.h"
@@ -151,7 +147,7 @@ static int p80211knetdev_init(netdevice_t *netdev)
 * Returns:
 *	the address of the statistics structure
 ----------------------------------------------------------------*/
-static struct net_device_stats *p80211knetdev_get_stats(netdevice_t *netdev)
+static struct net_device_stats *p80211knetdev_get_stats(netdevice_t * netdev)
 {
 	wlandevice_t *wlandev = netdev->ml_priv;
 
@@ -355,7 +351,7 @@ static int p80211knetdev_hard_start_xmit(struct sk_buff *skb,
 	p80211_metawep_t p80211_wep;
 
 	if (skb == NULL)
-		return 0;
+		return NETDEV_TX_OK;
 
 	if (wlandev->state != WLAN_DEVICE_OPEN) {
 		result = 1;
@@ -410,7 +406,7 @@ static int p80211knetdev_hard_start_xmit(struct sk_buff *skb,
 		     &p80211_wep) != 0) {
 			/* convert failed */
 			pr_debug("ether_to_80211(%d) failed.\n",
-			       wlandev->ethconv);
+				 wlandev->ethconv);
 			result = 1;
 			goto failed;
 		}
@@ -432,27 +428,27 @@ static int p80211knetdev_hard_start_xmit(struct sk_buff *skb,
 		/* success and more buf */
 		/* avail, re: hw_txdata */
 		netif_wake_queue(wlandev->netdev);
-		result = 0;
+		result = NETDEV_TX_OK;
 	} else if (txresult == 1) {
 		/* success, no more avail */
 		pr_debug("txframe success, no more bufs\n");
 		/* netdev->tbusy = 1;  don't set here, irqhdlr */
 		/*   may have already cleared it */
-		result = 0;
+		result = NETDEV_TX_OK;
 	} else if (txresult == 2) {
 		/* alloc failure, drop frame */
 		pr_debug("txframe returned alloc_fail\n");
-		result = 1;
+		result = NETDEV_TX_BUSY;
 	} else {
 		/* buffer full or queue busy, drop frame. */
 		pr_debug("txframe returned full or busy\n");
-		result = 1;
+		result = NETDEV_TX_BUSY;
 	}
 
 failed:
 	/* Free up the WEP buffer if it's not the same as the skb */
 	if ((p80211_wep.data) && (p80211_wep.data != skb->data))
-		kfree(p80211_wep.data);
+		kzfree(p80211_wep.data);
 
 	/* we always free the skb here, never in a lower level. */
 	if (!result)
@@ -567,8 +563,6 @@ static int p80211knetdev_do_ioctl(netdevice_t *dev, struct ifreq *ifr, int cmd)
 
 	pr_debug("rx'd ioctl, cmd=%d, len=%d\n", cmd, req->len);
 
-	mutex_lock(&wlandev->ioctl_lock);
-
 #ifdef SIOCETHTOOL
 	if (cmd == SIOCETHTOOL) {
 		result =
@@ -609,8 +603,6 @@ static int p80211knetdev_do_ioctl(netdevice_t *dev, struct ifreq *ifr, int cmd)
 		result = -ENOMEM;
 	}
 bail:
-	mutex_unlock(&wlandev->ioctl_lock);
-
 	return result;		/* If allocate,copyfrom or copyto fails, return errno */
 }
 
@@ -654,7 +646,7 @@ static int p80211knetdev_set_mac_address(netdevice_t *dev, void *addr)
 
 	/* Set up some convenience pointers. */
 	mibattr = &dot11req.mibattribute;
-	macaddr = (p80211item_pstr6_t *)&mibattr->data;
+	macaddr = (p80211item_pstr6_t *) & mibattr->data;
 	resultcode = &dot11req.resultcode;
 
 	/* Set up a dot11req_mibset */
@@ -682,7 +674,7 @@ static int p80211knetdev_set_mac_address(netdevice_t *dev, void *addr)
 	resultcode->data = 0;
 
 	/* now fire the request */
-	result = p80211req_dorequest(dev->ml_priv, (u8 *)&dot11req);
+	result = p80211req_dorequest(dev->ml_priv, (u8 *) & dot11req);
 
 	/* If the request wasn't successful, report an error and don't
 	 * change the netdev address
@@ -712,17 +704,17 @@ static int wlan_change_mtu(netdevice_t *dev, int new_mtu)
 }
 
 static const struct net_device_ops p80211_netdev_ops = {
-	.ndo_init		= p80211knetdev_init,
-	.ndo_open		= p80211knetdev_open,
-	.ndo_stop		= p80211knetdev_stop,
-	.ndo_get_stats		= p80211knetdev_get_stats,
-	.ndo_start_xmit		= p80211knetdev_hard_start_xmit,
-	.ndo_set_multicast_list	= p80211knetdev_set_multicast_list,
-	.ndo_do_ioctl		= p80211knetdev_do_ioctl,
-	.ndo_set_mac_address	= p80211knetdev_set_mac_address,
-	.ndo_tx_timeout		= p80211knetdev_tx_timeout,
-	.ndo_change_mtu		= wlan_change_mtu,
-	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_init = p80211knetdev_init,
+	.ndo_open = p80211knetdev_open,
+	.ndo_stop = p80211knetdev_stop,
+	.ndo_get_stats = p80211knetdev_get_stats,
+	.ndo_start_xmit = p80211knetdev_hard_start_xmit,
+	.ndo_set_multicast_list = p80211knetdev_set_multicast_list,
+	.ndo_do_ioctl = p80211knetdev_do_ioctl,
+	.ndo_set_mac_address = p80211knetdev_set_mac_address,
+	.ndo_tx_timeout = p80211knetdev_tx_timeout,
+	.ndo_change_mtu = wlan_change_mtu,
+	.ndo_validate_addr = eth_validate_addr,
 };
 
 /*----------------------------------------------------------------
@@ -772,14 +764,6 @@ int wlan_setup(wlandevice_t *wlandev)
 		dev->ml_priv = wlandev;
 		dev->netdev_ops = &p80211_netdev_ops;
 
-		mutex_init(&wlandev->ioctl_lock);
-		/* block ioctls until fully initialised. Don't forget to call
-		   allow_ioctls at some point!*/
-		mutex_lock(&wlandev->ioctl_lock);
-
-#if (WIRELESS_EXT < 21)
-		dev->get_wireless_stats = p80211wext_get_wireless_stats;
-#endif
 		dev->wireless_handlers = &p80211wext_handler_def;
 
 		netif_stop_queue(dev);
@@ -1116,9 +1100,4 @@ static void p80211knetdev_tx_timeout(netdevice_t *netdev)
 		       wlandev->nsdname);
 		netif_wake_queue(wlandev->netdev);
 	}
-}
-
-void p80211_allow_ioctls(wlandevice_t *wlandev)
-{
-	mutex_unlock(&wlandev->ioctl_lock);
 }

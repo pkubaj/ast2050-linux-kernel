@@ -49,6 +49,7 @@
 #include "prodigy192.h"
 #include "prodigy_hifi.h"
 #include "juli.h"
+#include "maya44.h"
 #include "phase.h"
 #include "wtm.h"
 #include "se.h"
@@ -65,6 +66,7 @@ MODULE_SUPPORTED_DEVICE("{"
 	       PRODIGY192_DEVICE_DESC
 	       PRODIGY_HIFI_DEVICE_DESC
 	       JULI_DEVICE_DESC
+	       MAYA44_DEVICE_DESC
 	       PHASE_DEVICE_DESC
 	       WTM_DEVICE_DESC
 	       SE_DEVICE_DESC
@@ -91,7 +93,7 @@ MODULE_PARM_DESC(model, "Use the given board model.");
 
 /* Both VT1720 and VT1724 have the same PCI IDs */
 static const struct pci_device_id snd_vt1724_ids[] = {
-	{ PCI_VENDOR_ID_ICE, PCI_DEVICE_ID_VT1724, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
+	{ PCI_VDEVICE(ICE, PCI_DEVICE_ID_VT1724), 0 },
 	{ 0, }
 };
 
@@ -558,6 +560,7 @@ static int snd_vt1724_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
 		spin_lock(&ice->reg_lock);
 		old = inb(ICEMT1724(ice, DMA_CONTROL));
 		if (cmd == SNDRV_PCM_TRIGGER_START)
@@ -566,6 +569,10 @@ static int snd_vt1724_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 			old &= ~what;
 		outb(old, ICEMT1724(ice, DMA_CONTROL));
 		spin_unlock(&ice->reg_lock);
+		break;
+
+	case SNDRV_PCM_TRIGGER_RESUME:
+		/* apps will have to restart stream */
 		break;
 
 	default:
@@ -626,7 +633,7 @@ static unsigned char stdclock_set_mclk(struct snd_ice1712 *ice,
 	return 0;
 }
 
-static void snd_vt1724_set_pro_rate(struct snd_ice1712 *ice, unsigned int rate,
+static int snd_vt1724_set_pro_rate(struct snd_ice1712 *ice, unsigned int rate,
 				    int force)
 {
 	unsigned long flags;
@@ -634,17 +641,18 @@ static void snd_vt1724_set_pro_rate(struct snd_ice1712 *ice, unsigned int rate,
 	unsigned int i, old_rate;
 
 	if (rate > ice->hw_rates->list[ice->hw_rates->count - 1])
-		return;
+		return -EINVAL;
+
 	spin_lock_irqsave(&ice->reg_lock, flags);
 	if ((inb(ICEMT1724(ice, DMA_CONTROL)) & DMA_STARTS) ||
 	    (inb(ICEMT1724(ice, DMA_PAUSE)) & DMA_PAUSES)) {
 		/* running? we cannot change the rate now... */
 		spin_unlock_irqrestore(&ice->reg_lock, flags);
-		return;
+		return ((rate == ice->cur_rate) && !force) ? 0 : -EBUSY;
 	}
 	if (!force && is_pro_rate_locked(ice)) {
 		spin_unlock_irqrestore(&ice->reg_lock, flags);
-		return;
+		return (rate == ice->cur_rate) ? 0 : -EBUSY;
 	}
 
 	old_rate = ice->get_rate(ice);
@@ -652,7 +660,7 @@ static void snd_vt1724_set_pro_rate(struct snd_ice1712 *ice, unsigned int rate,
 		ice->set_rate(ice, rate);
 	else if (rate == ice->cur_rate) {
 		spin_unlock_irqrestore(&ice->reg_lock, flags);
-		return;
+		return 0;
 	}
 
 	ice->cur_rate = rate;
@@ -674,13 +682,15 @@ static void snd_vt1724_set_pro_rate(struct snd_ice1712 *ice, unsigned int rate,
 	}
 	if (ice->spdif.ops.setup_rate)
 		ice->spdif.ops.setup_rate(ice, rate);
+
+	return 0;
 }
 
 static int snd_vt1724_pcm_hw_params(struct snd_pcm_substream *substream,
 				    struct snd_pcm_hw_params *hw_params)
 {
 	struct snd_ice1712 *ice = snd_pcm_substream_chip(substream);
-	int i, chs;
+	int i, chs, err;
 
 	chs = params_channels(hw_params);
 	mutex_lock(&ice->open_mutex);
@@ -715,7 +725,11 @@ static int snd_vt1724_pcm_hw_params(struct snd_pcm_substream *substream,
 		}
 	}
 	mutex_unlock(&ice->open_mutex);
-	snd_vt1724_set_pro_rate(ice, params_rate(hw_params), 0);
+
+	err = snd_vt1724_set_pro_rate(ice, params_rate(hw_params), 0);
+	if (err < 0)
+		return err;
+
 	return snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
 }
 
@@ -848,19 +862,38 @@ static snd_pcm_uframes_t snd_vt1724_pcm_pointer(struct snd_pcm_substream *substr
 #endif
 }
 
-static const struct vt1724_pcm_reg vt1724_playback_pro_reg = {
+static const struct vt1724_pcm_reg vt1724_pdma0_reg = {
 	.addr = VT1724_MT_PLAYBACK_ADDR,
 	.size = VT1724_MT_PLAYBACK_SIZE,
 	.count = VT1724_MT_PLAYBACK_COUNT,
 	.start = VT1724_PDMA0_START,
 };
 
-static const struct vt1724_pcm_reg vt1724_capture_pro_reg = {
+static const struct vt1724_pcm_reg vt1724_pdma4_reg = {
+	.addr = VT1724_MT_PDMA4_ADDR,
+	.size = VT1724_MT_PDMA4_SIZE,
+	.count = VT1724_MT_PDMA4_COUNT,
+	.start = VT1724_PDMA4_START,
+};
+
+static const struct vt1724_pcm_reg vt1724_rdma0_reg = {
 	.addr = VT1724_MT_CAPTURE_ADDR,
 	.size = VT1724_MT_CAPTURE_SIZE,
 	.count = VT1724_MT_CAPTURE_COUNT,
 	.start = VT1724_RDMA0_START,
 };
+
+static const struct vt1724_pcm_reg vt1724_rdma1_reg = {
+	.addr = VT1724_MT_RDMA1_ADDR,
+	.size = VT1724_MT_RDMA1_SIZE,
+	.count = VT1724_MT_RDMA1_COUNT,
+	.start = VT1724_RDMA1_START,
+};
+
+#define vt1724_playback_pro_reg vt1724_pdma0_reg
+#define vt1724_playback_spdif_reg vt1724_pdma4_reg
+#define vt1724_capture_pro_reg vt1724_rdma0_reg
+#define vt1724_capture_spdif_reg vt1724_rdma1_reg
 
 static const struct snd_pcm_hardware snd_vt1724_playback_pro = {
 	.info =			(SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_INTERLEAVED |
@@ -1077,20 +1110,6 @@ static int __devinit snd_vt1724_pcm_profi(struct snd_ice1712 *ice, int device)
  * SPDIF PCM
  */
 
-static const struct vt1724_pcm_reg vt1724_playback_spdif_reg = {
-	.addr = VT1724_MT_PDMA4_ADDR,
-	.size = VT1724_MT_PDMA4_SIZE,
-	.count = VT1724_MT_PDMA4_COUNT,
-	.start = VT1724_PDMA4_START,
-};
-
-static const struct vt1724_pcm_reg vt1724_capture_spdif_reg = {
-	.addr = VT1724_MT_RDMA1_ADDR,
-	.size = VT1724_MT_RDMA1_SIZE,
-	.count = VT1724_MT_RDMA1_COUNT,
-	.start = VT1724_RDMA1_START,
-};
-
 /* update spdif control bits; call with reg_lock */
 static void update_spdif_bits(struct snd_ice1712 *ice, unsigned int val)
 {
@@ -1275,7 +1294,7 @@ static int __devinit snd_vt1724_pcm_spdif(struct snd_ice1712 *ice, int device)
 
 	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
 					      snd_dma_pci_data(ice->pci),
-					      64*1024, 64*1024);
+					      256*1024, 256*1024);
 
 	ice->pcm = pcm;
 
@@ -1389,7 +1408,7 @@ static int __devinit snd_vt1724_pcm_indep(struct snd_ice1712 *ice, int device)
 
 	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
 					      snd_dma_pci_data(ice->pci),
-					      64*1024, 64*1024);
+					      256*1024, 256*1024);
 
 	ice->pcm_ds = pcm;
 
@@ -1963,7 +1982,7 @@ static inline int digital_route_shift(int idx)
 	return idx * 3;
 }
 
-static int get_route_val(struct snd_ice1712 *ice, int shift)
+int snd_ice1724_get_route_val(struct snd_ice1712 *ice, int shift)
 {
 	unsigned long val;
 	unsigned char eitem;
@@ -1982,7 +2001,8 @@ static int get_route_val(struct snd_ice1712 *ice, int shift)
 	return eitem;
 }
 
-static int put_route_val(struct snd_ice1712 *ice, unsigned int val, int shift)
+int snd_ice1724_put_route_val(struct snd_ice1712 *ice, unsigned int val,
+								int shift)
 {
 	unsigned int old_val, nval;
 	int change;
@@ -2010,7 +2030,7 @@ static int snd_vt1724_pro_route_analog_get(struct snd_kcontrol *kcontrol,
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
 	ucontrol->value.enumerated.item[0] =
-		get_route_val(ice, analog_route_shift(idx));
+		snd_ice1724_get_route_val(ice, analog_route_shift(idx));
 	return 0;
 }
 
@@ -2019,8 +2039,9 @@ static int snd_vt1724_pro_route_analog_put(struct snd_kcontrol *kcontrol,
 {
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
-	return put_route_val(ice, ucontrol->value.enumerated.item[0],
-			     analog_route_shift(idx));
+	return snd_ice1724_put_route_val(ice,
+					 ucontrol->value.enumerated.item[0],
+					 analog_route_shift(idx));
 }
 
 static int snd_vt1724_pro_route_spdif_get(struct snd_kcontrol *kcontrol,
@@ -2029,7 +2050,7 @@ static int snd_vt1724_pro_route_spdif_get(struct snd_kcontrol *kcontrol,
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
 	ucontrol->value.enumerated.item[0] =
-		get_route_val(ice, digital_route_shift(idx));
+		snd_ice1724_get_route_val(ice, digital_route_shift(idx));
 	return 0;
 }
 
@@ -2038,11 +2059,13 @@ static int snd_vt1724_pro_route_spdif_put(struct snd_kcontrol *kcontrol,
 {
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
-	return put_route_val(ice, ucontrol->value.enumerated.item[0],
-			     digital_route_shift(idx));
+	return snd_ice1724_put_route_val(ice,
+					 ucontrol->value.enumerated.item[0],
+					 digital_route_shift(idx));
 }
 
-static struct snd_kcontrol_new snd_vt1724_mixer_pro_analog_route __devinitdata = {
+static struct snd_kcontrol_new snd_vt1724_mixer_pro_analog_route __devinitdata =
+{
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "H/W Playback Route",
 	.info = snd_vt1724_pro_route_info,
@@ -2087,7 +2110,7 @@ static int snd_vt1724_pro_peak_get(struct snd_kcontrol *kcontrol,
 }
 
 static struct snd_kcontrol_new snd_vt1724_mixer_pro_peak __devinitdata = {
-	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.iface = SNDRV_CTL_ELEM_IFACE_PCM,
 	.name = "Multi Track Peak",
 	.access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 	.info = snd_vt1724_pro_peak_info,
@@ -2109,6 +2132,7 @@ static struct snd_ice1712_card_info *card_tables[] __devinitdata = {
 	snd_vt1724_prodigy_hifi_cards,
 	snd_vt1724_prodigy192_cards,
 	snd_vt1724_juli_cards,
+	snd_vt1724_maya44_cards,
 	snd_vt1724_phase_cards,
 	snd_vt1724_wtm_cards,
 	snd_vt1724_se_cards,
@@ -2243,15 +2267,17 @@ static int __devinit snd_vt1724_read_eeprom(struct snd_ice1712 *ice,
 
 
 
-static void __devinit snd_vt1724_chip_reset(struct snd_ice1712 *ice)
+static void snd_vt1724_chip_reset(struct snd_ice1712 *ice)
 {
 	outb(VT1724_RESET , ICEREG1724(ice, CONTROL));
+	inb(ICEREG1724(ice, CONTROL)); /* pci posting flush */
 	msleep(10);
 	outb(0, ICEREG1724(ice, CONTROL));
+	inb(ICEREG1724(ice, CONTROL)); /* pci posting flush */
 	msleep(10);
 }
 
-static int __devinit snd_vt1724_chip_init(struct snd_ice1712 *ice)
+static int snd_vt1724_chip_init(struct snd_ice1712 *ice)
 {
 	outb(ice->eeprom.data[ICE_EEP2_SYSCONF], ICEREG1724(ice, SYS_CFG));
 	outb(ice->eeprom.data[ICE_EEP2_ACLINK], ICEREG1724(ice, AC97_CFG));
@@ -2266,6 +2292,14 @@ static int __devinit snd_vt1724_chip_init(struct snd_ice1712 *ice)
 
 	outb(0, ICEREG1724(ice, POWERDOWN));
 
+	/* MPU_RX and TX irq masks are cleared later dynamically */
+	outb(VT1724_IRQ_MPU_RX | VT1724_IRQ_MPU_TX , ICEREG1724(ice, IRQMASK));
+
+	/* don't handle FIFO overrun/underruns (just yet),
+	 * since they cause machine lockups
+	 */
+	outb(VT1724_MULTI_FIFO_ERR, ICEMT1724(ice, DMA_INT_MASK));
+
 	return 0;
 }
 
@@ -2277,9 +2311,12 @@ static int __devinit snd_vt1724_spdif_build_controls(struct snd_ice1712 *ice)
 	if (snd_BUG_ON(!ice->pcm))
 		return -EIO;
 
-	err = snd_ctl_add(ice->card, snd_ctl_new1(&snd_vt1724_mixer_pro_spdif_route, ice));
-	if (err < 0)
-		return err;
+	if (!ice->own_routing) {
+		err = snd_ctl_add(ice->card,
+			snd_ctl_new1(&snd_vt1724_mixer_pro_spdif_route, ice));
+		if (err < 0)
+			return err;
+	}
 
 	err = snd_ctl_add(ice->card, snd_ctl_new1(&snd_vt1724_spdif_switch, ice));
 	if (err < 0)
@@ -2326,7 +2363,7 @@ static int __devinit snd_vt1724_build_controls(struct snd_ice1712 *ice)
 	if (err < 0)
 		return err;
 
-	if (ice->num_total_dacs > 0) {
+	if (!ice->own_routing && ice->num_total_dacs > 0) {
 		struct snd_kcontrol_new tmp = snd_vt1724_mixer_pro_analog_route;
 		tmp.count = ice->num_total_dacs;
 		if (ice->vt1720 && tmp.count > 2)
@@ -2407,6 +2444,8 @@ static int __devinit snd_vt1724_create(struct snd_card *card,
 	snd_vt1724_proc_init(ice);
 	synchronize_irq(pci->irq);
 
+	card->private_data = ice;
+
 	err = pci_request_regions(pci, "ICE1724");
 	if (err < 0) {
 		kfree(ice);
@@ -2434,14 +2473,6 @@ static int __devinit snd_vt1724_create(struct snd_card *card,
 		snd_vt1724_free(ice);
 		return -EIO;
 	}
-
-	/* MPU_RX and TX irq masks are cleared later dynamically */
-	outb(VT1724_IRQ_MPU_RX | VT1724_IRQ_MPU_TX , ICEREG1724(ice, IRQMASK));
-
-	/* don't handle FIFO overrun/underruns (just yet),
-	 * since they cause machine lockups
-	 */
-	outb(VT1724_MULTI_FIFO_ERR, ICEMT1724(ice, DMA_INT_MASK));
 
 	err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, ice, &ops);
 	if (err < 0) {
@@ -2626,11 +2657,96 @@ static void __devexit snd_vt1724_remove(struct pci_dev *pci)
 	pci_set_drvdata(pci, NULL);
 }
 
+#ifdef CONFIG_PM
+static int snd_vt1724_suspend(struct pci_dev *pci, pm_message_t state)
+{
+	struct snd_card *card = pci_get_drvdata(pci);
+	struct snd_ice1712 *ice = card->private_data;
+
+	if (!ice->pm_suspend_enabled)
+		return 0;
+
+	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
+
+	snd_pcm_suspend_all(ice->pcm);
+	snd_pcm_suspend_all(ice->pcm_pro);
+	snd_pcm_suspend_all(ice->pcm_ds);
+	snd_ac97_suspend(ice->ac97);
+
+	spin_lock_irq(&ice->reg_lock);
+	ice->pm_saved_is_spdif_master = ice->is_spdif_master(ice);
+	ice->pm_saved_spdif_ctrl = inw(ICEMT1724(ice, SPDIF_CTRL));
+	ice->pm_saved_spdif_cfg = inb(ICEREG1724(ice, SPDIF_CFG));
+	ice->pm_saved_route = inl(ICEMT1724(ice, ROUTE_PLAYBACK));
+	spin_unlock_irq(&ice->reg_lock);
+
+	if (ice->pm_suspend)
+		ice->pm_suspend(ice);
+
+	pci_disable_device(pci);
+	pci_save_state(pci);
+	pci_set_power_state(pci, pci_choose_state(pci, state));
+	return 0;
+}
+
+static int snd_vt1724_resume(struct pci_dev *pci)
+{
+	struct snd_card *card = pci_get_drvdata(pci);
+	struct snd_ice1712 *ice = card->private_data;
+
+	if (!ice->pm_suspend_enabled)
+		return 0;
+
+	pci_set_power_state(pci, PCI_D0);
+	pci_restore_state(pci);
+
+	if (pci_enable_device(pci) < 0) {
+		snd_card_disconnect(card);
+		return -EIO;
+	}
+
+	pci_set_master(pci);
+
+	snd_vt1724_chip_reset(ice);
+
+	if (snd_vt1724_chip_init(ice) < 0) {
+		snd_card_disconnect(card);
+		return -EIO;
+	}
+
+	if (ice->pm_resume)
+		ice->pm_resume(ice);
+
+	if (ice->pm_saved_is_spdif_master) {
+		/* switching to external clock via SPDIF */
+		ice->set_spdif_clock(ice);
+	} else {
+		/* internal on-card clock */
+		snd_vt1724_set_pro_rate(ice, ice->pro_rate_default, 1);
+	}
+
+	update_spdif_bits(ice, ice->pm_saved_spdif_ctrl);
+
+	outb(ice->pm_saved_spdif_cfg, ICEREG1724(ice, SPDIF_CFG));
+	outl(ice->pm_saved_route, ICEMT1724(ice, ROUTE_PLAYBACK));
+
+	if (ice->ac97)
+		snd_ac97_resume(ice->ac97);
+
+	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
+	return 0;
+}
+#endif
+
 static struct pci_driver driver = {
 	.name = "ICE1724",
 	.id_table = snd_vt1724_ids,
 	.probe = snd_vt1724_probe,
 	.remove = __devexit_p(snd_vt1724_remove),
+#ifdef CONFIG_PM
+	.suspend = snd_vt1724_suspend,
+	.resume = snd_vt1724_resume,
+#endif
 };
 
 static int __init alsa_card_ice1724_init(void)

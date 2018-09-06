@@ -115,7 +115,7 @@
 #define IEEE80211_MAX_SSID_LEN		32
 
 #define IEEE80211_MAX_MESH_ID_LEN	32
-#define IEEE80211_MESH_CONFIG_LEN	19
+#define IEEE80211_MESH_CONFIG_LEN	24
 
 #define IEEE80211_QOS_CTL_LEN		2
 #define IEEE80211_QOS_CTL_TID_MASK	0x000F
@@ -493,6 +493,7 @@ struct ieee80211s_hdr {
 /* Mesh flags */
 #define MESH_FLAGS_AE_A4 	0x1
 #define MESH_FLAGS_AE_A5_A6	0x2
+#define MESH_FLAGS_AE		0x3
 #define MESH_FLAGS_PS_DEEP	0x4
 
 /**
@@ -540,10 +541,10 @@ struct ieee80211_tim_ie {
 	u8 dtim_period;
 	u8 bitmap_ctrl;
 	/* variable size: 1 - 251 bytes */
-	u8 virtual_map[0];
+	u8 virtual_map[1];
 } __attribute__ ((packed));
 
-#define WLAN_SA_QUERY_TR_ID_LEN 16
+#define WLAN_SA_QUERY_TR_ID_LEN 2
 
 struct ieee80211_mgmt {
 	__le16 frame_control;
@@ -801,6 +802,31 @@ struct ieee80211_ht_cap {
 #define IEEE80211_HT_AMPDU_PARM_FACTOR		0x03
 #define IEEE80211_HT_AMPDU_PARM_DENSITY		0x1C
 
+/*
+ * Maximum length of AMPDU that the STA can receive.
+ * Length = 2 ^ (13 + max_ampdu_length_exp) - 1 (octets)
+ */
+enum ieee80211_max_ampdu_length_exp {
+	IEEE80211_HT_MAX_AMPDU_8K = 0,
+	IEEE80211_HT_MAX_AMPDU_16K = 1,
+	IEEE80211_HT_MAX_AMPDU_32K = 2,
+	IEEE80211_HT_MAX_AMPDU_64K = 3
+};
+
+#define IEEE80211_HT_MAX_AMPDU_FACTOR 13
+
+/* Minimum MPDU start spacing */
+enum ieee80211_min_mpdu_spacing {
+	IEEE80211_HT_MPDU_DENSITY_NONE = 0,	/* No restriction */
+	IEEE80211_HT_MPDU_DENSITY_0_25 = 1,	/* 1/4 usec */
+	IEEE80211_HT_MPDU_DENSITY_0_5 = 2,	/* 1/2 usec */
+	IEEE80211_HT_MPDU_DENSITY_1 = 3,	/* 1 usec */
+	IEEE80211_HT_MPDU_DENSITY_2 = 4,	/* 2 usec */
+	IEEE80211_HT_MPDU_DENSITY_4 = 5,	/* 4 usec */
+	IEEE80211_HT_MPDU_DENSITY_8 = 6,	/* 8 usec */
+	IEEE80211_HT_MPDU_DENSITY_16 = 7	/* 16 usec */
+};
+
 /**
  * struct ieee80211_ht_info - HT information
  *
@@ -846,7 +872,7 @@ struct ieee80211_ht_info {
 /* block-ack parameters */
 #define IEEE80211_ADDBA_PARAM_POLICY_MASK 0x0002
 #define IEEE80211_ADDBA_PARAM_TID_MASK 0x003C
-#define IEEE80211_ADDBA_PARAM_BUF_SIZE_MASK 0xFFA0
+#define IEEE80211_ADDBA_PARAM_BUF_SIZE_MASK 0xFFC0
 #define IEEE80211_DELBA_PARAM_TID_MASK 0xF000
 #define IEEE80211_DELBA_PARAM_INITIATOR_MASK 0x0800
 
@@ -1068,8 +1094,14 @@ enum ieee80211_category {
 	WLAN_CATEGORY_DLS = 2,
 	WLAN_CATEGORY_BACK = 3,
 	WLAN_CATEGORY_PUBLIC = 4,
+	WLAN_CATEGORY_HT = 7,
 	WLAN_CATEGORY_SA_QUERY = 8,
+	WLAN_CATEGORY_PROTECTED_DUAL_OF_ACTION = 9,
 	WLAN_CATEGORY_WMM = 17,
+	WLAN_CATEGORY_MESH_PLINK = 30,		/* Pending ANA approval */
+	WLAN_CATEGORY_MESH_PATH_SEL = 32,	/* Pending ANA approval */
+	WLAN_CATEGORY_VENDOR_SPECIFIC_PROTECTED = 126,
+	WLAN_CATEGORY_VENDOR_SPECIFIC = 127,
 };
 
 /* SPECTRUM_MGMT action code */
@@ -1079,6 +1111,15 @@ enum ieee80211_spectrum_mgmt_actioncode {
 	WLAN_ACTION_SPCT_TPC_REQ = 2,
 	WLAN_ACTION_SPCT_TPC_RPRT = 3,
 	WLAN_ACTION_SPCT_CHL_SWITCH = 4,
+};
+
+/* Security key length */
+enum ieee80211_key_len {
+	WLAN_KEY_LEN_WEP40 = 5,
+	WLAN_KEY_LEN_WEP104 = 13,
+	WLAN_KEY_LEN_CCMP = 16,
+	WLAN_KEY_LEN_TKIP = 32,
+	WLAN_KEY_LEN_AES_CMAC = 16,
 };
 
 /*
@@ -1182,6 +1223,10 @@ enum ieee80211_sa_query_action {
 #define WLAN_CIPHER_SUITE_WEP104	0x000FAC05
 #define WLAN_CIPHER_SUITE_AES_CMAC	0x000FAC06
 
+/* AKM suite selectors */
+#define WLAN_AKM_SUITE_8021X		0x000FAC01
+#define WLAN_AKM_SUITE_PSK		0x000FAC02
+
 #define WLAN_MAX_KEY_LEN		32
 
 /**
@@ -1261,7 +1306,9 @@ static inline bool ieee80211_is_robust_mgmt_frame(struct ieee80211_hdr *hdr)
 		if (ieee80211_has_protected(hdr->frame_control))
 			return true;
 		category = ((u8 *) hdr) + 24;
-		return *category != WLAN_CATEGORY_PUBLIC;
+		return *category != WLAN_CATEGORY_PUBLIC &&
+			*category != WLAN_CATEGORY_HT &&
+			*category != WLAN_CATEGORY_VENDOR_SPECIFIC;
 	}
 
 	return false;
@@ -1381,6 +1428,45 @@ static inline int ieee80211_freq_to_ofdm_chan(int s_freq, int freq)
 		return (freq + 2 - s_freq) / 5;
 	else
 		return -1;
+}
+
+/**
+ * ieee80211_tu_to_usec - convert time units (TU) to microseconds
+ * @tu: the TUs
+ */
+static inline unsigned long ieee80211_tu_to_usec(unsigned long tu)
+{
+	return 1024 * tu;
+}
+
+/**
+ * ieee80211_check_tim - check if AID bit is set in TIM
+ * @tim: the TIM IE
+ * @tim_len: length of the TIM IE
+ * @aid: the AID to look for
+ */
+static inline bool ieee80211_check_tim(struct ieee80211_tim_ie *tim,
+				       u8 tim_len, u16 aid)
+{
+	u8 mask;
+	u8 index, indexn1, indexn2;
+
+	if (unlikely(!tim || tim_len < sizeof(*tim)))
+		return false;
+
+	aid &= 0x3fff;
+	index = aid / 8;
+	mask  = 1 << (aid & 7);
+
+	indexn1 = tim->bitmap_ctrl & 0xfe;
+	indexn2 = tim_len + indexn1 - 4;
+
+	if (index < indexn1 || index > indexn2)
+		return false;
+
+	index -= indexn1;
+
+	return !!(tim->virtual_map[index] & mask);
 }
 
 #endif /* LINUX_IEEE80211_H */

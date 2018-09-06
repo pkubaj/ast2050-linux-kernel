@@ -98,10 +98,8 @@ struct ti_device {
 
 static int ti_startup(struct usb_serial *serial);
 static void ti_release(struct usb_serial *serial);
-static int ti_open(struct tty_struct *tty, struct usb_serial_port *port,
-		struct file *file);
-static void ti_close(struct tty_struct *tty, struct usb_serial_port *port,
-		struct file *file);
+static int ti_open(struct tty_struct *tty, struct usb_serial_port *port);
+static void ti_close(struct usb_serial_port *port);
 static int ti_write(struct tty_struct *tty, struct usb_serial_port *port,
 		const unsigned char *data, int count);
 static int ti_write_room(struct tty_struct *tty);
@@ -368,9 +366,9 @@ failed_1port:
 
 static void __exit ti_exit(void)
 {
+	usb_deregister(&ti_usb_driver);
 	usb_serial_deregister(&ti_1port_device);
 	usb_serial_deregister(&ti_2port_device);
-	usb_deregister(&ti_usb_driver);
 }
 
 
@@ -493,8 +491,7 @@ static void ti_release(struct usb_serial *serial)
 }
 
 
-static int ti_open(struct tty_struct *tty,
-			struct usb_serial_port *port, struct file *file)
+static int ti_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	struct ti_port *tport = usb_get_serial_port_data(port);
 	struct ti_device *tdev;
@@ -644,8 +641,7 @@ release_lock:
 }
 
 
-static void ti_close(struct tty_struct *tty, struct usb_serial_port *port,
-							struct file *file)
+static void ti_close(struct usb_serial_port *port)
 {
 	struct ti_device *tdev;
 	struct ti_port *tport;
@@ -729,7 +725,7 @@ static int ti_write_room(struct tty_struct *tty)
 	dbg("%s - port %d", __func__, port->number);
 
 	if (tport == NULL)
-		return -ENODEV;
+		return 0;
 
 	spin_lock_irqsave(&tport->tp_lock, flags);
 	room = ti_buf_space_avail(tport->tp_write_buf);
@@ -750,7 +746,7 @@ static int ti_chars_in_buffer(struct tty_struct *tty)
 	dbg("%s - port %d", __func__, port->number);
 
 	if (tport == NULL)
-		return -ENODEV;
+		return 0;
 
 	spin_lock_irqsave(&tport->tp_lock, flags);
 	chars = ti_buf_data_avail(tport->tp_write_buf);

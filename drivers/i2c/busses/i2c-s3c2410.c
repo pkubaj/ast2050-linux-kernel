@@ -51,6 +51,11 @@ enum s3c24xx_i2c_state {
 	STATE_STOP
 };
 
+enum s3c24xx_i2c_type {
+	TYPE_S3C2410,
+	TYPE_S3C2440,
+};
+
 struct s3c24xx_i2c {
 	spinlock_t		lock;
 	wait_queue_head_t	wait;
@@ -88,8 +93,10 @@ struct s3c24xx_i2c {
 static inline int s3c24xx_i2c_is2440(struct s3c24xx_i2c *i2c)
 {
 	struct platform_device *pdev = to_platform_device(i2c->dev);
+	enum s3c24xx_i2c_type type;
 
-	return !strcmp(pdev->name, "s3c2440-i2c");
+	type = platform_get_device_id(pdev)->driver_data;
+	return type == TYPE_S3C2440;
 }
 
 /* s3c24xx_i2c_master_complete
@@ -756,11 +763,6 @@ static int s3c24xx_i2c_init(struct s3c24xx_i2c *i2c)
 	dev_info(i2c->dev, "bus frequency set to %d KHz\n", freq);
 	dev_dbg(i2c->dev, "S3C2410_IICCON=0x%02lx\n", iicon);
 
-	/* check for s3c2440 i2c controller  */
-
-	if (s3c24xx_i2c_is2440(i2c))
-		writel(0x0, i2c->regs + S3C2440_IICLC);
-
 	return 0;
 }
 
@@ -821,7 +823,7 @@ static int s3c24xx_i2c_probe(struct platform_device *pdev)
 		goto err_clk;
 	}
 
-	i2c->ioarea = request_mem_region(res->start, (res->end-res->start)+1,
+	i2c->ioarea = request_mem_region(res->start, resource_size(res),
 					 pdev->name);
 
 	if (i2c->ioarea == NULL) {
@@ -830,7 +832,7 @@ static int s3c24xx_i2c_probe(struct platform_device *pdev)
 		goto err_clk;
 	}
 
-	i2c->regs = ioremap(res->start, (res->end-res->start)+1);
+	i2c->regs = ioremap(res->start, resource_size(res));
 
 	if (i2c->regs == NULL) {
 		dev_err(&pdev->dev, "cannot map IO\n");
@@ -944,17 +946,20 @@ static int s3c24xx_i2c_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-static int s3c24xx_i2c_suspend_late(struct platform_device *dev,
-				    pm_message_t msg)
+static int s3c24xx_i2c_suspend_noirq(struct device *dev)
 {
-	struct s3c24xx_i2c *i2c = platform_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct s3c24xx_i2c *i2c = platform_get_drvdata(pdev);
+
 	i2c->suspended = 1;
+
 	return 0;
 }
 
-static int s3c24xx_i2c_resume(struct platform_device *dev)
+static int s3c24xx_i2c_resume(struct device *dev)
 {
-	struct s3c24xx_i2c *i2c = platform_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct s3c24xx_i2c *i2c = platform_get_drvdata(pdev);
 
 	i2c->suspended = 0;
 	s3c24xx_i2c_init(i2c);
@@ -962,59 +967,52 @@ static int s3c24xx_i2c_resume(struct platform_device *dev)
 	return 0;
 }
 
+static struct dev_pm_ops s3c24xx_i2c_dev_pm_ops = {
+	.suspend_noirq = s3c24xx_i2c_suspend_noirq,
+	.resume = s3c24xx_i2c_resume,
+};
+
+#define S3C24XX_DEV_PM_OPS (&s3c24xx_i2c_dev_pm_ops)
 #else
-#define s3c24xx_i2c_suspend_late NULL
-#define s3c24xx_i2c_resume NULL
+#define S3C24XX_DEV_PM_OPS NULL
 #endif
 
 /* device driver for platform bus bits */
 
-static struct platform_driver s3c2410_i2c_driver = {
-	.probe		= s3c24xx_i2c_probe,
-	.remove		= s3c24xx_i2c_remove,
-	.suspend_late	= s3c24xx_i2c_suspend_late,
-	.resume		= s3c24xx_i2c_resume,
-	.driver		= {
-		.owner	= THIS_MODULE,
-		.name	= "s3c2410-i2c",
-	},
+static struct platform_device_id s3c24xx_driver_ids[] = {
+	{
+		.name		= "s3c2410-i2c",
+		.driver_data	= TYPE_S3C2410,
+	}, {
+		.name		= "s3c2440-i2c",
+		.driver_data	= TYPE_S3C2440,
+	}, { },
 };
+MODULE_DEVICE_TABLE(platform, s3c24xx_driver_ids);
 
-static struct platform_driver s3c2440_i2c_driver = {
+static struct platform_driver s3c24xx_i2c_driver = {
 	.probe		= s3c24xx_i2c_probe,
 	.remove		= s3c24xx_i2c_remove,
-	.suspend_late	= s3c24xx_i2c_suspend_late,
-	.resume		= s3c24xx_i2c_resume,
+	.id_table	= s3c24xx_driver_ids,
 	.driver		= {
 		.owner	= THIS_MODULE,
-		.name	= "s3c2440-i2c",
+		.name	= "s3c-i2c",
+		.pm	= S3C24XX_DEV_PM_OPS,
 	},
 };
 
 static int __init i2c_adap_s3c_init(void)
 {
-	int ret;
-
-	ret = platform_driver_register(&s3c2410_i2c_driver);
-	if (ret == 0) {
-		ret = platform_driver_register(&s3c2440_i2c_driver);
-		if (ret)
-			platform_driver_unregister(&s3c2410_i2c_driver);
-	}
-
-	return ret;
+	return platform_driver_register(&s3c24xx_i2c_driver);
 }
 subsys_initcall(i2c_adap_s3c_init);
 
 static void __exit i2c_adap_s3c_exit(void)
 {
-	platform_driver_unregister(&s3c2410_i2c_driver);
-	platform_driver_unregister(&s3c2440_i2c_driver);
+	platform_driver_unregister(&s3c24xx_i2c_driver);
 }
 module_exit(i2c_adap_s3c_exit);
 
 MODULE_DESCRIPTION("S3C24XX I2C Bus driver");
 MODULE_AUTHOR("Ben Dooks, <ben@simtec.co.uk>");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:s3c2410-i2c");
-MODULE_ALIAS("platform:s3c2440-i2c");

@@ -21,14 +21,6 @@
 #include <linux/percpu.h>
 #include <asm/byteorder.h>
 
-struct sha512_ctx {
-	u64 state[8];
-	u32 count[4];
-	u8 buf[128];
-};
-
-static DEFINE_PER_CPU(u64[80], msg_schedule);
-
 static inline u64 Ch(u64 x, u64 y, u64 z)
 {
         return z ^ (x & (y ^ z));
@@ -37,11 +29,6 @@ static inline u64 Ch(u64 x, u64 y, u64 z)
 static inline u64 Maj(u64 x, u64 y, u64 z)
 {
         return (x & y) | (z & (x | y));
-}
-
-static inline u64 RORu64(u64 x, u64 y)
-{
-        return (x >> y) | (x << (64 - y));
 }
 
 static const u64 sha512_K[80] = {
@@ -74,10 +61,10 @@ static const u64 sha512_K[80] = {
         0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL,
 };
 
-#define e0(x)       (RORu64(x,28) ^ RORu64(x,34) ^ RORu64(x,39))
-#define e1(x)       (RORu64(x,14) ^ RORu64(x,18) ^ RORu64(x,41))
-#define s0(x)       (RORu64(x, 1) ^ RORu64(x, 8) ^ (x >> 7))
-#define s1(x)       (RORu64(x,19) ^ RORu64(x,61) ^ (x >> 6))
+#define e0(x)       (ror64(x,28) ^ ror64(x,34) ^ ror64(x,39))
+#define e1(x)       (ror64(x,14) ^ ror64(x,18) ^ ror64(x,41))
+#define s0(x)       (ror64(x, 1) ^ ror64(x, 8) ^ (x >> 7))
+#define s1(x)       (ror64(x,19) ^ ror64(x,61) ^ (x >> 6))
 
 static inline void LOAD_OP(int I, u64 *W, const u8 *input)
 {
@@ -86,7 +73,7 @@ static inline void LOAD_OP(int I, u64 *W, const u8 *input)
 
 static inline void BLEND_OP(int I, u64 *W)
 {
-	W[I] = s1(W[I-2]) + W[I-7] + s0(W[I-15]) + W[I-16];
+	W[I & 15] += s1(W[(I-2) & 15]) + W[(I-7) & 15] + s0(W[(I-15) & 15]);
 }
 
 static void
@@ -95,15 +82,7 @@ sha512_transform(u64 *state, const u8 *input)
 	u64 a, b, c, d, e, f, g, h, t1, t2;
 
 	int i;
-	u64 *W = get_cpu_var(msg_schedule);
-
-	/* load the input */
-        for (i = 0; i < 16; i++)
-                LOAD_OP(i, W, input);
-
-        for (i = 16; i < 80; i++) {
-                BLEND_OP(i, W);
-        }
+	u64 W[16];
 
 	/* load the state into our registers */
 	a=state[0];   b=state[1];   c=state[2];   d=state[3];
@@ -111,21 +90,35 @@ sha512_transform(u64 *state, const u8 *input)
 
 	/* now iterate */
 	for (i=0; i<80; i+=8) {
-		t1 = h + e1(e) + Ch(e,f,g) + sha512_K[i  ] + W[i  ];
+		if (!(i & 8)) {
+			int j;
+
+			if (i < 16) {
+				/* load the input */
+				for (j = 0; j < 16; j++)
+					LOAD_OP(i + j, W, input);
+			} else {
+				for (j = 0; j < 16; j++) {
+					BLEND_OP(i + j, W);
+				}
+			}
+		}
+
+		t1 = h + e1(e) + Ch(e,f,g) + sha512_K[i  ] + W[(i & 15)];
 		t2 = e0(a) + Maj(a,b,c);    d+=t1;    h=t1+t2;
-		t1 = g + e1(d) + Ch(d,e,f) + sha512_K[i+1] + W[i+1];
+		t1 = g + e1(d) + Ch(d,e,f) + sha512_K[i+1] + W[(i & 15) + 1];
 		t2 = e0(h) + Maj(h,a,b);    c+=t1;    g=t1+t2;
-		t1 = f + e1(c) + Ch(c,d,e) + sha512_K[i+2] + W[i+2];
+		t1 = f + e1(c) + Ch(c,d,e) + sha512_K[i+2] + W[(i & 15) + 2];
 		t2 = e0(g) + Maj(g,h,a);    b+=t1;    f=t1+t2;
-		t1 = e + e1(b) + Ch(b,c,d) + sha512_K[i+3] + W[i+3];
+		t1 = e + e1(b) + Ch(b,c,d) + sha512_K[i+3] + W[(i & 15) + 3];
 		t2 = e0(f) + Maj(f,g,h);    a+=t1;    e=t1+t2;
-		t1 = d + e1(a) + Ch(a,b,c) + sha512_K[i+4] + W[i+4];
+		t1 = d + e1(a) + Ch(a,b,c) + sha512_K[i+4] + W[(i & 15) + 4];
 		t2 = e0(e) + Maj(e,f,g);    h+=t1;    d=t1+t2;
-		t1 = c + e1(h) + Ch(h,a,b) + sha512_K[i+5] + W[i+5];
+		t1 = c + e1(h) + Ch(h,a,b) + sha512_K[i+5] + W[(i & 15) + 5];
 		t2 = e0(d) + Maj(d,e,f);    g+=t1;    c=t1+t2;
-		t1 = b + e1(g) + Ch(g,h,a) + sha512_K[i+6] + W[i+6];
+		t1 = b + e1(g) + Ch(g,h,a) + sha512_K[i+6] + W[(i & 15) + 6];
 		t2 = e0(c) + Maj(c,d,e);    f+=t1;    b=t1+t2;
-		t1 = a + e1(f) + Ch(f,g,h) + sha512_K[i+7] + W[i+7];
+		t1 = a + e1(f) + Ch(f,g,h) + sha512_K[i+7] + W[(i & 15) + 7];
 		t2 = e0(b) + Maj(b,c,d);    e+=t1;    a=t1+t2;
 	}
 
@@ -134,14 +127,12 @@ sha512_transform(u64 *state, const u8 *input)
 
 	/* erase our data */
 	a = b = c = d = e = f = g = h = t1 = t2 = 0;
-	memset(W, 0, sizeof(__get_cpu_var(msg_schedule)));
-	put_cpu_var(msg_schedule);
 }
 
 static int
 sha512_init(struct shash_desc *desc)
 {
-	struct sha512_ctx *sctx = shash_desc_ctx(desc);
+	struct sha512_state *sctx = shash_desc_ctx(desc);
 	sctx->state[0] = SHA512_H0;
 	sctx->state[1] = SHA512_H1;
 	sctx->state[2] = SHA512_H2;
@@ -150,7 +141,7 @@ sha512_init(struct shash_desc *desc)
 	sctx->state[5] = SHA512_H5;
 	sctx->state[6] = SHA512_H6;
 	sctx->state[7] = SHA512_H7;
-	sctx->count[0] = sctx->count[1] = sctx->count[2] = sctx->count[3] = 0;
+	sctx->count[0] = sctx->count[1] = 0;
 
 	return 0;
 }
@@ -158,7 +149,7 @@ sha512_init(struct shash_desc *desc)
 static int
 sha384_init(struct shash_desc *desc)
 {
-	struct sha512_ctx *sctx = shash_desc_ctx(desc);
+	struct sha512_state *sctx = shash_desc_ctx(desc);
 	sctx->state[0] = SHA384_H0;
 	sctx->state[1] = SHA384_H1;
 	sctx->state[2] = SHA384_H2;
@@ -167,7 +158,7 @@ sha384_init(struct shash_desc *desc)
 	sctx->state[5] = SHA384_H5;
 	sctx->state[6] = SHA384_H6;
 	sctx->state[7] = SHA384_H7;
-        sctx->count[0] = sctx->count[1] = sctx->count[2] = sctx->count[3] = 0;
+	sctx->count[0] = sctx->count[1] = 0;
 
 	return 0;
 }
@@ -175,20 +166,16 @@ sha384_init(struct shash_desc *desc)
 static int
 sha512_update(struct shash_desc *desc, const u8 *data, unsigned int len)
 {
-	struct sha512_ctx *sctx = shash_desc_ctx(desc);
+	struct sha512_state *sctx = shash_desc_ctx(desc);
 
 	unsigned int i, index, part_len;
 
 	/* Compute number of bytes mod 128 */
-	index = (unsigned int)((sctx->count[0] >> 3) & 0x7F);
+	index = sctx->count[0] & 0x7f;
 
-	/* Update number of bits */
-	if ((sctx->count[0] += (len << 3)) < (len << 3)) {
-		if ((sctx->count[1] += 1) < 1)
-			if ((sctx->count[2] += 1) < 1)
-				sctx->count[3]++;
-		sctx->count[1] += (len >> 29);
-	}
+	/* Update number of bytes */
+	if ((sctx->count[0] += len) < len)
+		sctx->count[1]++;
 
         part_len = 128 - index;
 
@@ -214,21 +201,19 @@ sha512_update(struct shash_desc *desc, const u8 *data, unsigned int len)
 static int
 sha512_final(struct shash_desc *desc, u8 *hash)
 {
-	struct sha512_ctx *sctx = shash_desc_ctx(desc);
+	struct sha512_state *sctx = shash_desc_ctx(desc);
         static u8 padding[128] = { 0x80, };
 	__be64 *dst = (__be64 *)hash;
-	__be32 bits[4];
+	__be64 bits[2];
 	unsigned int index, pad_len;
 	int i;
 
 	/* Save number of bits */
-	bits[3] = cpu_to_be32(sctx->count[0]);
-	bits[2] = cpu_to_be32(sctx->count[1]);
-	bits[1] = cpu_to_be32(sctx->count[2]);
-	bits[0] = cpu_to_be32(sctx->count[3]);
+	bits[1] = cpu_to_be64(sctx->count[0] << 3);
+	bits[0] = cpu_to_be64(sctx->count[1] << 3 | sctx->count[0] >> 61);
 
 	/* Pad out to 112 mod 128. */
-	index = (sctx->count[0] >> 3) & 0x7f;
+	index = sctx->count[0] & 0x7f;
 	pad_len = (index < 112) ? (112 - index) : ((128+112) - index);
 	sha512_update(desc, padding, pad_len);
 
@@ -240,7 +225,7 @@ sha512_final(struct shash_desc *desc, u8 *hash)
 		dst[i] = cpu_to_be64(sctx->state[i]);
 
 	/* Zeroize sensitive information. */
-	memset(sctx, 0, sizeof(struct sha512_ctx));
+	memset(sctx, 0, sizeof(struct sha512_state));
 
 	return 0;
 }
@@ -262,7 +247,7 @@ static struct shash_alg sha512 = {
 	.init		=	sha512_init,
 	.update		=	sha512_update,
 	.final		=	sha512_final,
-	.descsize	=	sizeof(struct sha512_ctx),
+	.descsize	=	sizeof(struct sha512_state),
 	.base		=	{
 		.cra_name	=	"sha512",
 		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
@@ -276,7 +261,7 @@ static struct shash_alg sha384 = {
 	.init		=	sha384_init,
 	.update		=	sha512_update,
 	.final		=	sha384_final,
-	.descsize	=	sizeof(struct sha512_ctx),
+	.descsize	=	sizeof(struct sha512_state),
 	.base		=	{
 		.cra_name	=	"sha384",
 		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,

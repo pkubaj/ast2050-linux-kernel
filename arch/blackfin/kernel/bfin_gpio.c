@@ -1,30 +1,9 @@
 /*
- * File:         arch/blackfin/kernel/bfin_gpio.c
- * Based on:
- * Author:       Michael Hennerich (hennerich@blackfin.uclinux.org)
+ * GPIO Abstraction Layer
  *
- * Created:
- * Description:  GPIO Abstraction Layer
+ * Copyright 2006-2009 Analog Devices Inc.
  *
- * Modified:
- *               Copyright 2008 Analog Devices Inc.
- *
- * Bugs:         Enter bugs at http://blackfin.uclinux.org/
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see the file COPYING, or write
- * to the Free Software Foundation, Inc.,
- * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ * Licensed under the GPL-2 or later
  */
 
 #include <linux/delay.h>
@@ -312,15 +291,6 @@ inline void portmux_setup(unsigned short per)
 #else
 # define portmux_setup(...)  do { } while (0)
 #endif
-
-static int __init bfin_gpio_init(void)
-{
-	printk(KERN_INFO "Blackfin GPIO Controller\n");
-
-	return 0;
-}
-arch_initcall(bfin_gpio_init);
-
 
 #ifndef CONFIG_BF54x
 /***********************************************************
@@ -695,14 +665,12 @@ void bfin_gpio_pm_hibernate_restore(void)
 		*port_fer[bank] = gpio_bank_saved[bank].fer;
 #endif
 		gpio_array[bank]->inen  = gpio_bank_saved[bank].inen;
+		gpio_array[bank]->data_set = gpio_bank_saved[bank].data
+						& gpio_bank_saved[bank].dir;
 		gpio_array[bank]->dir   = gpio_bank_saved[bank].dir;
 		gpio_array[bank]->polar = gpio_bank_saved[bank].polar;
 		gpio_array[bank]->edge  = gpio_bank_saved[bank].edge;
 		gpio_array[bank]->both  = gpio_bank_saved[bank].both;
-
-		gpio_array[bank]->data_set = gpio_bank_saved[bank].data
-						| gpio_bank_saved[bank].dir;
-
 		gpio_array[bank]->maska = gpio_bank_saved[bank].maska;
 	}
 	AWA_DUMMY_READ(maska);
@@ -732,7 +700,6 @@ void bfin_gpio_pm_hibernate_suspend(void)
 
 		gpio_bank_saved[bank].fer = gpio_array[bank]->port_fer;
 		gpio_bank_saved[bank].mux = gpio_array[bank]->port_mux;
-		gpio_bank_saved[bank].data = gpio_array[bank]->data;
 		gpio_bank_saved[bank].data = gpio_array[bank]->data;
 		gpio_bank_saved[bank].inen = gpio_array[bank]->inen;
 		gpio_bank_saved[bank].dir = gpio_array[bank]->dir_set;
@@ -1021,15 +988,6 @@ int bfin_gpio_irq_request(unsigned gpio, const char *label)
 
 	local_irq_save_hw(flags);
 
-	if (unlikely(reserved_gpio_irq_map[gpio_bank(gpio)] & gpio_bit(gpio))) {
-		if (system_state == SYSTEM_BOOTING)
-			dump_stack();
-		printk(KERN_ERR
-		       "bfin-gpio: GPIO %d is already reserved as gpio-irq !\n",
-		       gpio);
-		local_irq_restore_hw(flags);
-		return -EBUSY;
-	}
 	if (unlikely(reserved_peri_map[gpio_bank(gpio)] & gpio_bit(gpio))) {
 		if (system_state == SYSTEM_BOOTING)
 			dump_stack();

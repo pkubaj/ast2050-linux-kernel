@@ -41,6 +41,7 @@ emu as port A output, port B input, port C N/A).
 IRQ is assigned but not used.
 */
 
+#include <linux/interrupt.h>
 #include "../comedidev.h"
 
 #include <linux/ioport.h>
@@ -53,37 +54,38 @@ IRQ is assigned but not used.
 
 static struct pcmcia_device *pcmcia_cur_dev = NULL;
 
-#define DIO700_SIZE 8		// size of io region used by board
+#define DIO700_SIZE 8		/*  size of io region used by board */
 
-static int dio700_attach(struct comedi_device * dev, struct comedi_devconfig * it);
-static int dio700_detach(struct comedi_device * dev);
+static int dio700_attach(struct comedi_device *dev,
+			 struct comedi_devconfig *it);
+static int dio700_detach(struct comedi_device *dev);
 
 enum dio700_bustype { pcmcia_bustype };
 
 struct dio700_board {
 	const char *name;
-	int device_id;		// device id for pcmcia board
-	enum dio700_bustype bustype;	// PCMCIA
-	int have_dio;		// have daqcard-700 dio
-	// function pointers so we can use inb/outb or readb/writeb
-	// as appropriate
+	int device_id;		/*  device id for pcmcia board */
+	enum dio700_bustype bustype;	/*  PCMCIA */
+	int have_dio;		/*  have daqcard-700 dio */
+	/*  function pointers so we can use inb/outb or readb/writeb */
+	/*  as appropriate */
 	unsigned int (*read_byte) (unsigned int address);
 	void (*write_byte) (unsigned int byte, unsigned int address);
 };
 
 static const struct dio700_board dio700_boards[] = {
 	{
-	      name:	"daqcard-700",
-	      device_id:0x4743,// 0x10b is manufacturer id, 0x4743 is device id
-	      bustype:	pcmcia_bustype,
-	      have_dio:1,
-		},
+	 .name = "daqcard-700",
+	 .device_id = 0x4743,	/*  0x10b is manufacturer id, 0x4743 is device id */
+	 .bustype = pcmcia_bustype,
+	 .have_dio = 1,
+	 },
 	{
-	      name:	"ni_daq_700",
-	      device_id:0x4743,// 0x10b is manufacturer id, 0x4743 is device id
-	      bustype:	pcmcia_bustype,
-	      have_dio:1,
-		},
+	 .name = "ni_daq_700",
+	 .device_id = 0x4743,	/*  0x10b is manufacturer id, 0x4743 is device id */
+	 .bustype = pcmcia_bustype,
+	 .have_dio = 1,
+	 },
 };
 
 /*
@@ -96,17 +98,16 @@ struct dio700_private {
 	int data;		/* number of data points left to be taken */
 };
 
-
 #define devpriv ((struct dio700_private *)dev->private)
 
 static struct comedi_driver driver_dio700 = {
-      driver_name:"ni_daq_700",
-      module:THIS_MODULE,
-      attach:dio700_attach,
-      detach:dio700_detach,
-      num_names:sizeof(dio700_boards) / sizeof(struct dio700_board),
-      board_name:&dio700_boards[0].name,
-      offset:sizeof(struct dio700_board),
+	.driver_name = "ni_daq_700",
+	.module = THIS_MODULE,
+	.attach = dio700_attach,
+	.detach = dio700_detach,
+	.num_names = ARRAY_SIZE(dio700_boards),
+	.board_name = &dio700_boards[0].name,
+	.offset = sizeof(struct dio700_board),
 };
 
 /*	the real driver routines	*/
@@ -128,9 +129,9 @@ struct subdev_700_struct {
 #define CALLBACK_FUNC	(((struct subdev_700_struct *)s->private)->cb_func)
 #define subdevpriv	((struct subdev_700_struct *)s->private)
 
-static void do_config(struct comedi_device * dev, struct comedi_subdevice * s);
+static void do_config(struct comedi_device *dev, struct comedi_subdevice *s);
 
-void subdev_700_interrupt(struct comedi_device * dev, struct comedi_subdevice * s)
+void subdev_700_interrupt(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	short d;
 
@@ -155,8 +156,9 @@ static int subdev_700_cb(int dir, int port, int data, unsigned long arg)
 	}
 }
 
-static int subdev_700_insn(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int subdev_700_insn(struct comedi_device *dev,
+			   struct comedi_subdevice *s, struct comedi_insn *insn,
+			   unsigned int *data)
 {
 	if (data[0]) {
 		s->state &= ~data[0];
@@ -164,7 +166,7 @@ static int subdev_700_insn(struct comedi_device * dev, struct comedi_subdevice *
 
 		if (data[0] & 0xff)
 			CALLBACK_FUNC(1, _700_DATA, s->state & 0xff,
-				CALLBACK_ARG);
+				      CALLBACK_ARG);
 	}
 
 	data[1] = s->state & 0xff;
@@ -173,8 +175,9 @@ static int subdev_700_insn(struct comedi_device * dev, struct comedi_subdevice *
 	return 2;
 }
 
-static int subdev_700_insn_config(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_insn * insn, unsigned int * data)
+static int subdev_700_insn_config(struct comedi_device *dev,
+				  struct comedi_subdevice *s,
+				  struct comedi_insn *insn, unsigned int *data)
 {
 
 	switch (data[0]) {
@@ -184,9 +187,9 @@ static int subdev_700_insn_config(struct comedi_device * dev, struct comedi_subd
 		break;
 	case INSN_CONFIG_DIO_QUERY:
 		data[1] =
-			(s->io_bits & (1 << CR_CHAN(insn->
-					chanspec))) ? COMEDI_OUTPUT :
-			COMEDI_INPUT;
+		    (s->
+		     io_bits & (1 << CR_CHAN(insn->chanspec))) ? COMEDI_OUTPUT :
+		    COMEDI_INPUT;
 		return insn->n;
 		break;
 	default:
@@ -196,13 +199,14 @@ static int subdev_700_insn_config(struct comedi_device * dev, struct comedi_subd
 	return 1;
 }
 
-static void do_config(struct comedi_device * dev, struct comedi_subdevice * s)
+static void do_config(struct comedi_device *dev, struct comedi_subdevice *s)
 {				/* use powerup defaults */
 	return;
 }
 
-static int subdev_700_cmdtest(struct comedi_device * dev, struct comedi_subdevice * s,
-	struct comedi_cmd * cmd)
+static int subdev_700_cmdtest(struct comedi_device *dev,
+			      struct comedi_subdevice *s,
+			      struct comedi_cmd *cmd)
 {
 	int err = 0;
 	unsigned int tmp;
@@ -276,22 +280,23 @@ static int subdev_700_cmdtest(struct comedi_device * dev, struct comedi_subdevic
 	return 0;
 }
 
-static int subdev_700_cmd(struct comedi_device * dev, struct comedi_subdevice * s)
+static int subdev_700_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	/* FIXME */
 
 	return 0;
 }
 
-static int subdev_700_cancel(struct comedi_device * dev, struct comedi_subdevice * s)
+static int subdev_700_cancel(struct comedi_device *dev,
+			     struct comedi_subdevice *s)
 {
 	/* FIXME */
 
 	return 0;
 }
 
-int subdev_700_init(struct comedi_device * dev, struct comedi_subdevice * s, int (*cb) (int,
-		int, int, unsigned long), unsigned long arg)
+int subdev_700_init(struct comedi_device *dev, struct comedi_subdevice *s,
+		    int (*cb) (int, int, int, unsigned long), unsigned long arg)
 {
 	s->type = COMEDI_SUBD_DIO;
 	s->subdev_flags = SDF_READABLE | SDF_WRITABLE;
@@ -319,8 +324,9 @@ int subdev_700_init(struct comedi_device * dev, struct comedi_subdevice * s, int
 	return 0;
 }
 
-int subdev_700_init_irq(struct comedi_device * dev, struct comedi_subdevice * s,
-	int (*cb) (int, int, int, unsigned long), unsigned long arg)
+int subdev_700_init_irq(struct comedi_device *dev, struct comedi_subdevice *s,
+			int (*cb) (int, int, int, unsigned long),
+			unsigned long arg)
 {
 	int ret;
 
@@ -337,7 +343,7 @@ int subdev_700_init_irq(struct comedi_device * dev, struct comedi_subdevice * s,
 	return 0;
 }
 
-void subdev_700_cleanup(struct comedi_device * dev, struct comedi_subdevice * s)
+void subdev_700_cleanup(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	if (s->private) {
 		if (subdevpriv->have_irq) {
@@ -352,7 +358,7 @@ EXPORT_SYMBOL(subdev_700_init_irq);
 EXPORT_SYMBOL(subdev_700_cleanup);
 EXPORT_SYMBOL(subdev_700_interrupt);
 
-static int dio700_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int dio700_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 	unsigned long iobase = 0;
@@ -365,7 +371,7 @@ static int dio700_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	if (alloc_private(dev, sizeof(struct dio700_private)) < 0)
 		return -ENOMEM;
 
-	// get base address, irq etc. based on bustype
+	/*  get base address, irq etc. based on bustype */
 	switch (thisboard->bustype) {
 	case pcmcia_bustype:
 		link = pcmcia_cur_dev;	/* XXX hack */
@@ -382,7 +388,7 @@ static int dio700_attach(struct comedi_device * dev, struct comedi_devconfig * i
 		break;
 	}
 	printk("comedi%d: ni_daq_700: %s, io 0x%lx", dev->minor,
-		thisboard->name, iobase);
+	       thisboard->name, iobase);
 #ifdef incomplete
 	if (irq) {
 		printk(", irq %u", irq);
@@ -415,7 +421,7 @@ static int dio700_attach(struct comedi_device * dev, struct comedi_devconfig * i
 	return 0;
 };
 
-static int dio700_detach(struct comedi_device * dev)
+static int dio700_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: ni_daq_700: cs-remove\n", dev->minor);
 
@@ -425,12 +431,12 @@ static int dio700_detach(struct comedi_device * dev)
 	if (thisboard->bustype != pcmcia_bustype && dev->iobase)
 		release_region(dev->iobase, DIO700_SIZE);
 	if (dev->irq)
-		comedi_free_irq(dev->irq, dev);
+		free_irq(dev->irq, dev);
 
 	return 0;
 };
 
-// PCMCIA crap
+/* PCMCIA crap */
 
 /*
    All the PCMCIA modules use PCMCIA_DEBUG to control debugging.  If
@@ -514,7 +520,7 @@ static int dio700_cs_attach(struct pcmcia_device *link)
 	link->priv = local;
 
 	/* Interrupt setup */
-	link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
+	link->irq.Attributes = IRQ_TYPE_DYNAMIC_SHARING;
 	link->irq.IRQInfo1 = IRQ_LEVEL_ID;
 	link->irq.Handler = NULL;
 
@@ -552,7 +558,7 @@ static void dio700_cs_detach(struct pcmcia_device *link)
 	DEBUG(0, "dio700_cs_detach(0x%p)\n", link);
 
 	if (link->dev_node) {
-		((struct local_info_t *) link->priv)->stop = 1;
+		((struct local_info_t *)link->priv)->stop = 1;
 		dio700_release(link);
 	}
 
@@ -594,15 +600,21 @@ static void dio700_config(struct pcmcia_device *link)
 	tuple.TupleData = buf;
 	tuple.TupleDataMax = sizeof(buf);
 	tuple.TupleOffset = 0;
-	if ((last_ret = pcmcia_get_first_tuple(link, &tuple)) != 0) {
+
+	last_ret = pcmcia_get_first_tuple(link, &tuple);
+	if (last_ret) {
 		cs_error(link, GetFirstTuple, last_ret);
 		goto cs_failed;
 	}
-	if ((last_ret = pcmcia_get_tuple_data(link, &tuple)) != 0) {
+
+	last_ret = pcmcia_get_tuple_data(link, &tuple);
+	if (last_ret) {
 		cs_error(link, GetTupleData, last_ret);
 		goto cs_failed;
 	}
-	if ((last_ret = pcmcia_parse_tuple(&tuple, &parse)) != 0) {
+
+	last_ret = pcmcia_parse_tuple(&tuple, &parse);
+	if (last_ret) {
 		cs_error(link, ParseTuple, last_ret);
 		goto cs_failed;
 	}
@@ -622,7 +634,8 @@ static void dio700_config(struct pcmcia_device *link)
 	   will only use the CIS to fill in implementation-defined details.
 	 */
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
-	if ((last_ret = pcmcia_get_first_tuple(link, &tuple)) != 0) {
+	last_ret = pcmcia_get_first_tuple(link, &tuple);
+	if (last_ret != 0) {
 		cs_error(link, GetFirstTuple, last_ret);
 		goto cs_failed;
 	}
@@ -673,7 +686,7 @@ static void dio700_config(struct pcmcia_device *link)
 
 		if ((cfg->mem.nwin > 0) || (dflt.mem.nwin > 0)) {
 			cistpl_mem_t *mem =
-				(cfg->mem.nwin) ? &cfg->mem : &dflt.mem;
+			    (cfg->mem.nwin) ? &cfg->mem : &dflt.mem;
 			req.Attributes = WIN_DATA_WIDTH_16 | WIN_MEMORY_TYPE_CM;
 			req.Attributes |= WIN_ENABLE;
 			req.Base = mem->win[0].host_addr;
@@ -691,8 +704,10 @@ static void dio700_config(struct pcmcia_device *link)
 		/* If we got this far, we're cool! */
 		break;
 
-	      next_entry:
-		if ((last_ret = pcmcia_get_next_tuple(link, &tuple)) != 0) {
+next_entry:
+
+		last_ret = pcmcia_get_next_tuple(link, &tuple);
+		if (last_ret) {
 			cs_error(link, GetNextTuple, last_ret);
 			goto cs_failed;
 		}
@@ -703,18 +718,21 @@ static void dio700_config(struct pcmcia_device *link)
 	   handler to the interrupt, unless the 'Handler' member of the
 	   irq structure is initialized.
 	 */
-	if (link->conf.Attributes & CONF_ENABLE_IRQ)
-		if ((last_ret = pcmcia_request_irq(link, &link->irq)) != 0) {
+	if (link->conf.Attributes & CONF_ENABLE_IRQ) {
+		last_ret = pcmcia_request_irq(link, &link->irq);
+		if (last_ret) {
 			cs_error(link, RequestIRQ, last_ret);
 			goto cs_failed;
 		}
+	}
 
 	/*
 	   This actually configures the PCMCIA socket -- setting up
 	   the I/O windows and the interrupt mapping, and putting the
 	   card and host interface into "Memory and IO" mode.
 	 */
-	if ((last_ret = pcmcia_request_configuration(link, &link->conf)) != 0) {
+	last_ret = pcmcia_request_configuration(link, &link->conf);
+	if (last_ret != 0) {
 		cs_error(link, RequestConfiguration, last_ret);
 		goto cs_failed;
 	}
@@ -729,23 +747,23 @@ static void dio700_config(struct pcmcia_device *link)
 
 	/* Finally, report what we've done */
 	printk(KERN_INFO "%s: index 0x%02x",
-		dev->node.dev_name, link->conf.ConfigIndex);
+	       dev->node.dev_name, link->conf.ConfigIndex);
 	if (link->conf.Attributes & CONF_ENABLE_IRQ)
 		printk(", irq %d", link->irq.AssignedIRQ);
 	if (link->io.NumPorts1)
 		printk(", io 0x%04x-0x%04x", link->io.BasePort1,
-			link->io.BasePort1 + link->io.NumPorts1 - 1);
+		       link->io.BasePort1 + link->io.NumPorts1 - 1);
 	if (link->io.NumPorts2)
 		printk(" & 0x%04x-0x%04x", link->io.BasePort2,
-			link->io.BasePort2 + link->io.NumPorts2 - 1);
+		       link->io.BasePort2 + link->io.NumPorts2 - 1);
 	if (link->win)
 		printk(", mem 0x%06lx-0x%06lx", req.Base,
-			req.Base + req.Size - 1);
+		       req.Base + req.Size - 1);
 	printk("\n");
 
 	return;
 
-      cs_failed:
+cs_failed:
 	printk(KERN_INFO "ni_daq_700 cs failed");
 	dio700_release(link);
 
@@ -806,7 +824,7 @@ struct pcmcia_driver dio700_cs_driver = {
 	.id_table = dio700_cs_ids,
 	.owner = THIS_MODULE,
 	.drv = {
-			.name = dev_info,
+		.name = dev_info,
 		},
 };
 
@@ -823,6 +841,7 @@ static void __exit exit_dio700_cs(void)
 	DEBUG(0, "ni_daq_700: unloading\n");
 	pcmcia_unregister_driver(&dio700_cs_driver);
 }
+
 int __init init_module(void)
 {
 	int ret;

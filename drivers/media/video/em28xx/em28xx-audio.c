@@ -339,6 +339,11 @@ static int snd_em28xx_pcm_close(struct snd_pcm_substream *substream)
 	mutex_lock(&dev->lock);
 	dev->adev.users--;
 	em28xx_audio_analog_set(dev);
+	if (substream->runtime->dma_area) {
+		dprintk("freeing\n");
+		vfree(substream->runtime->dma_area);
+		substream->runtime->dma_area = NULL;
+	}
 	mutex_unlock(&dev->lock);
 
 	return 0;
@@ -378,6 +383,11 @@ static int snd_em28xx_hw_capture_free(struct snd_pcm_substream *substream)
 
 static int snd_em28xx_prepare(struct snd_pcm_substream *substream)
 {
+	struct em28xx *dev = snd_pcm_substream_chip(substream);
+
+	dev->adev.hwptr_done_capture = 0;
+	dev->adev.capture_transfer_done = 0;
+
 	return 0;
 }
 

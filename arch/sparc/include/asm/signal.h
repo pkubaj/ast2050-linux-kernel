@@ -176,7 +176,7 @@ struct sigstack {
 #define SA_STATIC_ALLOC         0x8000
 #endif
 
-#include <asm-generic/signal.h>
+#include <asm-generic/signal-defs.h>
 
 struct __new_sigaction {
 	__sighandler_t		sa_handler;
@@ -191,6 +191,7 @@ struct __old_sigaction {
 	unsigned long		sa_flags;
 	void			(*sa_restorer)(void);  /* not used by Linux/SPARC yet */
 };
+#define __ARCH_HAS_SA_RESTORER
 
 typedef struct sigaltstack {
 	void			__user *ss_sp;

@@ -29,6 +29,7 @@
 #include "tuner-simple.h"
 #include "tda9887.h"
 #include "xc5000.h"
+#include "tda18271.h"
 
 #define UNSET (-1U)
 
@@ -309,32 +310,6 @@ static void set_freq(struct i2c_client *c, unsigned long freq)
 	}
 }
 
-static void tuner_i2c_address_check(struct tuner *t)
-{
-	if ((t->type == UNSET || t->type == TUNER_ABSENT) ||
-	    ((t->i2c->addr < 0x64) || (t->i2c->addr > 0x6f)))
-		return;
-
-	/* We already know that the XC5000 can only be located at
-	 * i2c address 0x61, 0x62, 0x63 or 0x64 */
-	if ((t->type == TUNER_XC5000) &&
-	    ((t->i2c->addr <= 0x64)) && (t->i2c->addr >= 0x61))
-		return;
-
-	tuner_warn("====================== WARNING! ======================\n");
-	tuner_warn("Support for tuners in i2c address range 0x64 thru 0x6f\n");
-	tuner_warn("will soon be dropped. This message indicates that your\n");
-	tuner_warn("hardware has a %s tuner at i2c address 0x%02x.\n",
-		   t->name, t->i2c->addr);
-	tuner_warn("To ensure continued support for your device, please\n");
-	tuner_warn("send a copy of this message, along with full dmesg\n");
-	tuner_warn("output to v4l-dvb-maintainer@linuxtv.org\n");
-	tuner_warn("Please use subject line: \"obsolete tuner i2c address.\"\n");
-	tuner_warn("driver: %s, addr: 0x%02x, type: %d (%s)\n",
-		   t->i2c->adapter->name, t->i2c->addr, t->type, t->name);
-	tuner_warn("====================== WARNING! ======================\n");
-}
-
 static struct xc5000_config xc5000_cfg;
 
 static void set_type(struct i2c_client *c, unsigned int type,
@@ -438,18 +413,23 @@ static void set_type(struct i2c_client *c, unsigned int type,
 		break;
 	case TUNER_XC5000:
 	{
-		struct dvb_tuner_ops *xc_tuner_ops;
-
 		xc5000_cfg.i2c_address	  = t->i2c->addr;
 		/* if_khz will be set when the digital dvb_attach() occurs */
 		xc5000_cfg.if_khz	  = 0;
 		if (!dvb_attach(xc5000_attach,
 				&t->fe, t->i2c->adapter, &xc5000_cfg))
 			goto attach_failed;
+		break;
+	}
+	case TUNER_NXP_TDA18271:
+	{
+		struct tda18271_config cfg = {
+			.config = t->config,
+		};
 
-		xc_tuner_ops = &t->fe.ops.tuner_ops;
-		if (xc_tuner_ops->init)
-			xc_tuner_ops->init(&t->fe);
+		if (!dvb_attach(tda18271_attach, &t->fe, t->i2c->addr,
+				t->i2c->adapter, &cfg))
+			goto attach_failed;
 		break;
 	}
 	default:
@@ -490,7 +470,6 @@ static void set_type(struct i2c_client *c, unsigned int type,
 	tuner_dbg("%s %s I2C addr 0x%02x with type %d used for 0x%02x\n",
 		  c->adapter->name, c->driver->driver.name, c->addr << 1, type,
 		  t->mode_mask);
-	tuner_i2c_address_check(t);
 	return;
 
 attach_failed:
@@ -852,8 +831,8 @@ static int tuner_g_frequency(struct v4l2_subdev *sd, struct v4l2_frequency *f)
 
 		fe_tuner_ops->get_frequency(&t->fe, &abs_freq);
 		f->frequency = (V4L2_TUNER_RADIO == t->mode) ?
-			(abs_freq * 2 + 125/2) / 125 :
-			(abs_freq + 62500/2) / 62500;
+			DIV_ROUND_CLOSEST(abs_freq * 2, 125) :
+			DIV_ROUND_CLOSEST(abs_freq, 62500);
 		return 0;
 	}
 	f->frequency = (V4L2_TUNER_RADIO == t->mode) ?

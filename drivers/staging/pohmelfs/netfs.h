@@ -25,13 +25,13 @@
 #define POHMELFS_CTLINFO_ACK		1
 #define POHMELFS_NOINFO_ACK		2
 
+#define POHMELFS_NULL_IDX		65535
 
 /*
  * Network command structure.
  * Will be extended.
  */
-struct netfs_cmd
-{
+struct netfs_cmd {
 	__u16			cmd;	/* Command number */
 	__u16			csize;	/* Attached crypto information size */
 	__u16			cpad;	/* Attached padding size */
@@ -88,6 +88,8 @@ enum {
 	POHMELFS_FLAGS_SHOW,    /* Network state control message for SHOW */
 	POHMELFS_FLAGS_CRYPTO,	/* Crypto data control message */
 	POHMELFS_FLAGS_MODIFY,	/* Network state modification message */
+	POHMELFS_FLAGS_DUMP,	/* Network state control message for SHOW ALL */
+	POHMELFS_FLAGS_FLUSH,	/* Network state control message for FLUSH */
 };
 
 /*
@@ -96,8 +98,7 @@ enum {
  */
 #define _K_SS_MAXSIZE	128
 
-struct saddr
-{
+struct saddr {
 	unsigned short		sa_family;
 	char			addr[_K_SS_MAXSIZE];
 };
@@ -107,8 +108,7 @@ enum {
 	POHMELFS_CRYPTO_CIPHER,
 };
 
-struct pohmelfs_crypto
-{
+struct pohmelfs_crypto {
 	unsigned int		idx;		/* Config index */
 	unsigned short		strlen;		/* Size of the attached crypto string including 0-byte
 						 * "cbc(aes)" for example */
@@ -123,8 +123,7 @@ struct pohmelfs_crypto
 /*
  * Configuration command used to create table of different remote servers.
  */
-struct pohmelfs_ctl
-{
+struct pohmelfs_ctl {
 	__u32			idx;		/* Config index */
 	__u32			type;		/* Socket type */
 	__u32			proto;		/* Socket protocol */
@@ -137,8 +136,7 @@ struct pohmelfs_ctl
 /*
  * Ack for userspace about requested command.
  */
-struct pohmelfs_cn_ack
-{
+struct pohmelfs_cn_ack {
 	struct cn_msg		msg;
 	int			error;
 	int			msg_num;
@@ -150,8 +148,7 @@ struct pohmelfs_cn_ack
  * Inode info structure used to sync with server.
  * Check what stat() returns.
  */
-struct netfs_inode_info
-{
+struct netfs_inode_info {
 	unsigned int		mode;
 	unsigned int		nlink;
 	unsigned int		uid;
@@ -205,8 +202,7 @@ enum pohmelfs_capabilities {
 /* Extended attributes support on/off */
 #define POHMELFS_FLAGS_XATTR		(1<<1)
 
-struct netfs_root_capabilities
-{
+struct netfs_root_capabilities {
 	__u64			nr_files;
 	__u64			used, avail;
 	__u64			flags;
@@ -220,8 +216,7 @@ static inline void netfs_convert_root_capabilities(struct netfs_root_capabilitie
 	cap->flags = __cpu_to_be64(cap->flags);
 }
 
-struct netfs_crypto_capabilities
-{
+struct netfs_crypto_capabilities {
 	unsigned short		hash_strlen;	/* Hash string length, like "hmac(sha1) including 0 byte "*/
 	unsigned short		cipher_strlen;	/* Cipher string length with the same format */
 	unsigned int		cipher_keysize;	/* Cipher key size */
@@ -241,8 +236,7 @@ enum pohmelfs_lock_type {
 	POHMELFS_WRITE_LOCK,
 };
 
-struct netfs_lock
-{
+struct netfs_lock {
 	__u64			start;
 	__u64			ino;
 	__u32			size;
@@ -268,8 +262,7 @@ static inline void netfs_convert_lock(struct netfs_lock *lock)
 /*
  * Private POHMELFS cache of objects in directory.
  */
-struct pohmelfs_name
-{
+struct pohmelfs_name {
 	struct rb_node		hash_node;
 
 	struct list_head	sync_create_entry;
@@ -286,8 +279,7 @@ struct pohmelfs_name
 /*
  * POHMELFS inode. Main object.
  */
-struct pohmelfs_inode
-{
+struct pohmelfs_inode {
 	struct list_head	inode_entry;		/* Entry in superblock list.
 							 * Objects which are not bound to dentry require to be dropped
 							 * in ->put_super()
@@ -318,8 +310,7 @@ typedef int (* netfs_trans_complete_t)(struct page **pages, unsigned int page_nu
 struct netfs_state;
 struct pohmelfs_sb;
 
-struct netfs_trans
-{
+struct netfs_trans {
 	/*
 	 * Transaction header and attached contiguous data live here.
 	 */
@@ -426,8 +417,7 @@ static inline void netfs_trans_reset(struct netfs_trans *t)
 	t->complete = NULL;
 }
 
-struct netfs_trans_dst
-{
+struct netfs_trans_dst {
 	struct list_head		trans_entry;
 	struct rb_node			state_entry;
 
@@ -456,8 +446,7 @@ int netfs_trans_remove_nolock(struct netfs_trans_dst *dst, struct netfs_state *s
 int netfs_trans_init(void);
 void netfs_trans_exit(void);
 
-struct pohmelfs_crypto_engine
-{
+struct pohmelfs_crypto_engine {
 	u64				iv;		/* Crypto IV for current operation */
 	unsigned long			timeout;	/* Crypto waiting timeout */
 	unsigned int			size;		/* Size of crypto scratchpad */
@@ -474,8 +463,7 @@ struct pohmelfs_crypto_engine
 	unsigned int			page_num;
 };
 
-struct pohmelfs_crypto_thread
-{
+struct pohmelfs_crypto_thread {
 	struct list_head		thread_entry;
 
 	struct task_struct		*thread;
@@ -497,8 +485,7 @@ void pohmelfs_crypto_thread_make_ready(struct pohmelfs_crypto_thread *th);
 /*
  * Network state, attached to one server.
  */
-struct netfs_state
-{
+struct netfs_state {
 	struct mutex		__state_lock;		/* Can not allow to use the same socket simultaneously */
 	struct mutex		__state_send_lock;
 	struct netfs_cmd 	cmd;			/* Cached command */
@@ -580,8 +567,7 @@ static inline unsigned int netfs_state_poll(struct netfs_state *st)
 
 struct pohmelfs_config;
 
-struct pohmelfs_sb
-{
+struct pohmelfs_sb {
 	struct rb_root		mcache_root;
 	struct mutex		mcache_lock;
 	atomic_long_t		mcache_gen;
@@ -718,15 +704,13 @@ static inline void pohmelfs_put_inode(struct pohmelfs_inode *pi)
 	spin_unlock(&psb->ino_lock);
 }
 
-struct pohmelfs_config
-{
+struct pohmelfs_config {
 	struct list_head	config_entry;
 
 	struct netfs_state	state;
 };
 
-struct pohmelfs_config_group
-{
+struct pohmelfs_config_group {
 	/*
 	 * Entry in the global config group list.
 	 */
@@ -814,8 +798,7 @@ void pohmelfs_switch_active(struct pohmelfs_sb *psb);
 int pohmelfs_construct_path_string(struct pohmelfs_inode *pi, void *data, int len);
 int pohmelfs_path_length(struct pohmelfs_inode *pi);
 
-struct pohmelfs_crypto_completion
-{
+struct pohmelfs_crypto_completion {
 	struct completion	complete;
 	int			error;
 };
@@ -864,7 +847,7 @@ static inline int pohmelfs_need_lock(struct pohmelfs_inode *pi, int type)
 int __init pohmelfs_mcache_init(void);
 void pohmelfs_mcache_exit(void);
 
-//#define CONFIG_POHMELFS_DEBUG
+/* #define CONFIG_POHMELFS_DEBUG */
 
 #ifdef CONFIG_POHMELFS_DEBUG
 #define dprintka(f, a...) printk(f, ##a)
@@ -891,8 +874,7 @@ static inline void netfs_trans_put(struct netfs_trans *t)
 	}
 }
 
-struct pohmelfs_mcache
-{
+struct pohmelfs_mcache {
 	struct rb_node			mcache_entry;
 	struct completion		complete;
 
@@ -925,6 +907,8 @@ static inline void pohmelfs_mcache_put(struct pohmelfs_sb *psb,
 	if (atomic_dec_and_test(&m->refcnt))
 		pohmelfs_mcache_free(psb, m);
 }
+
+//#define POHMELFS_TRUNCATE_ON_INODE_FLUSH
 
 #endif /* __KERNEL__*/
 

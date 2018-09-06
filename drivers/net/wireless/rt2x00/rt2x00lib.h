@@ -30,10 +30,8 @@
 
 /*
  * Interval defines
- * Both the link tuner as the rfkill will be called once per second.
  */
-#define LINK_TUNE_INTERVAL	( round_jiffies_relative(HZ) )
-#define RFKILL_POLL_INTERVAL	( 1000 )
+#define LINK_TUNE_INTERVAL	round_jiffies_relative(HZ)
 
 /*
  * rt2x00_rate: Per rate device information
@@ -48,6 +46,7 @@ struct rt2x00_rate {
 	unsigned short ratemask;
 
 	unsigned short plcp;
+	unsigned short mcs;
 };
 
 extern const struct rt2x00_rate rt2x00_supported_rates[12];
@@ -55,6 +54,14 @@ extern const struct rt2x00_rate rt2x00_supported_rates[12];
 static inline const struct rt2x00_rate *rt2x00_get_rate(const u16 hw_value)
 {
 	return &rt2x00_supported_rates[hw_value & 0xff];
+}
+
+#define RATE_MCS(__mode, __mcs) \
+	( (((__mode) & 0x00ff) << 8) | ((__mcs) & 0x00ff) )
+
+static inline int rt2x00_get_rate_mcs(const u16 mcs_value)
+{
+	return (mcs_value & 0x00ff);
 }
 
 /*
@@ -81,7 +88,7 @@ void rt2x00lib_config_erp(struct rt2x00_dev *rt2x00dev,
 			  struct rt2x00_intf *intf,
 			  struct ieee80211_bss_conf *conf);
 void rt2x00lib_config_antenna(struct rt2x00_dev *rt2x00dev,
-			      struct antenna_setup *ant);
+			      struct antenna_setup ant);
 void rt2x00lib_config(struct rt2x00_dev *rt2x00dev,
 		      struct ieee80211_conf *conf,
 		      const unsigned int changed_flags);
@@ -111,6 +118,44 @@ void rt2x00queue_unmap_skb(struct rt2x00_dev *rt2x00dev, struct sk_buff *skb);
  * @skb: The skb to free.
  */
 void rt2x00queue_free_skb(struct rt2x00_dev *rt2x00dev, struct sk_buff *skb);
+
+/**
+ * rt2x00queue_align_frame - Align 802.11 frame to 4-byte boundary
+ * @skb: The skb to align
+ *
+ * Align the start of the 802.11 frame to a 4-byte boundary, this could
+ * mean the payload is not aligned properly though.
+ */
+void rt2x00queue_align_frame(struct sk_buff *skb);
+
+/**
+ * rt2x00queue_align_payload - Align 802.11 payload to 4-byte boundary
+ * @skb: The skb to align
+ * @header_length: Length of 802.11 header
+ *
+ * Align the 802.11 payload to a 4-byte boundary, this could
+ * mean the header is not aligned properly though.
+ */
+void rt2x00queue_align_payload(struct sk_buff *skb, unsigned int header_length);
+
+/**
+ * rt2x00queue_insert_l2pad - Align 802.11 header & payload to 4-byte boundary
+ * @skb: The skb to align
+ * @header_length: Length of 802.11 header
+ *
+ * Apply L2 padding to align both header and payload to 4-byte boundary
+ */
+void rt2x00queue_insert_l2pad(struct sk_buff *skb, unsigned int header_length);
+
+/**
+ * rt2x00queue_insert_l2pad - Remove L2 padding from 802.11 frame
+ * @skb: The skb to align
+ * @header_length: Length of 802.11 header
+ *
+ * Remove L2 padding used to align both header and payload to 4-byte boundary,
+ * by removing the L2 padding the header will no longer be 4-byte aligned.
+ */
+void rt2x00queue_remove_l2pad(struct sk_buff *skb, unsigned int header_length);
 
 /**
  * rt2x00queue_write_tx_frame - Write TX frame to hardware
@@ -235,7 +280,7 @@ void rt2x00link_reset_tuner(struct rt2x00_dev *rt2x00dev, bool antenna);
  * @rt2x00dev: Pointer to &struct rt2x00_dev.
  *
  * Initialize work structure and all link tuning related
- * paramters. This will not start the link tuning process itself.
+ * parameters. This will not start the link tuning process itself.
  */
 void rt2x00link_register(struct rt2x00_dev *rt2x00dev);
 
@@ -295,10 +340,12 @@ void rt2x00crypto_create_tx_descriptor(struct queue_entry *entry,
 				       struct txentry_desc *txdesc);
 unsigned int rt2x00crypto_tx_overhead(struct rt2x00_dev *rt2x00dev,
 				      struct sk_buff *skb);
-void rt2x00crypto_tx_copy_iv(struct sk_buff *skb, unsigned int iv_len);
-void rt2x00crypto_tx_remove_iv(struct sk_buff *skb, unsigned int iv_len);
-void rt2x00crypto_tx_insert_iv(struct sk_buff *skb);
-void rt2x00crypto_rx_insert_iv(struct sk_buff *skb, unsigned int align,
+void rt2x00crypto_tx_copy_iv(struct sk_buff *skb,
+			     struct txentry_desc *txdesc);
+void rt2x00crypto_tx_remove_iv(struct sk_buff *skb,
+			       struct txentry_desc *txdesc);
+void rt2x00crypto_tx_insert_iv(struct sk_buff *skb, unsigned int header_length);
+void rt2x00crypto_rx_insert_iv(struct sk_buff *skb,
 			       unsigned int header_length,
 			       struct rxdone_entry_desc *rxdesc);
 #else
@@ -319,21 +366,21 @@ static inline unsigned int rt2x00crypto_tx_overhead(struct rt2x00_dev *rt2x00dev
 }
 
 static inline void rt2x00crypto_tx_copy_iv(struct sk_buff *skb,
-					   unsigned int iv_len)
+					   struct txentry_desc *txdesc)
 {
 }
 
 static inline void rt2x00crypto_tx_remove_iv(struct sk_buff *skb,
-					     unsigned int iv_len)
+					     struct txentry_desc *txdesc)
 {
 }
 
-static inline void rt2x00crypto_tx_insert_iv(struct sk_buff *skb)
+static inline void rt2x00crypto_tx_insert_iv(struct sk_buff *skb,
+					     unsigned int header_length)
 {
 }
 
 static inline void rt2x00crypto_rx_insert_iv(struct sk_buff *skb,
-					     unsigned int align,
 					     unsigned int header_length,
 					     struct rxdone_entry_desc *rxdesc)
 {
@@ -341,30 +388,34 @@ static inline void rt2x00crypto_rx_insert_iv(struct sk_buff *skb,
 #endif /* CONFIG_RT2X00_LIB_CRYPTO */
 
 /*
+ * HT handlers.
+ */
+#ifdef CONFIG_RT2X00_LIB_HT
+void rt2x00ht_create_tx_descriptor(struct queue_entry *entry,
+				   struct txentry_desc *txdesc,
+				   const struct rt2x00_rate *hwrate);
+#else
+static inline void rt2x00ht_create_tx_descriptor(struct queue_entry *entry,
+						 struct txentry_desc *txdesc,
+						 const struct rt2x00_rate *hwrate)
+{
+}
+#endif /* CONFIG_RT2X00_LIB_HT */
+
+/*
  * RFkill handlers.
  */
-#ifdef CONFIG_RT2X00_LIB_RFKILL
-void rt2x00rfkill_register(struct rt2x00_dev *rt2x00dev);
-void rt2x00rfkill_unregister(struct rt2x00_dev *rt2x00dev);
-void rt2x00rfkill_allocate(struct rt2x00_dev *rt2x00dev);
-void rt2x00rfkill_free(struct rt2x00_dev *rt2x00dev);
-#else
 static inline void rt2x00rfkill_register(struct rt2x00_dev *rt2x00dev)
 {
+	if (test_bit(CONFIG_SUPPORT_HW_BUTTON, &rt2x00dev->flags))
+		wiphy_rfkill_start_polling(rt2x00dev->hw->wiphy);
 }
 
 static inline void rt2x00rfkill_unregister(struct rt2x00_dev *rt2x00dev)
 {
+	if (test_bit(CONFIG_SUPPORT_HW_BUTTON, &rt2x00dev->flags))
+		wiphy_rfkill_stop_polling(rt2x00dev->hw->wiphy);
 }
-
-static inline void rt2x00rfkill_allocate(struct rt2x00_dev *rt2x00dev)
-{
-}
-
-static inline void rt2x00rfkill_free(struct rt2x00_dev *rt2x00dev)
-{
-}
-#endif /* CONFIG_RT2X00_LIB_RFKILL */
 
 /*
  * LED handlers

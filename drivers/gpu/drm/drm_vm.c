@@ -144,14 +144,14 @@ static int drm_do_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		 * Get the page, inc the use count, and return it
 		 */
 		offset = (baddr - agpmem->bound) >> PAGE_SHIFT;
-		page = virt_to_page(__va(agpmem->memory->memory[offset]));
+		page = agpmem->memory->pages[offset];
 		get_page(page);
 		vmf->page = page;
 
 		DRM_DEBUG
 		    ("baddr = 0x%llx page = 0x%p, offset = 0x%llx, count=%d\n",
 		     (unsigned long long)baddr,
-		     __va(agpmem->memory->memory[offset]),
+		     agpmem->memory->pages[offset],
 		     (unsigned long long)offset,
 		     page_count(page));
 		return 0;
@@ -227,7 +227,7 @@ static void drm_vm_shm_close(struct vm_area_struct *vma)
 			found_maps++;
 		if (pt->vma == vma) {
 			list_del(&pt->head);
-			drm_free(pt, sizeof(*pt), DRM_MEM_VMAS);
+			kfree(pt);
 		}
 	}
 
@@ -273,7 +273,7 @@ static void drm_vm_shm_close(struct vm_area_struct *vma)
 				DRM_ERROR("tried to rmmap GEM object\n");
 				break;
 			}
-			drm_free(map, sizeof(*map), DRM_MEM_MAPS);
+			kfree(map);
 		}
 	}
 	mutex_unlock(&dev->struct_mutex);
@@ -369,28 +369,28 @@ static int drm_vm_sg_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 }
 
 /** AGP virtual memory operations */
-static struct vm_operations_struct drm_vm_ops = {
+static const struct vm_operations_struct drm_vm_ops = {
 	.fault = drm_vm_fault,
 	.open = drm_vm_open,
 	.close = drm_vm_close,
 };
 
 /** Shared virtual memory operations */
-static struct vm_operations_struct drm_vm_shm_ops = {
+static const struct vm_operations_struct drm_vm_shm_ops = {
 	.fault = drm_vm_shm_fault,
 	.open = drm_vm_open,
 	.close = drm_vm_shm_close,
 };
 
 /** DMA virtual memory operations */
-static struct vm_operations_struct drm_vm_dma_ops = {
+static const struct vm_operations_struct drm_vm_dma_ops = {
 	.fault = drm_vm_dma_fault,
 	.open = drm_vm_open,
 	.close = drm_vm_close,
 };
 
 /** Scatter-gather virtual memory operations */
-static struct vm_operations_struct drm_vm_sg_ops = {
+static const struct vm_operations_struct drm_vm_sg_ops = {
 	.fault = drm_vm_sg_fault,
 	.open = drm_vm_open,
 	.close = drm_vm_close,
@@ -414,7 +414,7 @@ void drm_vm_open_locked(struct vm_area_struct *vma)
 		  vma->vm_start, vma->vm_end - vma->vm_start);
 	atomic_inc(&dev->vma_count);
 
-	vma_entry = drm_alloc(sizeof(*vma_entry), DRM_MEM_VMAS);
+	vma_entry = kmalloc(sizeof(*vma_entry), GFP_KERNEL);
 	if (vma_entry) {
 		vma_entry->vma = vma;
 		vma_entry->pid = current->pid;
@@ -454,7 +454,7 @@ static void drm_vm_close(struct vm_area_struct *vma)
 	list_for_each_entry_safe(pt, temp, &dev->vmalist, head) {
 		if (pt->vma == vma) {
 			list_del(&pt->head);
-			drm_free(pt, sizeof(*pt), DRM_MEM_VMAS);
+			kfree(pt);
 			break;
 		}
 	}

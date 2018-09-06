@@ -52,9 +52,9 @@ struct aio_iiro_16_board {
 
 static const struct aio_iiro_16_board aio_iiro_16_boards[] = {
 	{
-	      name:	"aio_iiro_16",
-	      di:	16,
-      do_:	16},
+	 .name = "aio_iiro_16",
+	 .di = 16,
+	 .do_ = 16},
 };
 
 #define	thisboard	((const struct aio_iiro_16_board *) dev->board_ptr)
@@ -67,27 +67,33 @@ struct aio_iiro_16_private {
 
 #define	devpriv	((struct aio_iiro_16_private *) dev->private)
 
-static int aio_iiro_16_attach(struct comedi_device * dev, struct comedi_devconfig * it);
+static int aio_iiro_16_attach(struct comedi_device *dev,
+			      struct comedi_devconfig *it);
 
-static int aio_iiro_16_detach(struct comedi_device * dev);
+static int aio_iiro_16_detach(struct comedi_device *dev);
 
 static struct comedi_driver driver_aio_iiro_16 = {
-      driver_name:"aio_iiro_16",
-      module:THIS_MODULE,
-      attach:aio_iiro_16_attach,
-      detach:aio_iiro_16_detach,
-      board_name:&aio_iiro_16_boards[0].name,
-      offset:sizeof(struct aio_iiro_16_board),
-      num_names:sizeof(aio_iiro_16_boards) / sizeof(struct aio_iiro_16_board),
+	.driver_name = "aio_iiro_16",
+	.module = THIS_MODULE,
+	.attach = aio_iiro_16_attach,
+	.detach = aio_iiro_16_detach,
+	.board_name = &aio_iiro_16_boards[0].name,
+	.offset = sizeof(struct aio_iiro_16_board),
+	.num_names = ARRAY_SIZE(aio_iiro_16_boards),
 };
 
-static int aio_iiro_16_dio_insn_bits_read(struct comedi_device * dev,
-	struct comedi_subdevice * s, struct comedi_insn * insn, unsigned int * data);
+static int aio_iiro_16_dio_insn_bits_read(struct comedi_device *dev,
+					  struct comedi_subdevice *s,
+					  struct comedi_insn *insn,
+					  unsigned int *data);
 
-static int aio_iiro_16_dio_insn_bits_write(struct comedi_device * dev,
-	struct comedi_subdevice * s, struct comedi_insn * insn, unsigned int * data);
+static int aio_iiro_16_dio_insn_bits_write(struct comedi_device *dev,
+					   struct comedi_subdevice *s,
+					   struct comedi_insn *insn,
+					   unsigned int *data);
 
-static int aio_iiro_16_attach(struct comedi_device * dev, struct comedi_devconfig * it)
+static int aio_iiro_16_attach(struct comedi_device *dev,
+			      struct comedi_devconfig *it)
 {
 	int iobase;
 	struct comedi_subdevice *s;
@@ -132,7 +138,7 @@ static int aio_iiro_16_attach(struct comedi_device * dev, struct comedi_devconfi
 	return 1;
 }
 
-static int aio_iiro_16_detach(struct comedi_device * dev)
+static int aio_iiro_16_detach(struct comedi_device *dev)
 {
 	printk("comedi%d: aio_iiro_16: remove\n", dev->minor);
 
@@ -142,8 +148,10 @@ static int aio_iiro_16_detach(struct comedi_device * dev)
 	return 0;
 }
 
-static int aio_iiro_16_dio_insn_bits_write(struct comedi_device * dev,
-	struct comedi_subdevice * s, struct comedi_insn * insn, unsigned int * data)
+static int aio_iiro_16_dio_insn_bits_write(struct comedi_device *dev,
+					   struct comedi_subdevice *s,
+					   struct comedi_insn *insn,
+					   unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -153,7 +161,7 @@ static int aio_iiro_16_dio_insn_bits_write(struct comedi_device * dev,
 		s->state |= data[0] & data[1];
 		outb(s->state & 0xff, dev->iobase + AIO_IIRO_16_RELAY_0_7);
 		outb((s->state >> 8) & 0xff,
-			dev->iobase + AIO_IIRO_16_RELAY_8_15);
+		     dev->iobase + AIO_IIRO_16_RELAY_8_15);
 	}
 
 	data[1] = s->state;
@@ -161,8 +169,10 @@ static int aio_iiro_16_dio_insn_bits_write(struct comedi_device * dev,
 	return 2;
 }
 
-static int aio_iiro_16_dio_insn_bits_read(struct comedi_device * dev,
-	struct comedi_subdevice * s, struct comedi_insn * insn, unsigned int * data)
+static int aio_iiro_16_dio_insn_bits_read(struct comedi_device *dev,
+					  struct comedi_subdevice *s,
+					  struct comedi_insn *insn,
+					  unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;

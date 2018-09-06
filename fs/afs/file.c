@@ -134,9 +134,16 @@ static int afs_readpage(struct file *file, struct page *page)
 
 	inode = page->mapping->host;
 
-	ASSERT(file != NULL);
-	key = file->private_data;
-	ASSERT(key != NULL);
+	if (file) {
+		key = file->private_data;
+		ASSERT(key != NULL);
+	} else {
+		key = afs_request_key(AFS_FS_S(inode->i_sb)->volume->cell);
+		if (IS_ERR(key)) {
+			ret = PTR_ERR(key);
+			goto error_nokey;
+		}
+	}
 
 	_enter("{%x},{%lu},{%lu}", key_serial(key), inode->i_ino, page->index);
 
@@ -207,12 +214,17 @@ static int afs_readpage(struct file *file, struct page *page)
 		unlock_page(page);
 	}
 
+	if (!file)
+		key_put(key);
 	_leave(" = 0");
 	return 0;
 
 error:
 	SetPageError(page);
 	unlock_page(page);
+	if (!file)
+		key_put(key);
+error_nokey:
 	_leave(" = %d", ret);
 	return ret;
 }
@@ -303,7 +315,6 @@ static void afs_invalidatepage(struct page *page, unsigned long offset)
 			struct afs_vnode *vnode = AFS_FS_I(page->mapping->host);
 			fscache_wait_on_page_write(vnode->cache, page);
 			fscache_uncache_page(vnode->cache, page);
-			ClearPageFsCache(page);
 		}
 #endif
 
@@ -337,17 +348,9 @@ static int afs_releasepage(struct page *page, gfp_t gfp_flags)
 	/* deny if page is being written to the cache and the caller hasn't
 	 * elected to wait */
 #ifdef CONFIG_AFS_FSCACHE
-	if (PageFsCache(page)) {
-		if (fscache_check_page_write(vnode->cache, page)) {
-			if (!(gfp_flags & __GFP_WAIT)) {
-				_leave(" = F [cache busy]");
-				return 0;
-			}
-			fscache_wait_on_page_write(vnode->cache, page);
-		}
-
-		fscache_uncache_page(vnode->cache, page);
-		ClearPageFsCache(page);
+	if (!fscache_maybe_release_page(vnode->cache, page, gfp_flags)) {
+		_leave(" = F [cache busy]");
+		return 0;
 	}
 #endif
 

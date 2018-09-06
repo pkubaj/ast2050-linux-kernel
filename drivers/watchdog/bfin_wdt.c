@@ -1,9 +1,8 @@
 /*
  * Blackfin On-Chip Watchdog Driver
- *  Supports BF53[123]/BF53[467]/BF54[2489]/BF561
  *
  * Originally based on softdog.c
- * Copyright 2006-2007 Analog Devices Inc.
+ * Copyright 2006-2010 Analog Devices Inc.
  * Copyright 2006-2007 Michele d'Amico
  * Copyright 1996 Alan Cox <alan@lxorguk.ukuu.org.uk>
  *
@@ -27,10 +26,15 @@
 #include <linux/uaccess.h>
 #include <asm/blackfin.h>
 
-#define stamp(fmt, args...) pr_debug("%s:%i: " fmt "\n", __func__, __LINE__, ## args)
+#define stamp(fmt, args...) \
+	pr_debug("%s:%i: " fmt "\n", __func__, __LINE__, ## args)
 #define stampit() stamp("here i am")
-#define pr_devinit(fmt, args...) ({ static const __devinitconst char __fmt[] = fmt; printk(__fmt, ## args); })
-#define pr_init(fmt, args...) ({ static const __initconst char __fmt[] = fmt; printk(__fmt, ## args); })
+#define pr_devinit(fmt, args...) \
+	({ static const __devinitconst char __fmt[] = fmt; \
+	printk(__fmt, ## args); })
+#define pr_init(fmt, args...) \
+	({ static const __initconst char __fmt[] = fmt; \
+	printk(__fmt, ## args); })
 
 #define WATCHDOG_NAME "bfin-wdt"
 #define PFX WATCHDOG_NAME ": "
@@ -132,13 +136,15 @@ static int bfin_wdt_running(void)
  */
 static int bfin_wdt_set_timeout(unsigned long t)
 {
-	u32 cnt;
+	u32 cnt, max_t, sclk;
 	unsigned long flags;
 
-	stampit();
+	sclk = get_sclk();
+	max_t = -1 / sclk;
+	cnt = t * sclk;
+	stamp("maxtimeout=%us newtimeout=%lus (cnt=%#x)", max_t, t, cnt);
 
-	cnt = t * get_sclk();
-	if (cnt < get_sclk()) {
+	if (t > max_t) {
 		printk(KERN_WARNING PFX "timeout value is too large\n");
 		return -EINVAL;
 	}
@@ -476,7 +482,8 @@ static int __init bfin_wdt_init(void)
 		return ret;
 	}
 
-	bfin_wdt_device = platform_device_register_simple(WATCHDOG_NAME, -1, NULL, 0);
+	bfin_wdt_device = platform_device_register_simple(WATCHDOG_NAME,
+								-1, NULL, 0);
 	if (IS_ERR(bfin_wdt_device)) {
 		pr_init(KERN_ERR PFX "unable to register device\n");
 		platform_driver_unregister(&bfin_wdt_driver);

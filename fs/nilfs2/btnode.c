@@ -34,28 +34,18 @@
 #include "btnode.h"
 
 
-void nilfs_btnode_cache_init_once(struct address_space *btnc)
-{
-	memset(btnc, 0, sizeof(*btnc));
-	INIT_RADIX_TREE(&btnc->page_tree, GFP_ATOMIC);
-	spin_lock_init(&btnc->tree_lock);
-	INIT_LIST_HEAD(&btnc->private_list);
-	spin_lock_init(&btnc->private_lock);
+static const struct address_space_operations def_btnode_aops = {
+	.sync_page		= block_sync_page,
+};
 
-	spin_lock_init(&btnc->i_mmap_lock);
-	INIT_RAW_PRIO_TREE_ROOT(&btnc->i_mmap);
-	INIT_LIST_HEAD(&btnc->i_mmap_nonlinear);
-}
-
-static struct address_space_operations def_btnode_aops;
-
-void nilfs_btnode_cache_init(struct address_space *btnc)
+void nilfs_btnode_cache_init(struct address_space *btnc,
+			     struct backing_dev_info *bdi)
 {
 	btnc->host = NULL;  /* can safely set to host inode ? */
 	btnc->flags = 0;
 	mapping_set_gfp_mask(btnc, GFP_NOFS);
 	btnc->assoc_mapping = NULL;
-	btnc->backing_dev_info = &default_backing_dev_info;
+	btnc->backing_dev_info = bdi;
 	btnc->a_ops = &def_btnode_aops;
 }
 
@@ -84,6 +74,7 @@ int nilfs_btnode_submit_block(struct address_space *btnc, __u64 blocknr,
 			brelse(bh);
 			BUG();
 		}
+		memset(bh->b_data, 0, 1 << inode->i_blkbits);
 		bh->b_bdev = NILFS_I_NILFS(inode)->ns_bdev;
 		bh->b_blocknr = blocknr;
 		set_buffer_mapped(bh);
@@ -273,8 +264,7 @@ void nilfs_btnode_commit_change_key(struct address_space *btnc,
 				       "invalid oldkey %lld (newkey=%lld)",
 				       (unsigned long long)oldkey,
 				       (unsigned long long)newkey);
-		if (!test_set_buffer_dirty(obh) && TestSetPageDirty(opage))
-			BUG();
+		nilfs_btnode_mark_dirty(obh);
 
 		spin_lock_irq(&btnc->tree_lock);
 		radix_tree_delete(&btnc->page_tree, oldkey);

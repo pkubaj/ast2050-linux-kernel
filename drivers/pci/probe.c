@@ -193,7 +193,7 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 		res->flags |= pci_calc_resource_flags(l) | IORESOURCE_SIZEALIGN;
 		if (type == pci_bar_io) {
 			l &= PCI_BASE_ADDRESS_IO_MASK;
-			mask = PCI_BASE_ADDRESS_IO_MASK & 0xffff;
+			mask = PCI_BASE_ADDRESS_IO_MASK & IO_SPACE_LIMIT;
 		} else {
 			l &= PCI_BASE_ADDRESS_MEM_MASK;
 			mask = (u32)PCI_BASE_ADDRESS_MEM_MASK;
@@ -235,8 +235,13 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 			res->start = l64;
 			res->end = l64 + sz64;
 			dev_printk(KERN_DEBUG, &dev->dev,
-				"reg %x 64bit mmio: %pR\n", pos, res);
+				"reg %x %s: %pR\n", pos,
+				 (res->flags & IORESOURCE_PREFETCH) ?
+					"64bit mmio pref" : "64bit mmio",
+				 res);
 		}
+
+		res->flags |= IORESOURCE_MEM_64;
 	} else {
 		sz = pci_size(l, sz, mask);
 
@@ -247,7 +252,9 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 		res->end = l + sz;
 
 		dev_printk(KERN_DEBUG, &dev->dev, "reg %x %s: %pR\n", pos,
-			(res->flags & IORESOURCE_IO) ? "io port" : "32bit mmio",
+			(res->flags & IORESOURCE_IO) ? "io port" :
+			 ((res->flags & IORESOURCE_PREFETCH) ?
+				 "32bit mmio pref" : "32bit mmio"),
 			res);
 	}
 
@@ -287,7 +294,7 @@ void __devinit pci_read_bridge_bases(struct pci_bus *child)
 	struct resource *res;
 	int i;
 
-	if (!child->parent)	/* It's a host bus, nothing to read */
+	if (pci_is_root_bus(child))	/* It's a host bus, nothing to read */
 		return;
 
 	if (dev->transparent) {
@@ -362,7 +369,10 @@ void __devinit pci_read_bridge_bases(struct pci_bus *child)
 		}
 	}
 	if (base <= limit) {
-		res->flags = (mem_base_lo & PCI_MEMORY_RANGE_TYPE_MASK) | IORESOURCE_MEM | IORESOURCE_PREFETCH;
+		res->flags = (mem_base_lo & PCI_PREF_RANGE_TYPE_MASK) |
+					 IORESOURCE_MEM | IORESOURCE_PREFETCH;
+		if (res->flags & PCI_PREF_RANGE_TYPE_64)
+			res->flags |= IORESOURCE_MEM_64;
 		res->start = base;
 		res->end = limit + 0xfffff;
 		dev_printk(KERN_DEBUG, &dev->dev, "bridge %sbit mmio pref: %pR\n",
@@ -687,6 +697,23 @@ static void set_pcie_port_type(struct pci_dev *pdev)
 	pdev->pcie_type = (reg16 & PCI_EXP_FLAGS_TYPE) >> 4;
 }
 
+static void set_pcie_hotplug_bridge(struct pci_dev *pdev)
+{
+	int pos;
+	u16 reg16;
+	u32 reg32;
+
+	pos = pci_find_capability(pdev, PCI_CAP_ID_EXP);
+	if (!pos)
+		return;
+	pci_read_config_word(pdev, pos + PCI_EXP_FLAGS, &reg16);
+	if (!(reg16 & PCI_EXP_FLAGS_SLOT))
+		return;
+	pci_read_config_dword(pdev, pos + PCI_EXP_SLTCAP, &reg32);
+	if (reg32 & PCI_EXP_SLTCAP_HPC)
+		pdev->is_hotplug_bridge = 1;
+}
+
 #define LEGACY_IO_RESOURCE	(IORESOURCE_IO | IORESOURCE_PCI_FIXED)
 
 /**
@@ -794,6 +821,7 @@ int pci_setup_device(struct pci_dev *dev)
 		pci_read_irq(dev);
 		dev->transparent = ((dev->class & 0xff) == 1);
 		pci_read_bases(dev, 2, PCI_ROM_ADDRESS1);
+		set_pcie_hotplug_bridge(dev);
 		break;
 
 	case PCI_HEADER_TYPE_CARDBUS:		    /* CardBus bridge header */
@@ -1004,6 +1032,9 @@ void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
 	/* Fix up broken headers */
 	pci_fixup_device(pci_fixup_header, dev);
 
+	/* Clear the state_saved flag. */
+	dev->state_saved = false;
+
 	/* Initialize various capabilities */
 	pci_init_capabilities(dev);
 
@@ -1056,8 +1087,7 @@ int pci_scan_slot(struct pci_bus *bus, int devfn)
 	if (dev && !dev->is_added)	/* new device? */
 		nr++;
 
-	if ((dev && dev->multifunction) ||
-	    (!dev && pcibios_scan_all_fns(bus, devfn))) {
+	if (dev && dev->multifunction) {
 		for (fn = 1; fn < 8; fn++) {
 			dev = pci_scan_single_device(bus, devfn + fn);
 			if (dev) {

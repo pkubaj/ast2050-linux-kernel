@@ -39,7 +39,6 @@ void *traverse_pci_devices(struct device_node *start, traverse_func pre,
 
 extern void pci_devs_phb_init(void);
 extern void pci_devs_phb_init_dynamic(struct pci_controller *phb);
-extern void scan_phb(struct pci_controller *hose);
 
 /* From rtas_pci.h */
 extern void init_pci_config_tokens (void);
@@ -137,6 +136,11 @@ struct device_node * find_device_pe(struct device_node *dn);
 
 void eeh_sysfs_add_device(struct pci_dev *pdev);
 void eeh_sysfs_remove_device(struct pci_dev *pdev);
+
+static inline const char *eeh_pci_name(struct pci_dev *pdev)
+{
+	return pdev ? pci_name(pdev) : "<null>";
+}
 
 #endif /* CONFIG_EEH */
 

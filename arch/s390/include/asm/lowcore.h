@@ -30,6 +30,7 @@
 #define __LC_SUBCHANNEL_NR		0x00ba
 #define __LC_IO_INT_PARM		0x00bc
 #define __LC_IO_INT_WORD		0x00c0
+#define __LC_STFL_FAC_LIST		0x00c8
 #define __LC_MCCK_CODE			0x00e8
 
 #define __LC_DUMP_REIPL			0x0e00
@@ -67,6 +68,7 @@
 #define __LC_CPUID			0x02b0
 #define __LC_INT_CLOCK			0x02c8
 #define __LC_MACHINE_FLAGS		0x02d8
+#define __LC_FTRACE_FUNC		0x02dc
 #define __LC_IRB			0x0300
 #define __LC_PFAULT_INTPARM		0x0080
 #define __LC_CPU_TIMER_SAVE_AREA	0x00d8
@@ -84,6 +86,7 @@
 #define __LC_PGM_OLD_PSW		0x0150
 #define __LC_MCK_OLD_PSW		0x0160
 #define __LC_IO_OLD_PSW			0x0170
+#define __LC_RESTART_PSW		0x01a0
 #define __LC_EXT_NEW_PSW		0x01b0
 #define __LC_SVC_NEW_PSW		0x01c0
 #define __LC_PGM_NEW_PSW		0x01d0
@@ -112,6 +115,7 @@
 #define __LC_INT_CLOCK			0x0340
 #define __LC_VDSO_PER_CPU		0x0350
 #define __LC_MACHINE_FLAGS		0x0358
+#define __LC_FTRACE_FUNC		0x0360
 #define __LC_IRB			0x0380
 #define __LC_PASTE			0x03c0
 #define __LC_PFAULT_INTPARM		0x11b8
@@ -129,7 +133,7 @@
 
 #ifndef __ASSEMBLY__
 
-#include <asm/cpuid.h>
+#include <asm/cpu.h>
 #include <asm/ptrace.h>
 #include <linux/types.h>
 
@@ -185,6 +189,14 @@ union save_area {
 #define SAVE_AREA_SIZE sizeof(struct save_area_s390x)
 #define SAVE_AREA_BASE SAVE_AREA_BASE_S390X
 #endif
+
+#ifndef __s390x__
+#define LC_ORDER 0
+#else
+#define LC_ORDER 1
+#endif
+
+#define LC_PAGES (1UL << LC_ORDER)
 
 struct _lowcore
 {
@@ -272,7 +284,7 @@ struct _lowcore
 	__u32	user_exec_asce;			/* 0x02ac */
 
 	/* SMP info area */
-	cpuid_t	cpu_id;				/* 0x02b0 */
+	struct cpuid cpu_id;			/* 0x02b0 */
 	__u32	cpu_nr;				/* 0x02b8 */
 	__u32	softirq_pending;		/* 0x02bc */
 	__u32	percpu_offset;			/* 0x02c0 */
@@ -280,7 +292,8 @@ struct _lowcore
 	__u64	int_clock;			/* 0x02c8 */
 	__u64	clock_comparator;		/* 0x02d0 */
 	__u32	machine_flags;			/* 0x02d8 */
-	__u8	pad_0x02dc[0x0300-0x02dc];	/* 0x02dc */
+	__u32	ftrace_func;			/* 0x02dc */
+	__u8	pad_0x02f0[0x0300-0x02f0];	/* 0x02f0 */
 
 	/* Interrupt response block */
 	__u8	irb[64];			/* 0x0300 */
@@ -376,7 +389,7 @@ struct _lowcore
 	__u64	user_exec_asce;			/* 0x0318 */
 
 	/* SMP info area */
-	cpuid_t	cpu_id;				/* 0x0320 */
+	struct cpuid cpu_id;			/* 0x0320 */
 	__u32	cpu_nr;				/* 0x0328 */
 	__u32	softirq_pending;		/* 0x032c */
 	__u64	percpu_offset;			/* 0x0330 */
@@ -385,7 +398,8 @@ struct _lowcore
 	__u64	clock_comparator;		/* 0x0348 */
 	__u64	vdso_per_cpu_data;		/* 0x0350 */
 	__u64	machine_flags;			/* 0x0358 */
-	__u8	pad_0x0360[0x0380-0x0360];	/* 0x0360 */
+	__u64	ftrace_func;			/* 0x0360 */
+	__u8	pad_0x0368[0x0380-0x0368];	/* 0x0368 */
 
 	/* Interrupt response block. */
 	__u8	irb[64];			/* 0x0380 */

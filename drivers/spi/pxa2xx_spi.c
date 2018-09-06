@@ -1185,9 +1185,6 @@ static int transfer(struct spi_device *spi, struct spi_message *msg)
 	return 0;
 }
 
-/* the spi->mode bits understood by this driver: */
-#define MODEBITS (SPI_CPOL | SPI_CPHA)
-
 static int setup_cs(struct spi_device *spi, struct chip_data *chip,
 		    struct pxa2xx_spi_chip *chip_info)
 {
@@ -1236,9 +1233,6 @@ static int setup(struct spi_device *spi)
 	uint tx_thres = TX_THRESH_DFLT;
 	uint rx_thres = RX_THRESH_DFLT;
 
-	if (!spi->bits_per_word)
-		spi->bits_per_word = 8;
-
 	if (drv_data->ssp_type != PXA25x_SSP
 		&& (spi->bits_per_word < 4 || spi->bits_per_word > 32)) {
 		dev_err(&spi->dev, "failed setup: ssp_type=%d, bits/wrd=%d "
@@ -1252,12 +1246,6 @@ static int setup(struct spi_device *spi)
 		dev_err(&spi->dev, "failed setup: ssp_type=%d, bits/wrd=%d "
 				"b/w not 4-16 for type PXA25x_SSP\n",
 				drv_data->ssp_type, spi->bits_per_word);
-		return -EINVAL;
-	}
-
-	if (spi->mode & ~MODEBITS) {
-		dev_dbg(&spi->dev, "setup: unsupported mode bits %x\n",
-			spi->mode & ~MODEBITS);
 		return -EINVAL;
 	}
 
@@ -1328,18 +1316,14 @@ static int setup(struct spi_device *spi)
 
 	/* NOTE:  PXA25x_SSP _could_ use external clocking ... */
 	if (drv_data->ssp_type != PXA25x_SSP)
-		dev_dbg(&spi->dev, "%d bits/word, %ld Hz, mode %d, %s\n",
-				spi->bits_per_word,
+		dev_dbg(&spi->dev, "%ld Hz actual, %s\n",
 				clk_get_rate(ssp->clk)
 					/ (1 + ((chip->cr0 & SSCR0_SCR) >> 8)),
-				spi->mode & 0x3,
 				chip->enable_dma ? "DMA" : "PIO");
 	else
-		dev_dbg(&spi->dev, "%d bits/word, %ld Hz, mode %d, %s\n",
-				spi->bits_per_word,
+		dev_dbg(&spi->dev, "%ld Hz actual, %s\n",
 				clk_get_rate(ssp->clk) / 2
 					/ (1 + ((chip->cr0 & SSCR0_SCR) >> 8)),
-				spi->mode & 0x3,
 				chip->enable_dma ? "DMA" : "PIO");
 
 	if (spi->bits_per_word <= 8) {
@@ -1499,6 +1483,9 @@ static int __init pxa2xx_spi_probe(struct platform_device *pdev)
 	drv_data->master_info = platform_info;
 	drv_data->pdev = pdev;
 	drv_data->ssp = ssp;
+
+	/* the spi->mode bits understood by this driver: */
+	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH;
 
 	master->bus_num = pdev->id;
 	master->num_chipselect = platform_info->num_chipselect;
@@ -1681,10 +1668,9 @@ static void pxa2xx_spi_shutdown(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-
-static int pxa2xx_spi_suspend(struct platform_device *pdev, pm_message_t state)
+static int pxa2xx_spi_suspend(struct device *dev)
 {
-	struct driver_data *drv_data = platform_get_drvdata(pdev);
+	struct driver_data *drv_data = dev_get_drvdata(dev);
 	struct ssp_device *ssp = drv_data->ssp;
 	int status = 0;
 
@@ -1697,9 +1683,9 @@ static int pxa2xx_spi_suspend(struct platform_device *pdev, pm_message_t state)
 	return 0;
 }
 
-static int pxa2xx_spi_resume(struct platform_device *pdev)
+static int pxa2xx_spi_resume(struct device *dev)
 {
-	struct driver_data *drv_data = platform_get_drvdata(pdev);
+	struct driver_data *drv_data = dev_get_drvdata(dev);
 	struct ssp_device *ssp = drv_data->ssp;
 	int status = 0;
 
@@ -1716,33 +1702,36 @@ static int pxa2xx_spi_resume(struct platform_device *pdev)
 	/* Start the queue running */
 	status = start_queue(drv_data);
 	if (status != 0) {
-		dev_err(&pdev->dev, "problem starting queue (%d)\n", status);
+		dev_err(dev, "problem starting queue (%d)\n", status);
 		return status;
 	}
 
 	return 0;
 }
-#else
-#define pxa2xx_spi_suspend NULL
-#define pxa2xx_spi_resume NULL
-#endif /* CONFIG_PM */
+
+static struct dev_pm_ops pxa2xx_spi_pm_ops = {
+	.suspend	= pxa2xx_spi_suspend,
+	.resume		= pxa2xx_spi_resume,
+};
+#endif
 
 static struct platform_driver driver = {
 	.driver = {
-		.name = "pxa2xx-spi",
-		.owner = THIS_MODULE,
+		.name	= "pxa2xx-spi",
+		.owner	= THIS_MODULE,
+#ifdef CONFIG_PM
+		.pm	= &pxa2xx_spi_pm_ops,
+#endif
 	},
 	.remove = pxa2xx_spi_remove,
 	.shutdown = pxa2xx_spi_shutdown,
-	.suspend = pxa2xx_spi_suspend,
-	.resume = pxa2xx_spi_resume,
 };
 
 static int __init pxa2xx_spi_init(void)
 {
 	return platform_driver_probe(&driver, pxa2xx_spi_probe);
 }
-module_init(pxa2xx_spi_init);
+subsys_initcall(pxa2xx_spi_init);
 
 static void __exit pxa2xx_spi_exit(void)
 {

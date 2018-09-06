@@ -22,7 +22,6 @@
 #endif
 #define THREAD_SIZE 	(PAGE_SIZE << THREAD_ORDER)
 
-#define STACKFAULT_STACK 0
 #define DOUBLEFAULT_STACK 1
 #define NMI_STACK 0
 #define DEBUG_STACK 0
@@ -54,10 +53,6 @@ extern unsigned int __VMALLOC_RESERVE;
 extern int sysctl_legacy_va_layout;
 
 extern void find_low_pfn_range(void);
-extern unsigned long init_memory_mapping(unsigned long start,
-					 unsigned long end);
-extern void initmem_init(unsigned long, unsigned long);
-extern void free_initmem(void);
 extern void setup_bootmem_allocator(void);
 
 #endif	/* !__ASSEMBLY__ */

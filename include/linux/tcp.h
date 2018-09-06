@@ -233,7 +233,7 @@ struct tcp_request_sock {
 	struct inet_request_sock 	req;
 #ifdef CONFIG_TCP_MD5SIG
 	/* Only used by TCP MD5 Signature so far. */
-	struct tcp_request_sock_ops	*af_specific;
+	const struct tcp_request_sock_ops *af_specific;
 #endif
 	u32			 	rcv_isn;
 	u32			 	snt_isn;
@@ -377,7 +377,7 @@ struct tcp_sock {
 	unsigned int		keepalive_time;	  /* time before keep alive takes place */
 	unsigned int		keepalive_intvl;  /* time interval between keep alive probes */
 
-	unsigned long last_synq_overflow; 
+	int			linger2;
 
 /* Receiver side RTT estimation */
 	struct {
@@ -401,13 +401,11 @@ struct tcp_sock {
 
 #ifdef CONFIG_TCP_MD5SIG
 /* TCP AF-Specific parts; only used by MD5 Signature support so far */
-	struct tcp_sock_af_ops	*af_specific;
+	const struct tcp_sock_af_ops	*af_specific;
 
-/* TCP MD5 Signagure Option information */
+/* TCP MD5 Signature Option information */
 	struct tcp_md5sig_info	*md5sig_info;
 #endif
-
-	int			linger2;
 };
 
 static inline struct tcp_sock *tcp_sk(const struct sock *sk)

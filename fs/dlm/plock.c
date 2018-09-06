@@ -82,7 +82,7 @@ int dlm_posix_lock(dlm_lockspace_t *lockspace, u64 number, struct file *file,
 	if (!ls)
 		return -EINVAL;
 
-	xop = kzalloc(sizeof(*xop), GFP_KERNEL);
+	xop = kzalloc(sizeof(*xop), GFP_NOFS);
 	if (!xop) {
 		rv = -ENOMEM;
 		goto out;
@@ -211,7 +211,7 @@ int dlm_posix_unlock(dlm_lockspace_t *lockspace, u64 number, struct file *file,
 	if (!ls)
 		return -EINVAL;
 
-	op = kzalloc(sizeof(*op), GFP_KERNEL);
+	op = kzalloc(sizeof(*op), GFP_NOFS);
 	if (!op) {
 		rv = -ENOMEM;
 		goto out;
@@ -266,7 +266,7 @@ int dlm_posix_get(dlm_lockspace_t *lockspace, u64 number, struct file *file,
 	if (!ls)
 		return -EINVAL;
 
-	op = kzalloc(sizeof(*op), GFP_KERNEL);
+	op = kzalloc(sizeof(*op), GFP_NOFS);
 	if (!op) {
 		rv = -ENOMEM;
 		goto out;
@@ -353,7 +353,7 @@ static ssize_t dev_write(struct file *file, const char __user *u, size_t count,
 {
 	struct dlm_plock_info info;
 	struct plock_op *op;
-	int found = 0;
+	int found = 0, do_callback = 0;
 
 	if (count != sizeof(info))
 		return -EINVAL;
@@ -366,21 +366,24 @@ static ssize_t dev_write(struct file *file, const char __user *u, size_t count,
 
 	spin_lock(&ops_lock);
 	list_for_each_entry(op, &recv_list, list) {
-		if (op->info.fsid == info.fsid && op->info.number == info.number &&
+		if (op->info.fsid == info.fsid &&
+		    op->info.number == info.number &&
 		    op->info.owner == info.owner) {
+			struct plock_xop *xop = (struct plock_xop *)op;
 			list_del_init(&op->list);
-			found = 1;
-			op->done = 1;
 			memcpy(&op->info, &info, sizeof(info));
+			if (xop->callback)
+				do_callback = 1;
+			else
+				op->done = 1;
+			found = 1;
 			break;
 		}
 	}
 	spin_unlock(&ops_lock);
 
 	if (found) {
-		struct plock_xop *xop;
-		xop = (struct plock_xop *)op;
-		if (xop->callback)
+		if (do_callback)
 			dlm_plock_callback(op);
 		else
 			wake_up(&recv_wq);

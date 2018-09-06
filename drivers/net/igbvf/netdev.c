@@ -58,8 +58,7 @@ static void igbvf_reset_interrupt_capability(struct igbvf_adapter *);
 
 static struct igbvf_info igbvf_vf_info = {
 	.mac                    = e1000_vfadapt,
-	.flags                  = FLAG_HAS_JUMBO_FRAMES
-	                          | FLAG_RX_CSUM_ENABLED,
+	.flags                  = 0,
 	.pba                    = 10,
 	.init_ops               = e1000_init_function_pointers_vf,
 };
@@ -97,8 +96,6 @@ static void igbvf_receive_skb(struct igbvf_adapter *adapter,
 		                         E1000_RXD_SPC_VLAN_MASK);
 	else
 		netif_receive_skb(skb);
-
-	netdev->last_rx = jiffies;
 }
 
 static inline void igbvf_rx_checksum_adv(struct igbvf_adapter *adapter,
@@ -107,8 +104,10 @@ static inline void igbvf_rx_checksum_adv(struct igbvf_adapter *adapter,
 	skb->ip_summed = CHECKSUM_NONE;
 
 	/* Ignore Checksum bit is set or checksum is disabled through ethtool */
-	if ((status_err & E1000_RXD_STAT_IXSM))
+	if ((status_err & E1000_RXD_STAT_IXSM) ||
+	    (adapter->flags & IGBVF_FLAG_RX_CSUM_DISABLED))
 		return;
+
 	/* TCP/UDP checksum error bit is set */
 	if (status_err &
 	    (E1000_RXDEXT_STATERR_TCPE | E1000_RXDEXT_STATERR_IPE)) {
@@ -116,6 +115,7 @@ static inline void igbvf_rx_checksum_adv(struct igbvf_adapter *adapter,
 		adapter->hw_csum_err++;
 		return;
 	}
+
 	/* It must be a TCP or UDP packet with a valid checksum */
 	if (status_err & (E1000_RXD_STAT_TCPCS | E1000_RXD_STAT_UDPCS))
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
@@ -147,7 +147,6 @@ static void igbvf_alloc_rx_buffers(struct igbvf_ring *rx_ring,
 		bufsz = adapter->rx_ps_hdr_size;
 	else
 		bufsz = adapter->rx_buffer_len;
-	bufsz += NET_IP_ALIGN;
 
 	while (cleaned_count--) {
 		rx_desc = IGBVF_RX_DESC_ADV(*rx_ring, i);
@@ -171,7 +170,7 @@ static void igbvf_alloc_rx_buffers(struct igbvf_ring *rx_ring,
 		}
 
 		if (!buffer_info->skb) {
-			skb = netdev_alloc_skb(netdev, bufsz);
+			skb = netdev_alloc_skb(netdev, bufsz + NET_IP_ALIGN);
 			if (!skb) {
 				adapter->alloc_rx_buff_failed++;
 				goto no_buffers;
@@ -284,7 +283,7 @@ static bool igbvf_clean_rx_irq(struct igbvf_adapter *adapter,
 
 		if (!skb_shinfo(skb)->nr_frags) {
 			pci_unmap_single(pdev, buffer_info->dma,
-			                 adapter->rx_ps_hdr_size + NET_IP_ALIGN,
+			                 adapter->rx_ps_hdr_size,
 			                 PCI_DMA_FROMDEVICE);
 			skb_put(skb, hlen);
 		}
@@ -340,8 +339,6 @@ send_up:
 
 		igbvf_receive_skb(adapter, netdev, skb, staterr,
 		                  rx_desc->wb.upper.vlan);
-
-		netdev->last_rx = jiffies;
 
 next_desc:
 		rx_desc->wb.upper.status_error = 0;
@@ -1279,7 +1276,7 @@ static void igbvf_configure_tx(struct igbvf_adapter *adapter)
 	/* Setup the HW Tx Head and Tail descriptor pointers */
 	ew32(TDLEN(0), tx_ring->count * sizeof(union e1000_adv_tx_desc));
 	tdba = tx_ring->dma;
-	ew32(TDBAL(0), (tdba & DMA_32BIT_MASK));
+	ew32(TDBAL(0), (tdba & DMA_BIT_MASK(32)));
 	ew32(TDBAH(0), (tdba >> 32));
 	ew32(TDH(0), 0);
 	ew32(TDT(0), 0);
@@ -1365,7 +1362,7 @@ static void igbvf_configure_rx(struct igbvf_adapter *adapter)
 	 * the Base and Length of the Rx Descriptor Ring
 	 */
 	rdba = rx_ring->dma;
-	ew32(RDBAL(0), (rdba & DMA_32BIT_MASK));
+	ew32(RDBAL(0), (rdba & DMA_BIT_MASK(32)));
 	ew32(RDBAH(0), (rdba >> 32));
 	ew32(RDLEN(0), rx_ring->count * sizeof(union e1000_adv_rx_desc));
 	rx_ring->head = E1000_RDH(0);
@@ -1956,7 +1953,7 @@ static int igbvf_tso(struct igbvf_adapter *adapter,
 		                                         iph->daddr, 0,
 		                                         IPPROTO_TCP,
 		                                         0);
-	} else if (skb_shinfo(skb)->gso_type == SKB_GSO_TCPV6) {
+	} else if (skb_is_gso_v6(skb)) {
 		ipv6_hdr(skb)->payload_len = 0;
 		tcp_hdr(skb)->check = ~csum_ipv6_magic(&ipv6_hdr(skb)->saddr,
 		                                       &ipv6_hdr(skb)->daddr,
@@ -2117,8 +2114,7 @@ static inline int igbvf_tx_map_adv(struct igbvf_adapter *adapter,
 	/* set time_stamp *before* dma to help avoid a possible race */
 	buffer_info->time_stamp = jiffies;
 	buffer_info->next_to_watch = i;
-	buffer_info->dma = map[count];
-	count++;
+	buffer_info->dma = skb_shinfo(skb)->dma_head;
 
 	for (f = 0; f < skb_shinfo(skb)->nr_frags; f++) {
 		struct skb_frag_struct *frag;
@@ -2142,7 +2138,7 @@ static inline int igbvf_tx_map_adv(struct igbvf_adapter *adapter,
 	tx_ring->buffer_info[i].skb = skb;
 	tx_ring->buffer_info[first].next_to_watch = i;
 
-	return count;
+	return count + 1;
 }
 
 static inline void igbvf_tx_queue_adv(struct igbvf_adapter *adapter,
@@ -2204,9 +2200,9 @@ static inline void igbvf_tx_queue_adv(struct igbvf_adapter *adapter,
 	mmiowb();
 }
 
-static int igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
-                                   struct net_device *netdev,
-                                   struct igbvf_ring *tx_ring)
+static netdev_tx_t igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
+					     struct net_device *netdev,
+					     struct igbvf_ring *tx_ring)
 {
 	struct igbvf_adapter *adapter = netdev_priv(netdev);
 	unsigned int first, tx_flags = 0;
@@ -2268,7 +2264,6 @@ static int igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
 	if (count) {
 		igbvf_tx_queue_adv(adapter, tx_ring, tx_flags, count,
 		                   skb->len, hdr_len);
-		netdev->trans_start = jiffies;
 		/* Make sure there is space in the ring for the next send. */
 		igbvf_maybe_stop_tx(netdev, MAX_SKB_FRAGS + 4);
 	} else {
@@ -2280,11 +2275,11 @@ static int igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
 	return NETDEV_TX_OK;
 }
 
-static int igbvf_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t igbvf_xmit_frame(struct sk_buff *skb,
+				    struct net_device *netdev)
 {
 	struct igbvf_adapter *adapter = netdev_priv(netdev);
 	struct igbvf_ring *tx_ring;
-	int retval;
 
 	if (test_bit(__IGBVF_DOWN, &adapter->state)) {
 		dev_kfree_skb_any(skb);
@@ -2293,9 +2288,7 @@ static int igbvf_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 	tx_ring = &adapter->tx_ring[0];
 
-	retval = igbvf_xmit_frame_ring_adv(skb, netdev, tx_ring);
-
-	return retval;
+	return igbvf_xmit_frame_ring_adv(skb, netdev, tx_ring);
 }
 
 /**
@@ -2349,15 +2342,6 @@ static int igbvf_change_mtu(struct net_device *netdev, int new_mtu)
 	if ((new_mtu < 68) || (max_frame > MAX_JUMBO_FRAME_SIZE)) {
 		dev_err(&adapter->pdev->dev, "Invalid MTU setting\n");
 		return -EINVAL;
-	}
-
-	/* Jumbo frame size limits */
-	if (max_frame > ETH_FRAME_LEN + ETH_FCS_LEN) {
-		if (!(adapter->flags & FLAG_HAS_JUMBO_FRAMES)) {
-			dev_err(&adapter->pdev->dev,
-			        "Jumbo Frames not supported.\n");
-			return -EINVAL;
-		}
 	}
 
 #define MAX_STD_JUMBO_FRAME_SIZE 9234
@@ -2521,6 +2505,9 @@ static pci_ers_result_t igbvf_io_error_detected(struct pci_dev *pdev,
 
 	netif_device_detach(netdev);
 
+	if (state == pci_channel_io_perm_failure)
+		return PCI_ERS_RESULT_DISCONNECT;
+
 	if (netif_running(netdev))
 		igbvf_down(adapter);
 	pci_disable_device(pdev);
@@ -2637,15 +2624,16 @@ static int __devinit igbvf_probe(struct pci_dev *pdev,
 		return err;
 
 	pci_using_dac = 0;
-	err = pci_set_dma_mask(pdev, DMA_64BIT_MASK);
+	err = pci_set_dma_mask(pdev, DMA_BIT_MASK(64));
 	if (!err) {
-		err = pci_set_consistent_dma_mask(pdev, DMA_64BIT_MASK);
+		err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
 		if (!err)
 			pci_using_dac = 1;
 	} else {
-		err = pci_set_dma_mask(pdev, DMA_32BIT_MASK);
+		err = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
 		if (err) {
-			err = pci_set_consistent_dma_mask(pdev, DMA_32BIT_MASK);
+			err = pci_set_consistent_dma_mask(pdev,
+							  DMA_BIT_MASK(32));
 			if (err) {
 				dev_err(&pdev->dev, "No usable DMA "
 				        "configuration, aborting\n");

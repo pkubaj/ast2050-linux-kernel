@@ -609,7 +609,7 @@ static int snd_sgio2audio_pcm_hw_params(struct snd_pcm_substream *substream,
 	/* alloc virtual 'dma' area */
 	if (runtime->dma_area)
 		vfree(runtime->dma_area);
-	runtime->dma_area = vmalloc(size);
+	runtime->dma_area = vmalloc_user(size);
 	if (runtime->dma_area == NULL)
 		return -ENOMEM;
 	runtime->dma_bytes = size;
@@ -619,8 +619,7 @@ static int snd_sgio2audio_pcm_hw_params(struct snd_pcm_substream *substream,
 /* hw_free callback */
 static int snd_sgio2audio_pcm_hw_free(struct snd_pcm_substream *substream)
 {
-	if (substream->runtime->dma_area)
-		vfree(substream->runtime->dma_area);
+	vfree(substream->runtime->dma_area);
 	substream->runtime->dma_area = NULL;
 	return 0;
 }
@@ -974,7 +973,7 @@ static int __devinit snd_sgio2audio_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __exit snd_sgio2audio_remove(struct platform_device *pdev)
+static int __devexit snd_sgio2audio_remove(struct platform_device *pdev)
 {
 	struct snd_card *card = platform_get_drvdata(pdev);
 

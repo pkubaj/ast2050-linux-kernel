@@ -1568,7 +1568,8 @@ static void at76_rx_tasklet(unsigned long param)
 
 	at76_dbg(DBG_MAC80211, "calling ieee80211_rx_irqsafe(): %d/%d",
 		 priv->rx_skb->len, priv->rx_skb->data_len);
-	ieee80211_rx_irqsafe(priv->hw, priv->rx_skb, &rx_status);
+	memcpy(IEEE80211_SKB_RXCB(priv->rx_skb), &rx_status, sizeof(rx_status));
+	ieee80211_rx_irqsafe(priv->hw, priv->rx_skb);
 
 	/* Use a new skb for the next receive */
 	priv->rx_skb = NULL;
@@ -1772,6 +1773,9 @@ static void at76_mac80211_stop(struct ieee80211_hw *hw)
 
 	at76_dbg(DBG_MAC80211, "%s()", __func__);
 
+	cancel_delayed_work(&priv->dwork_hw_scan);
+	cancel_work_sync(&priv->work_set_promisc);
+
 	mutex_lock(&priv->mtx);
 
 	if (!priv->device_unplugged) {
@@ -1871,8 +1875,8 @@ static void at76_dwork_hw_scan(struct work_struct *work)
 	/* FIXME: add maximum time for scan to complete */
 
 	if (ret != CMD_STATUS_COMPLETE) {
-		queue_delayed_work(priv->hw->workqueue, &priv->dwork_hw_scan,
-				   SCAN_POLL_INTERVAL);
+		ieee80211_queue_delayed_work(priv->hw, &priv->dwork_hw_scan,
+					     SCAN_POLL_INTERVAL);
 		mutex_unlock(&priv->mtx);
 		return;
 	}
@@ -1933,8 +1937,8 @@ static int at76_hw_scan(struct ieee80211_hw *hw,
 		goto exit;
 	}
 
-	queue_delayed_work(priv->hw->workqueue, &priv->dwork_hw_scan,
-			   SCAN_POLL_INTERVAL);
+	ieee80211_queue_delayed_work(priv->hw, &priv->dwork_hw_scan,
+				     SCAN_POLL_INTERVAL);
 
 exit:
 	mutex_unlock(&priv->mtx);
@@ -1946,9 +1950,8 @@ static int at76_config(struct ieee80211_hw *hw, u32 changed)
 {
 	struct at76_priv *priv = hw->priv;
 
-	at76_dbg(DBG_MAC80211, "%s(): channel %d radio %d",
-		 __func__, hw->conf.channel->hw_value,
-		 hw->conf.radio_enabled);
+	at76_dbg(DBG_MAC80211, "%s(): channel %d",
+		 __func__, hw->conf.channel->hw_value);
 	at76_dbg_dump(DBG_MAC80211, priv->bssid, ETH_ALEN, "bssid:");
 
 	mutex_lock(&priv->mtx);
@@ -1965,13 +1968,18 @@ static int at76_config(struct ieee80211_hw *hw, u32 changed)
 	return 0;
 }
 
-static int at76_config_interface(struct ieee80211_hw *hw,
-				 struct ieee80211_vif *vif,
-				 struct ieee80211_if_conf *conf)
+static void at76_bss_info_changed(struct ieee80211_hw *hw,
+				  struct ieee80211_vif *vif,
+				  struct ieee80211_bss_conf *conf,
+				  u32 changed)
 {
 	struct at76_priv *priv = hw->priv;
 
 	at76_dbg(DBG_MAC80211, "%s():", __func__);
+
+	if (!(changed & BSS_CHANGED_BSSID))
+		return;
+
 	at76_dbg_dump(DBG_MAC80211, conf->bssid, ETH_ALEN, "bssid:");
 
 	mutex_lock(&priv->mtx);
@@ -1983,22 +1991,19 @@ static int at76_config_interface(struct ieee80211_hw *hw,
 		at76_join(priv);
 
 	mutex_unlock(&priv->mtx);
-
-	return 0;
 }
 
 /* must be atomic */
 static void at76_configure_filter(struct ieee80211_hw *hw,
 				  unsigned int changed_flags,
-				  unsigned int *total_flags, int mc_count,
-				  struct dev_addr_list *mc_list)
+				  unsigned int *total_flags, u64 multicast)
 {
 	struct at76_priv *priv = hw->priv;
 	int flags;
 
 	at76_dbg(DBG_MAC80211, "%s(): changed_flags=0x%08x "
-		 "total_flags=0x%08x mc_count=%d",
-		 __func__, changed_flags, *total_flags, mc_count);
+		 "total_flags=0x%08x",
+		 __func__, changed_flags, *total_flags);
 
 	flags = changed_flags & AT76_SUPPORTED_FILTERS;
 	*total_flags = AT76_SUPPORTED_FILTERS;
@@ -2020,7 +2025,7 @@ static void at76_configure_filter(struct ieee80211_hw *hw,
 	} else
 		return;
 
-	queue_work(hw->workqueue, &priv->work_set_promisc);
+	ieee80211_queue_work(hw, &priv->work_set_promisc);
 }
 
 static int at76_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
@@ -2076,7 +2081,7 @@ static const struct ieee80211_ops at76_ops = {
 	.add_interface = at76_add_interface,
 	.remove_interface = at76_remove_interface,
 	.config = at76_config,
-	.config_interface = at76_config_interface,
+	.bss_info_changed = at76_bss_info_changed,
 	.configure_filter = at76_configure_filter,
 	.start = at76_mac80211_start,
 	.stop = at76_mac80211_stop,
@@ -2250,6 +2255,7 @@ static int at76_init_new_device(struct at76_priv *priv,
 
 	/* mac80211 initialisation */
 	priv->hw->wiphy->max_scan_ssids = 1;
+	priv->hw->wiphy->max_scan_ie_len = 0;
 	priv->hw->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION);
 	priv->hw->wiphy->bands[IEEE80211_BAND_2GHZ] = &at76_supported_band;
 	priv->hw->flags = IEEE80211_HW_RX_INCLUDES_FCS |
@@ -2290,11 +2296,8 @@ static void at76_delete_device(struct at76_priv *priv)
 
 	tasklet_kill(&priv->rx_tasklet);
 
-	if (priv->mac80211_registered) {
-		cancel_delayed_work(&priv->dwork_hw_scan);
-		flush_workqueue(priv->hw->workqueue);
+	if (priv->mac80211_registered)
 		ieee80211_unregister_hw(priv->hw);
-	}
 
 	if (priv->tx_urb) {
 		usb_kill_urb(priv->tx_urb);
@@ -2311,8 +2314,7 @@ static void at76_delete_device(struct at76_priv *priv)
 
 	del_timer_sync(&ledtrig_tx_timer);
 
-	if (priv->rx_skb)
-		kfree_skb(priv->rx_skb);
+	kfree_skb(priv->rx_skb);
 
 	usb_put_dev(priv->udev);
 

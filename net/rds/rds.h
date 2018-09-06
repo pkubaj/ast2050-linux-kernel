@@ -132,7 +132,7 @@ struct rds_connection {
 #define RDS_FLAG_CONG_BITMAP	0x01
 #define RDS_FLAG_ACK_REQUIRED	0x02
 #define RDS_FLAG_RETRANSMITTED	0x04
-#define RDS_MAX_ADV_CREDIT	127
+#define RDS_MAX_ADV_CREDIT	255
 
 /*
  * Maximum space available for extension headers.
@@ -311,11 +311,17 @@ struct rds_notifier {
  * 		   flag and header.
  */
 
+#define RDS_TRANS_IB	0
+#define RDS_TRANS_IWARP	1
+#define RDS_TRANS_TCP	2
+#define RDS_TRANS_COUNT	3
+
 struct rds_transport {
 	char			t_name[TRANSNAMSIZ];
 	struct list_head	t_item;
 	struct module		*t_owner;
 	unsigned int		t_prefer_loopback:1;
+	unsigned int		t_type;
 
 	int (*laddr_check)(__be32 addr);
 	int (*conn_alloc)(struct rds_connection *conn, gfp_t gfp);
@@ -652,7 +658,8 @@ DECLARE_PER_CPU_SHARED_ALIGNED(struct rds_statistics, rds_stats);
 int __init rds_stats_init(void);
 void rds_stats_exit(void);
 void rds_stats_info_copy(struct rds_info_iterator *iter,
-			 uint64_t *values, char **names, size_t nr);
+			 uint64_t *values, const char *const *names,
+			 size_t nr);
 
 /* sysctl.c */
 int __init rds_sysctl_init(void);

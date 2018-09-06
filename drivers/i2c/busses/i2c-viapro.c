@@ -37,6 +37,7 @@
    VT8251             0x3287             yes
    CX700              0x8324             yes
    VX800/VX820        0x8353             yes
+   VX855/VX875        0x8409             yes
 
    Note: we assume there can only be one device, with one SMBus interface.
 */
@@ -329,7 +330,7 @@ static int __devinit vt596_probe(struct pci_dev *pdev,
 				 const struct pci_device_id *id)
 {
 	unsigned char temp;
-	int error = -ENODEV;
+	int error;
 
 	/* Determine the address of the SMBus areas */
 	if (force_addr) {
@@ -364,7 +365,7 @@ static int __devinit vt596_probe(struct pci_dev *pdev,
 found:
 	error = acpi_check_region(vt596_smba, 8, vt596_driver.name);
 	if (error)
-		return error;
+		return -ENODEV;
 
 	if (!request_region(vt596_smba, 8, vt596_driver.name)) {
 		dev_err(&pdev->dev, "SMBus region 0x%x already in use!\n",
@@ -395,6 +396,7 @@ found:
 			dev_err(&pdev->dev, "SMBUS: Error: Host SMBus "
 				"controller not enabled! - upgrade BIOS or "
 				"use force=1\n");
+			error = -ENODEV;
 			goto release_region;
 		}
 	}
@@ -404,6 +406,7 @@ found:
 	switch (pdev->device) {
 	case PCI_DEVICE_ID_VIA_CX700:
 	case PCI_DEVICE_ID_VIA_VX800:
+	case PCI_DEVICE_ID_VIA_VX855:
 	case PCI_DEVICE_ID_VIA_8251:
 	case PCI_DEVICE_ID_VIA_8237:
 	case PCI_DEVICE_ID_VIA_8237A:
@@ -426,9 +429,11 @@ found:
 		 "SMBus Via Pro adapter at %04x", vt596_smba);
 
 	vt596_pdev = pci_dev_get(pdev);
-	if (i2c_add_adapter(&vt596_adapter)) {
+	error = i2c_add_adapter(&vt596_adapter);
+	if (error) {
 		pci_dev_put(vt596_pdev);
 		vt596_pdev = NULL;
+		goto release_region;
 	}
 
 	/* Always return failure here.  This is to allow other drivers to bind
@@ -468,6 +473,8 @@ static struct pci_device_id vt596_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_CX700),
 	  .driver_data = SMBBA3 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_VX800),
+	  .driver_data = SMBBA3 },
+	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_VX855),
 	  .driver_data = SMBBA3 },
 	{ 0, }
 };

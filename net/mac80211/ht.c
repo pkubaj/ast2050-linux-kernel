@@ -14,7 +14,6 @@
  */
 
 #include <linux/ieee80211.h>
-#include <net/wireless.h>
 #include <net/mac80211.h>
 #include "ieee80211_i.h"
 #include "rate.h"
@@ -83,89 +82,6 @@ void ieee80211_ht_cap_ie_to_sta_ht_cap(struct ieee80211_supported_band *sband,
 		ht_cap->mcs.rx_mask[32/8] |= 1;
 }
 
-/*
- * ieee80211_enable_ht should be called only after the operating band
- * has been determined as ht configuration depends on the hw's
- * HT abilities for a specific band.
- */
-u32 ieee80211_enable_ht(struct ieee80211_sub_if_data *sdata,
-			struct ieee80211_ht_info *hti,
-			u16 ap_ht_cap_flags)
-{
-	struct ieee80211_local *local = sdata->local;
-	struct ieee80211_supported_band *sband;
-	struct ieee80211_if_managed *ifmgd = &sdata->u.mgd;
-	struct ieee80211_bss_ht_conf ht;
-	struct sta_info *sta;
-	u32 changed = 0;
-	bool enable_ht = true, ht_changed;
-	enum nl80211_channel_type channel_type = NL80211_CHAN_NO_HT;
-
-	sband = local->hw.wiphy->bands[local->hw.conf.channel->band];
-
-	memset(&ht, 0, sizeof(ht));
-
-	/* HT is not supported */
-	if (!sband->ht_cap.ht_supported)
-		enable_ht = false;
-
-	/* check that channel matches the right operating channel */
-	if (local->hw.conf.channel->center_freq !=
-	    ieee80211_channel_to_frequency(hti->control_chan))
-		enable_ht = false;
-
-	if (enable_ht) {
-		channel_type = NL80211_CHAN_HT20;
-
-		if (!(ap_ht_cap_flags & IEEE80211_HT_CAP_40MHZ_INTOLERANT) &&
-		    (sband->ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40) &&
-		    (hti->ht_param & IEEE80211_HT_PARAM_CHAN_WIDTH_ANY)) {
-			switch(hti->ht_param & IEEE80211_HT_PARAM_CHA_SEC_OFFSET) {
-			case IEEE80211_HT_PARAM_CHA_SEC_ABOVE:
-				channel_type = NL80211_CHAN_HT40PLUS;
-				break;
-			case IEEE80211_HT_PARAM_CHA_SEC_BELOW:
-				channel_type = NL80211_CHAN_HT40MINUS;
-				break;
-			}
-		}
-	}
-
-	ht_changed = conf_is_ht(&local->hw.conf) != enable_ht ||
-		     channel_type != local->hw.conf.channel_type;
-
-	local->oper_channel_type = channel_type;
-
-	if (ht_changed) {
-                /* channel_type change automatically detected */
-		ieee80211_hw_config(local, 0);
-
-		rcu_read_lock();
-
-		sta = sta_info_get(local, ifmgd->bssid);
-		if (sta)
-			rate_control_rate_update(local, sband, sta,
-						 IEEE80211_RC_HT_CHANGED);
-
-		rcu_read_unlock();
-
-        }
-
-	/* disable HT */
-	if (!enable_ht)
-		return 0;
-
-	ht.operation_mode = le16_to_cpu(hti->operation_mode);
-
-	/* if bss configuration changed store the new one */
-	if (memcmp(&sdata->vif.bss_conf.ht, &ht, sizeof(ht))) {
-		changed |= BSS_CHANGED_HT;
-		sdata->vif.bss_conf.ht = ht;
-	}
-
-	return changed;
-}
-
 void ieee80211_sta_tear_down_BA_sessions(struct sta_info *sta)
 {
 	int i;
@@ -225,7 +141,6 @@ void ieee80211_process_delba(struct ieee80211_sub_if_data *sdata,
 			     struct sta_info *sta,
 			     struct ieee80211_mgmt *mgmt, size_t len)
 {
-	struct ieee80211_local *local = sdata->local;
 	u16 tid, params;
 	u16 initiator;
 
@@ -237,7 +152,7 @@ void ieee80211_process_delba(struct ieee80211_sub_if_data *sdata,
 	if (net_ratelimit())
 		printk(KERN_DEBUG "delba from %pM (%s) tid %d reason code %d\n",
 			mgmt->sa, initiator ? "initiator" : "recipient", tid,
-			mgmt->u.action.u.delba.reason_code);
+			le16_to_cpu(mgmt->u.action.u.delba.reason_code));
 #endif /* CONFIG_MAC80211_HT_DEBUG */
 
 	if (initiator == WLAN_BACK_INITIATOR)
@@ -245,10 +160,9 @@ void ieee80211_process_delba(struct ieee80211_sub_if_data *sdata,
 						 WLAN_BACK_INITIATOR, 0);
 	else { /* WLAN_BACK_RECIPIENT */
 		spin_lock_bh(&sta->lock);
-		sta->ampdu_mlme.tid_state_tx[tid] =
-				HT_AGG_STATE_OPERATIONAL;
+		if (sta->ampdu_mlme.tid_state_tx[tid] & HT_ADDBA_REQUESTED_MSK)
+			___ieee80211_stop_tx_ba_session(sta, tid,
+							WLAN_BACK_RECIPIENT);
 		spin_unlock_bh(&sta->lock);
-		ieee80211_stop_tx_ba_session(&local->hw, sta->sta.addr, tid,
-					     WLAN_BACK_RECIPIENT);
 	}
 }

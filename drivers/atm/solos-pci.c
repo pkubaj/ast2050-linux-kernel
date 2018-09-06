@@ -59,21 +59,29 @@
 #define RX_DMA_ADDR(port)	(0x30 + (4 * (port)))
 
 #define DATA_RAM_SIZE	32768
-#define BUF_SIZE	4096
+#define BUF_SIZE	2048
+#define OLD_BUF_SIZE	4096 /* For FPGA versions <= 2*/
 #define FPGA_PAGE	528 /* FPGA flash page size*/
 #define SOLOS_PAGE	512 /* Solos flash page size*/
 #define FPGA_BLOCK	(FPGA_PAGE * 8) /* FPGA flash block size*/
 #define SOLOS_BLOCK	(SOLOS_PAGE * 8) /* Solos flash block size*/
 
-#define RX_BUF(card, nr) ((card->buffers) + (nr)*BUF_SIZE*2)
-#define TX_BUF(card, nr) ((card->buffers) + (nr)*BUF_SIZE*2 + BUF_SIZE)
+#define RX_BUF(card, nr) ((card->buffers) + (nr)*(card->buffer_size)*2)
+#define TX_BUF(card, nr) ((card->buffers) + (nr)*(card->buffer_size)*2 + (card->buffer_size))
+#define FLASH_BUF ((card->buffers) + 4*(card->buffer_size)*2)
 
 #define RX_DMA_SIZE	2048
+
+#define FPGA_VERSION(a,b) (((a) << 8) + (b))
+#define LEGACY_BUFFERS	2
+#define DMA_SUPPORTED	4
 
 static int reset = 0;
 static int atmdebug = 0;
 static int firmware_upgrade = 0;
 static int fpga_upgrade = 0;
+static int db_firmware_upgrade = 0;
+static int db_fpga_upgrade = 0;
 
 struct pkt_hdr {
 	__le16 size;
@@ -116,6 +124,8 @@ struct solos_card {
 	wait_queue_head_t param_wq;
 	wait_queue_head_t fw_wq;
 	int using_dma;
+	int fpga_version;
+	int buffer_size;
 };
 
 
@@ -136,10 +146,14 @@ MODULE_PARM_DESC(reset, "Reset Solos chips on startup");
 MODULE_PARM_DESC(atmdebug, "Print ATM data");
 MODULE_PARM_DESC(firmware_upgrade, "Initiate Solos firmware upgrade");
 MODULE_PARM_DESC(fpga_upgrade, "Initiate FPGA upgrade");
+MODULE_PARM_DESC(db_firmware_upgrade, "Initiate daughter board Solos firmware upgrade");
+MODULE_PARM_DESC(db_fpga_upgrade, "Initiate daughter board FPGA upgrade");
 module_param(reset, int, 0444);
 module_param(atmdebug, int, 0644);
 module_param(firmware_upgrade, int, 0444);
 module_param(fpga_upgrade, int, 0444);
+module_param(db_firmware_upgrade, int, 0444);
+module_param(db_fpga_upgrade, int, 0444);
 
 static void fpga_queue(struct solos_card *card, int port, struct sk_buff *skb,
 		       struct atm_vcc *vcc);
@@ -372,7 +386,7 @@ static int process_status(struct solos_card *card, int port, struct sk_buff *skb
 	}
 
 	snr = next_string(skb);
-	if (!str)
+	if (!snr)
 		return -EIO;
 	attn = next_string(skb);
 	if (!attn)
@@ -517,9 +531,31 @@ static int flash_upgrade(struct solos_card *card, int chip)
 	if (chip == 0) {
 		fw_name = "solos-FPGA.bin";
 		blocksize = FPGA_BLOCK;
-	} else {
+	} 
+	
+	if (chip == 1) {
 		fw_name = "solos-Firmware.bin";
 		blocksize = SOLOS_BLOCK;
+	}
+	
+	if (chip == 2){
+		if (card->fpga_version > LEGACY_BUFFERS){
+			fw_name = "solos-db-FPGA.bin";
+			blocksize = FPGA_BLOCK;
+		} else {
+			dev_info(&card->dev->dev, "FPGA version doesn't support daughter board upgrades\n");
+			return -EPERM;
+		}
+	}
+	
+	if (chip == 3){
+		if (card->fpga_version > LEGACY_BUFFERS){
+			fw_name = "solos-Firmware.bin";
+			blocksize = SOLOS_BLOCK;
+		} else {
+		dev_info(&card->dev->dev, "FPGA version doesn't support daughter board upgrades\n");
+		return -EPERM;
+		}
 	}
 
 	if (request_firmware(&fw, fw_name, &card->dev->dev))
@@ -536,8 +572,10 @@ static int flash_upgrade(struct solos_card *card, int chip)
 	data32 = ioread32(card->config_regs + FPGA_MODE); 
 
 	/* Set mode to Chip Erase */
-	dev_info(&card->dev->dev, "Set FPGA Flash mode to %s Chip Erase\n",
-		 chip?"Solos":"FPGA");
+	if(chip == 0 || chip == 2)
+		dev_info(&card->dev->dev, "Set FPGA Flash mode to FPGA Chip Erase\n");
+	if(chip == 1 || chip == 3)
+		dev_info(&card->dev->dev, "Set FPGA Flash mode to Solos Chip Erase\n");
 	iowrite32((chip * 2), card->config_regs + FLASH_MODE);
 
 
@@ -557,7 +595,10 @@ static int flash_upgrade(struct solos_card *card, int chip)
 		/* Copy block to buffer, swapping each 16 bits */
 		for(i = 0; i < blocksize; i += 4) {
 			uint32_t word = swahb32p((uint32_t *)(fw->data + offset + i));
-			iowrite32(word, RX_BUF(card, 3) + i);
+			if(card->fpga_version > LEGACY_BUFFERS)
+				iowrite32(word, FLASH_BUF + i);
+			else
+				iowrite32(word, RX_BUF(card, 3) + i);
 		}
 
 		/* Specify block number and then trigger flash write */
@@ -630,6 +671,10 @@ void solos_bh(unsigned long card_arg)
 				memcpy_fromio(header, RX_BUF(card, port), sizeof(*header));
 
 				size = le16_to_cpu(header->size);
+				if (size > (card->buffer_size - sizeof(*header))){
+					dev_warn(&card->dev->dev, "Invalid buffer size\n");
+					continue;
+				}
 
 				skb = alloc_skb(size + 1, GFP_ATOMIC);
 				if (!skb) {
@@ -643,7 +688,7 @@ void solos_bh(unsigned long card_arg)
 					      size);
 			}
 			if (atmdebug) {
-				dev_info(&card->dev->dev, "Received: device %d\n", port);
+				dev_info(&card->dev->dev, "Received: port %d\n", port);
 				dev_info(&card->dev->dev, "size: %d VPI: %d VCI: %d\n",
 					 size, le16_to_cpu(header->vpi),
 					 le16_to_cpu(header->vci));
@@ -729,7 +774,8 @@ static struct atm_vcc *find_vcc(struct atm_dev *dev, short vpi, int vci)
 	sk_for_each(s, node, head) {
 		vcc = atm_sk(s);
 		if (vcc->dev == dev && vcc->vci == vci &&
-		    vcc->vpi == vpi && vcc->qos.rxtp.traffic_class != ATM_NONE)
+		    vcc->vpi == vpi && vcc->qos.rxtp.traffic_class != ATM_NONE &&
+		    test_bit(ATM_VF_READY, &vcc->flags))
 			goto out;
 	}
 	vcc = NULL;
@@ -855,6 +901,10 @@ static void pclose(struct atm_vcc *vcc)
 	clear_bit(ATM_VF_ADDR, &vcc->flags);
 	clear_bit(ATM_VF_READY, &vcc->flags);
 
+	/* Hold up vcc_destroy_socket() (our caller) until solos_bh() in the
+	   tasklet has finished processing any incoming packets (and, more to
+	   the point, using the vcc pointer). */
+	tasklet_unlock_wait(&card->tlet);
 	return;
 }
 
@@ -958,8 +1008,15 @@ static uint32_t fpga_tx(struct solos_card *card)
 
 			/* Clean up and free oldskb now it's gone */
 			if (atmdebug) {
+				struct pkt_hdr *header = (void *)oldskb->data;
+				int size = le16_to_cpu(header->size);
+
+				skb_pull(oldskb, sizeof(*header));
 				dev_info(&card->dev->dev, "Transmitted: port %d\n",
 					 port);
+				dev_info(&card->dev->dev, "size: %d VPI: %d VCI: %d\n",
+					 size, le16_to_cpu(header->vpi),
+					 le16_to_cpu(header->vci));
 				print_buffer(oldskb);
 			}
 
@@ -1094,12 +1151,18 @@ static int fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	fpga_ver = (data32 & 0x0000FFFF);
 	major_ver = ((data32 & 0xFF000000) >> 24);
 	minor_ver = ((data32 & 0x00FF0000) >> 16);
+	card->fpga_version = FPGA_VERSION(major_ver,minor_ver);
+	if (card->fpga_version > LEGACY_BUFFERS)
+		card->buffer_size = BUF_SIZE;
+	else
+		card->buffer_size = OLD_BUF_SIZE;
 	dev_info(&dev->dev, "Solos FPGA Version %d.%02d svn-%d\n",
 		 major_ver, minor_ver, fpga_ver);
 
-	if (0 && fpga_ver > 27)
+	if (card->fpga_version >= DMA_SUPPORTED){
 		card->using_dma = 1;
-	else {
+	} else {
+		card->using_dma = 0;
 		/* Set RX empty flag for all ports */
 		iowrite32(0xF0, card->config_regs + FLAGS_ADDR);
 	}
@@ -1130,6 +1193,12 @@ static int fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	if (firmware_upgrade)
 		flash_upgrade(card, 1);
+
+	if (db_fpga_upgrade)
+		flash_upgrade(card, 2);
+
+	if (db_firmware_upgrade)
+		flash_upgrade(card, 3);
 
 	err = atm_init(card);
 	if (err)

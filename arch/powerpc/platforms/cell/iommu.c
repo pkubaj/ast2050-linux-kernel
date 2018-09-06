@@ -100,16 +100,6 @@
 #define IOSTE_PS_1M		0x0000000000000005ul /*   - 1MB  */
 #define IOSTE_PS_16M		0x0000000000000007ul /*   - 16MB */
 
-/* Page table entries */
-#define IOPTE_PP_W		0x8000000000000000ul /* protection: write */
-#define IOPTE_PP_R		0x4000000000000000ul /* protection: read */
-#define IOPTE_M			0x2000000000000000ul /* coherency required */
-#define IOPTE_SO_R		0x1000000000000000ul /* ordering: writes */
-#define IOPTE_SO_RW             0x1800000000000000ul /* ordering: r & w */
-#define IOPTE_RPN_Mask		0x07fffffffffff000ul /* RPN */
-#define IOPTE_H			0x0000000000000800ul /* cache hint */
-#define IOPTE_IOID_Mask		0x00000000000007fful /* ioid */
-
 
 /* IOMMU sizing */
 #define IO_SEGMENT_SHIFT	28
@@ -193,19 +183,21 @@ static int tce_build_cell(struct iommu_table *tbl, long index, long npages,
 	 */
 	const unsigned long prot = 0xc48;
 	base_pte =
-		((prot << (52 + 4 * direction)) & (IOPTE_PP_W | IOPTE_PP_R))
-		| IOPTE_M | IOPTE_SO_RW | (window->ioid & IOPTE_IOID_Mask);
+		((prot << (52 + 4 * direction)) &
+		 (CBE_IOPTE_PP_W | CBE_IOPTE_PP_R)) |
+		CBE_IOPTE_M | CBE_IOPTE_SO_RW |
+		(window->ioid & CBE_IOPTE_IOID_Mask);
 #else
-	base_pte = IOPTE_PP_W | IOPTE_PP_R | IOPTE_M | IOPTE_SO_RW |
-		(window->ioid & IOPTE_IOID_Mask);
+	base_pte = CBE_IOPTE_PP_W | CBE_IOPTE_PP_R | CBE_IOPTE_M |
+		CBE_IOPTE_SO_RW | (window->ioid & CBE_IOPTE_IOID_Mask);
 #endif
 	if (unlikely(dma_get_attr(DMA_ATTR_WEAK_ORDERING, attrs)))
-		base_pte &= ~IOPTE_SO_RW;
+		base_pte &= ~CBE_IOPTE_SO_RW;
 
 	io_pte = (unsigned long *)tbl->it_base + (index - tbl->it_offset);
 
 	for (i = 0; i < npages; i++, uaddr += IOMMU_PAGE_SIZE)
-		io_pte[i] = base_pte | (__pa(uaddr) & IOPTE_RPN_Mask);
+		io_pte[i] = base_pte | (__pa(uaddr) & CBE_IOPTE_RPN_Mask);
 
 	mb();
 
@@ -231,8 +223,9 @@ static void tce_free_cell(struct iommu_table *tbl, long index, long npages)
 #else
 	/* spider bridge does PCI reads after freeing - insert a mapping
 	 * to a scratch page instead of an invalid entry */
-	pte = IOPTE_PP_R | IOPTE_M | IOPTE_SO_RW | __pa(window->iommu->pad_page)
-		| (window->ioid & IOPTE_IOID_Mask);
+	pte = CBE_IOPTE_PP_R | CBE_IOPTE_M | CBE_IOPTE_SO_RW |
+		__pa(window->iommu->pad_page) |
+		(window->ioid & CBE_IOPTE_IOID_Mask);
 #endif
 
 	io_pte = (unsigned long *)tbl->it_base + (index - tbl->it_offset);
@@ -649,7 +642,7 @@ static int dma_fixed_dma_supported(struct device *dev, u64 mask)
 
 static int dma_set_mask_and_switch(struct device *dev, u64 dma_mask);
 
-struct dma_mapping_ops dma_iommu_fixed_ops = {
+struct dma_map_ops dma_iommu_fixed_ops = {
 	.alloc_coherent = dma_fixed_alloc_coherent,
 	.free_coherent  = dma_fixed_free_coherent,
 	.map_sg         = dma_fixed_map_sg,
@@ -664,15 +657,13 @@ static void cell_dma_dev_setup_fixed(struct device *dev);
 
 static void cell_dma_dev_setup(struct device *dev)
 {
-	struct dev_archdata *archdata = &dev->archdata;
-
 	/* Order is important here, these are not mutually exclusive */
 	if (get_dma_ops(dev) == &dma_iommu_fixed_ops)
 		cell_dma_dev_setup_fixed(dev);
 	else if (get_pci_dma_ops() == &dma_iommu_ops)
-		archdata->dma_data = cell_get_iommu_table(dev);
+		set_iommu_table_base(dev, cell_get_iommu_table(dev));
 	else if (get_pci_dma_ops() == &dma_direct_ops)
-		archdata->dma_data = (void *)cell_dma_direct_offset;
+		set_dma_offset(dev, cell_dma_direct_offset);
 	else
 		BUG();
 }
@@ -980,11 +971,10 @@ static int dma_set_mask_and_switch(struct device *dev, u64 dma_mask)
 
 static void cell_dma_dev_setup_fixed(struct device *dev)
 {
-	struct dev_archdata *archdata = &dev->archdata;
 	u64 addr;
 
 	addr = cell_iommu_get_fixed_address(dev) + dma_iommu_fixed_base;
-	archdata->dma_data = (void *)addr;
+	set_dma_offset(dev, addr);
 
 	dev_dbg(dev, "iommu: fixed addr = %llx\n", addr);
 }
@@ -1001,7 +991,7 @@ static void insert_16M_pte(unsigned long addr, unsigned long *ptab,
 	pr_debug("iommu: addr %lx ptab %p segment %lx offset %lx\n",
 		  addr, ptab, segment, offset);
 
-	ptab[offset] = base_pte | (__pa(addr) & IOPTE_RPN_Mask);
+	ptab[offset] = base_pte | (__pa(addr) & CBE_IOPTE_RPN_Mask);
 }
 
 static void cell_iommu_setup_fixed_ptab(struct cbe_iommu *iommu,
@@ -1016,14 +1006,14 @@ static void cell_iommu_setup_fixed_ptab(struct cbe_iommu *iommu,
 
 	pr_debug("iommu: mapping 0x%lx pages from 0x%lx\n", fsize, fbase);
 
-	base_pte = IOPTE_PP_W | IOPTE_PP_R | IOPTE_M
-		    | (cell_iommu_get_ioid(np) & IOPTE_IOID_Mask);
+	base_pte = CBE_IOPTE_PP_W | CBE_IOPTE_PP_R | CBE_IOPTE_M |
+		(cell_iommu_get_ioid(np) & CBE_IOPTE_IOID_Mask);
 
 	if (iommu_fixed_is_weak)
 		pr_info("IOMMU: Using weak ordering for fixed mapping\n");
 	else {
 		pr_info("IOMMU: Using strong ordering for fixed mapping\n");
-		base_pte |= IOPTE_SO_RW;
+		base_pte |= CBE_IOPTE_SO_RW;
 	}
 
 	for (uaddr = 0; uaddr < fsize; uaddr += (1 << 24)) {

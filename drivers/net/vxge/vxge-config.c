@@ -313,14 +313,6 @@ __vxge_hw_device_reg_addr_get(struct __vxge_hw_device *hldev)
 		hldev->kdfc = (u8 __iomem *)(hldev->bar0 +
 			VXGE_HW_TOC_GET_KDFC_INITIAL_OFFSET(val64));
 		break;
-	case 2:
-		hldev->kdfc = (u8 __iomem *)(hldev->bar1 +
-			VXGE_HW_TOC_GET_KDFC_INITIAL_OFFSET(val64));
-		break;
-	case 4:
-		hldev->kdfc = (u8 __iomem *)(hldev->bar2 +
-			VXGE_HW_TOC_GET_KDFC_INITIAL_OFFSET(val64));
-		break;
 	default:
 		break;
 	}
@@ -454,7 +446,7 @@ __vxge_hw_verify_pci_e_info(struct __vxge_hw_device *hldev)
 	return VXGE_HW_OK;
 }
 
-static enum vxge_hw_status
+enum vxge_hw_status
 __vxge_hw_device_is_privilaged(struct __vxge_hw_device *hldev)
 {
 	if ((hldev->host_type == VXGE_HW_NO_MR_NO_SR_NORMAL_FUNCTION ||
@@ -676,10 +668,12 @@ enum vxge_hw_status __vxge_hw_device_initialize(struct __vxge_hw_device *hldev)
 {
 	enum vxge_hw_status status = VXGE_HW_OK;
 
-	/* Validate the pci-e link width and speed */
-	status = __vxge_hw_verify_pci_e_info(hldev);
-	if (status != VXGE_HW_OK)
-		goto exit;
+	if (VXGE_HW_OK == __vxge_hw_device_is_privilaged(hldev)) {
+		/* Validate the pci-e link width and speed */
+		status = __vxge_hw_verify_pci_e_info(hldev);
+		if (status != VXGE_HW_OK)
+			goto exit;
+	}
 
 	vxge_hw_wrr_rebalance(hldev);
 exit:
@@ -829,8 +823,6 @@ vxge_hw_device_initialize(
 		sizeof(struct vxge_hw_device_config));
 
 	hldev->bar0 = attr->bar0;
-	hldev->bar1 = attr->bar1;
-	hldev->bar2 = attr->bar2;
 	hldev->pdev = attr->pdev;
 
 	hldev->uld_callbacks.link_up = attr->uld_callbacks.link_up;
@@ -1884,17 +1876,13 @@ void __vxge_hw_mempool_destroy(struct vxge_hw_mempool *mempool)
 				mempool->memblock_size, dma_object);
 	}
 
-	if (mempool->items_arr)
-		vfree(mempool->items_arr);
+	vfree(mempool->items_arr);
 
-	if (mempool->memblocks_dma_arr)
-		vfree(mempool->memblocks_dma_arr);
+	vfree(mempool->memblocks_dma_arr);
 
-	if (mempool->memblocks_priv_arr)
-		vfree(mempool->memblocks_priv_arr);
+	vfree(mempool->memblocks_priv_arr);
 
-	if (mempool->memblocks_arr)
-		vfree(mempool->memblocks_arr);
+	vfree(mempool->memblocks_arr);
 
 	vfree(mempool);
 }

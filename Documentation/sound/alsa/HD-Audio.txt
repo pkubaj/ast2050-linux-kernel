@@ -16,7 +16,7 @@ methods for the	HD-audio hardware.
 The HD-audio component consists of two parts: the controller chip and 
 the codec chips on the HD-audio bus.  Linux provides a single driver
 for all controllers, snd-hda-intel.  Although the driver name contains
-a word of a well-known harware vendor, it's not specific to it but for
+a word of a well-known hardware vendor, it's not specific to it but for
 all controller chips by other companies.  Since the HD-audio
 controllers are supposed to be compatible, the single snd-hda-driver
 should work in most cases.  But, not surprisingly, there are known
@@ -138,6 +138,10 @@ override the BIOS setup or to provide more comprehensive features.
 The driver checks PCI SSID and looks through the static configuration
 table until any matching entry is found.  If you have a new machine,
 you may see a message like below:
+------------------------------------------------------------------------
+    hda_codec: ALC880: BIOS auto-probing.
+------------------------------------------------------------------------
+Meanwhile, in the earlier versions, you would see a message like:
 ------------------------------------------------------------------------
     hda_codec: Unknown model for ALC880, trying auto-probe from BIOS...
 ------------------------------------------------------------------------
@@ -400,6 +404,66 @@ re-configure based on that state, run like below:
 ------------------------------------------------------------------------
   # echo 0x14 0x9993013f > /sys/class/sound/hwC0D0/user_pin_configs
   # echo 1 > /sys/class/sound/hwC0D0/reconfig  
+------------------------------------------------------------------------
+
+
+Early Patching
+~~~~~~~~~~~~~~
+When CONFIG_SND_HDA_PATCH_LOADER=y is set, you can pass a "patch" as a
+firmware file for modifying the HD-audio setup before initializing the
+codec.  This can work basically like the reconfiguration via sysfs in
+the above, but it does it before the first codec configuration.
+
+A patch file is a plain text file which looks like below:
+
+------------------------------------------------------------------------
+  [codec]
+  0x12345678 0xabcd1234 2
+
+  [model]
+  auto
+
+  [pincfg]
+  0x12 0x411111f0
+
+  [verb]
+  0x20 0x500 0x03
+  0x20 0x400 0xff
+
+  [hint]
+  hp_detect = yes
+------------------------------------------------------------------------
+
+The file needs to have a line `[codec]`.  The next line should contain
+three numbers indicating the codec vendor-id (0x12345678 in the
+example), the codec subsystem-id (0xabcd1234) and the address (2) of
+the codec.  The rest patch entries are applied to this specified codec
+until another codec entry is given.
+
+The `[model]` line allows to change the model name of the each codec.
+In the example above, it will be changed to model=auto.
+Note that this overrides the module option.
+
+After the `[pincfg]` line, the contents are parsed as the initial
+default pin-configurations just like `user_pin_configs` sysfs above.
+The values can be shown in user_pin_configs sysfs file, too.
+
+Similarly, the lines after `[verb]` are parsed as `init_verbs`
+sysfs entries, and the lines after `[hint]` are parsed as `hints`
+sysfs entries, respectively.
+
+The hd-audio driver reads the file via request_firmware().  Thus,
+a patch file has to be located on the appropriate firmware path,
+typically, /lib/firmware.  For example, when you pass the option
+`patch=hda-init.fw`, the file /lib/firmware/hda-init-fw must be
+present.
+
+The patch module option is specific to each card instance, and you
+need to give one file name for each instance, separated by commas.
+For example, if you have two cards, one for an on-board analog and one 
+for an HDMI video board, you may pass patch option like below:
+------------------------------------------------------------------------
+    options snd-hda-intel patch=on-board-patch,hdmi-patch
 ------------------------------------------------------------------------
 
 

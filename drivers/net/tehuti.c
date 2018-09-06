@@ -324,7 +324,7 @@ static int bdx_fw_load(struct bdx_priv *priv)
 	ENTER;
 	master = READ_REG(priv, regINIT_SEMAPHORE);
 	if (!READ_REG(priv, regINIT_STATUS) && master) {
-		rc = request_firmware(&fw, "tehuti/firmware.bin", &priv->pdev->dev);
+		rc = request_firmware(&fw, "tehuti/bdx.bin", &priv->pdev->dev);
 		if (rc)
 			goto out;
 		bdx_tx_push_desc_safe(priv, (char *)fw->data, fw->size);
@@ -948,8 +948,7 @@ static void print_rxfd(struct rxf_desc *rxfd);
 
 static void bdx_rxdb_destroy(struct rxdb *db)
 {
-	if (db)
-		vfree(db);
+	vfree(db);
 }
 
 static struct rxdb *bdx_rxdb_create(int nelem)
@@ -1482,10 +1481,8 @@ static void bdx_tx_db_close(struct txdb *d)
 {
 	BDX_ASSERT(d == NULL);
 
-	if (d->start) {
-		vfree(d->start);
-		d->start = NULL;
-	}
+	vfree(d->start);
+	d->start = NULL;
 }
 
 /*************************************************************************
@@ -1625,7 +1622,8 @@ static inline int bdx_tx_space(struct bdx_priv *priv)
  *   the driver. Note: the driver must NOT put the skb in its DMA ring.
  * o NETDEV_TX_LOCKED Locking failed, please retry quickly.
  */
-static int bdx_tx_transmit(struct sk_buff *skb, struct net_device *ndev)
+static netdev_tx_t bdx_tx_transmit(struct sk_buff *skb,
+				   struct net_device *ndev)
 {
 	struct bdx_priv *priv = netdev_priv(ndev);
 	struct txd_fifo *f = &priv->txd_fifo0;
@@ -1718,8 +1716,9 @@ static int bdx_tx_transmit(struct sk_buff *skb, struct net_device *ndev)
 	WRITE_REG(priv, f->m.reg_WPTR, f->m.wptr & TXF_WPTR_WR_PTR);
 
 #endif
-	ndev->trans_start = jiffies;
-
+#ifdef BDX_LLTX
+	ndev->trans_start = jiffies; /* NETIF_F_LLTX driver :( */
+#endif
 	priv->net_stats.tx_packets++;
 	priv->net_stats.tx_bytes += skb->len;
 
@@ -2429,7 +2428,7 @@ static void bdx_get_ethtool_stats(struct net_device *netdev,
  */
 static void bdx_ethtool_ops(struct net_device *netdev)
 {
-	static struct ethtool_ops bdx_ethtool_ops = {
+	static const struct ethtool_ops bdx_ethtool_ops = {
 		.get_settings = bdx_get_settings,
 		.get_drvinfo = bdx_get_drvinfo,
 		.get_link = ethtool_op_get_link,
@@ -2525,4 +2524,4 @@ module_exit(bdx_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(BDX_DRV_DESC);
-MODULE_FIRMWARE("tehuti/firmware.bin");
+MODULE_FIRMWARE("tehuti/bdx.bin");

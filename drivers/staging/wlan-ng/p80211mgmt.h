@@ -100,17 +100,9 @@
 #ifndef _P80211MGMT_H
 #define _P80211MGMT_H
 
-/*================================================================*/
-/* Project Includes */
-
-
 #ifndef  _P80211HDR_H
 #include "p80211hdr.h"
 #endif
-
-
-/*================================================================*/
-/* Constants */
 
 /*-- Information Element IDs --------------------*/
 #define WLAN_EID_SSID		0
@@ -504,25 +496,25 @@ typedef struct wlan_fr_deauthen {
 
 } wlan_fr_deauthen_t;
 
-void wlan_mgmt_encode_beacon(wlan_fr_beacon_t *f);
-void wlan_mgmt_decode_beacon(wlan_fr_beacon_t *f);
-void wlan_mgmt_encode_disassoc(wlan_fr_disassoc_t *f);
-void wlan_mgmt_decode_disassoc(wlan_fr_disassoc_t *f);
-void wlan_mgmt_encode_assocreq(wlan_fr_assocreq_t *f);
-void wlan_mgmt_decode_assocreq(wlan_fr_assocreq_t *f);
-void wlan_mgmt_encode_assocresp(wlan_fr_assocresp_t *f);
-void wlan_mgmt_decode_assocresp(wlan_fr_assocresp_t *f);
-void wlan_mgmt_encode_reassocreq(wlan_fr_reassocreq_t *f);
-void wlan_mgmt_decode_reassocreq(wlan_fr_reassocreq_t *f);
-void wlan_mgmt_encode_reassocresp(wlan_fr_reassocresp_t *f);
-void wlan_mgmt_decode_reassocresp(wlan_fr_reassocresp_t *f);
-void wlan_mgmt_encode_probereq(wlan_fr_probereq_t *f);
-void wlan_mgmt_decode_probereq(wlan_fr_probereq_t *f);
-void wlan_mgmt_encode_proberesp(wlan_fr_proberesp_t *f);
-void wlan_mgmt_decode_proberesp(wlan_fr_proberesp_t *f);
-void wlan_mgmt_encode_authen(wlan_fr_authen_t *f);
-void wlan_mgmt_decode_authen(wlan_fr_authen_t *f);
-void wlan_mgmt_encode_deauthen(wlan_fr_deauthen_t *f);
-void wlan_mgmt_decode_deauthen(wlan_fr_deauthen_t *f);
+void wlan_mgmt_encode_beacon(wlan_fr_beacon_t * f);
+void wlan_mgmt_decode_beacon(wlan_fr_beacon_t * f);
+void wlan_mgmt_encode_disassoc(wlan_fr_disassoc_t * f);
+void wlan_mgmt_decode_disassoc(wlan_fr_disassoc_t * f);
+void wlan_mgmt_encode_assocreq(wlan_fr_assocreq_t * f);
+void wlan_mgmt_decode_assocreq(wlan_fr_assocreq_t * f);
+void wlan_mgmt_encode_assocresp(wlan_fr_assocresp_t * f);
+void wlan_mgmt_decode_assocresp(wlan_fr_assocresp_t * f);
+void wlan_mgmt_encode_reassocreq(wlan_fr_reassocreq_t * f);
+void wlan_mgmt_decode_reassocreq(wlan_fr_reassocreq_t * f);
+void wlan_mgmt_encode_reassocresp(wlan_fr_reassocresp_t * f);
+void wlan_mgmt_decode_reassocresp(wlan_fr_reassocresp_t * f);
+void wlan_mgmt_encode_probereq(wlan_fr_probereq_t * f);
+void wlan_mgmt_decode_probereq(wlan_fr_probereq_t * f);
+void wlan_mgmt_encode_proberesp(wlan_fr_proberesp_t * f);
+void wlan_mgmt_decode_proberesp(wlan_fr_proberesp_t * f);
+void wlan_mgmt_encode_authen(wlan_fr_authen_t * f);
+void wlan_mgmt_decode_authen(wlan_fr_authen_t * f);
+void wlan_mgmt_encode_deauthen(wlan_fr_deauthen_t * f);
+void wlan_mgmt_decode_deauthen(wlan_fr_deauthen_t * f);
 
 #endif /* _P80211MGMT_H */

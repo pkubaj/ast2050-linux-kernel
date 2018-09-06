@@ -17,6 +17,7 @@
 #include <asm-generic/gpio.h>
 
 #include <mach/irqs.h>
+#include <mach/common.h>
 
 #define DAVINCI_GPIO_BASE 0x01C67000
 
@@ -40,6 +41,9 @@
  * to the DaVinci chip.  For now, they won't be usable as IRQ sources.
  */
 #define	GPIO(X)		(X)		/* 0 <= X <= (DAVINCI_N_GPIO - 1) */
+
+/* Convert GPIO signal to GPIO pin number */
+#define GPIO_TO_PIN(bank, gpio)	(16 * (bank) + (gpio))
 
 struct gpio_controller {
 	u32	dir;
@@ -67,15 +71,18 @@ static inline struct gpio_controller *__iomem
 __gpio_to_controller(unsigned gpio)
 {
 	void *__iomem ptr;
+	void __iomem *base = davinci_soc_info.gpio_base;
 
 	if (gpio < 32 * 1)
-		ptr = IO_ADDRESS(DAVINCI_GPIO_BASE + 0x10);
+		ptr = base + 0x10;
 	else if (gpio < 32 * 2)
-		ptr = IO_ADDRESS(DAVINCI_GPIO_BASE + 0x38);
+		ptr = base + 0x38;
 	else if (gpio < 32 * 3)
-		ptr = IO_ADDRESS(DAVINCI_GPIO_BASE + 0x60);
+		ptr = base + 0x60;
 	else if (gpio < 32 * 4)
-		ptr = IO_ADDRESS(DAVINCI_GPIO_BASE + 0x88);
+		ptr = base + 0x88;
+	else if (gpio < 32 * 5)
+		ptr = base + 0xb0;
 	else
 		ptr = NULL;
 	return ptr;
@@ -140,15 +147,13 @@ static inline int gpio_cansleep(unsigned gpio)
 
 static inline int gpio_to_irq(unsigned gpio)
 {
-	if (gpio >= DAVINCI_N_GPIO)
-		return -EINVAL;
-	return DAVINCI_N_AINTC_IRQ + gpio;
+	return __gpio_to_irq(gpio);
 }
 
 static inline int irq_to_gpio(unsigned irq)
 {
-	/* caller guarantees gpio_to_irq() succeeded */
-	return irq - DAVINCI_N_AINTC_IRQ;
+	/* don't support the reverse mapping */
+	return -ENOSYS;
 }
 
 #endif				/* __DAVINCI_GPIO_H */

@@ -50,6 +50,7 @@
 #include <scsi/scsi_host.h>
 #include <scsi/scsicam.h>
 #include <scsi/scsi_eh.h>
+#include <scsi/scsi_dbg.h>
 
 #include "sd.h"
 #include "scsi_logging.h"
@@ -64,6 +65,7 @@ static const char * scsi_debug_version_date = "20070104";
 #define PARAMETER_LIST_LENGTH_ERR 0x1a
 #define INVALID_OPCODE 0x20
 #define ADDR_OUT_OF_RANGE 0x21
+#define INVALID_COMMAND_OPCODE 0x20
 #define INVALID_FIELD_IN_CDB 0x24
 #define INVALID_FIELD_IN_PARAM_LIST 0x26
 #define POWERON_RESET 0x29
@@ -101,6 +103,8 @@ static const char * scsi_debug_version_date = "20070104";
 #define DEF_DIF 0
 #define DEF_GUARD 0
 #define DEF_ATO 1
+#define DEF_PHYSBLK_EXP 0
+#define DEF_LOWEST_ALIGNED 0
 
 /* bit mask values for scsi_debug_opts */
 #define SCSI_DEBUG_OPT_NOISE   1
@@ -156,6 +160,8 @@ static int scsi_debug_dix = DEF_DIX;
 static int scsi_debug_dif = DEF_DIF;
 static int scsi_debug_guard = DEF_GUARD;
 static int scsi_debug_ato = DEF_ATO;
+static int scsi_debug_physblk_exp = DEF_PHYSBLK_EXP;
+static int scsi_debug_lowest_aligned = DEF_LOWEST_ALIGNED;
 
 static int scsi_debug_cmnd_count = 0;
 
@@ -176,7 +182,7 @@ static int sdebug_sectors_per;		/* sectors per cylinder */
 #define SDEBUG_SENSE_LEN 32
 
 #define SCSI_DEBUG_CANQUEUE  255
-#define SCSI_DEBUG_MAX_CMD_LEN 16
+#define SCSI_DEBUG_MAX_CMD_LEN 32
 
 struct sdebug_dev_info {
 	struct list_head dev_list;
@@ -292,9 +298,25 @@ static void mk_sense_buffer(struct sdebug_dev_info *devip, int key,
 }
 
 static void get_data_transfer_info(unsigned char *cmd,
-				   unsigned long long *lba, unsigned int *num)
+				   unsigned long long *lba, unsigned int *num,
+				   u32 *ei_lba)
 {
+	*ei_lba = 0;
+
 	switch (*cmd) {
+	case VARIABLE_LENGTH_CMD:
+		*lba = (u64)cmd[19] | (u64)cmd[18] << 8 |
+			(u64)cmd[17] << 16 | (u64)cmd[16] << 24 |
+			(u64)cmd[15] << 32 | (u64)cmd[14] << 40 |
+			(u64)cmd[13] << 48 | (u64)cmd[12] << 56;
+
+		*ei_lba = (u32)cmd[23] | (u32)cmd[22] << 8 |
+			(u32)cmd[21] << 16 | (u32)cmd[20] << 24;
+
+		*num = (u32)cmd[31] | (u32)cmd[30] << 8 | (u32)cmd[29] << 16 |
+			(u32)cmd[28] << 24;
+		break;
+
 	case WRITE_16:
 	case READ_16:
 		*lba = (u64)cmd[9] | (u64)cmd[8] << 8 |
@@ -657,7 +679,12 @@ static unsigned char vpdb0_data[] = {
 
 static int inquiry_evpd_b0(unsigned char * arr)
 {
+	unsigned int gran;
+
 	memcpy(arr, vpdb0_data, sizeof(vpdb0_data));
+	gran = 1 << scsi_debug_physblk_exp;
+	arr[2] = (gran >> 8) & 0xff;
+	arr[3] = gran & 0xff;
 	if (sdebug_store_sectors > 0x400) {
 		arr[4] = (sdebug_store_sectors >> 24) & 0xff;
 		arr[5] = (sdebug_store_sectors >> 16) & 0xff;
@@ -887,7 +914,8 @@ static int resp_start_stop(struct scsi_cmnd * scp,
 static sector_t get_sdebug_capacity(void)
 {
 	if (scsi_debug_virtual_gb > 0)
-		return 2048 * 1024 * scsi_debug_virtual_gb;
+		return (sector_t)scsi_debug_virtual_gb *
+			(1073741824 / scsi_debug_sector_size);
 	else
 		return sdebug_store_sectors;
 }
@@ -945,6 +973,9 @@ static int resp_readcap16(struct scsi_cmnd * scp,
 	arr[9] = (scsi_debug_sector_size >> 16) & 0xff;
 	arr[10] = (scsi_debug_sector_size >> 8) & 0xff;
 	arr[11] = scsi_debug_sector_size & 0xff;
+	arr[13] = scsi_debug_physblk_exp & 0xf;
+	arr[14] = (scsi_debug_lowest_aligned >> 8) & 0x3f;
+	arr[15] = scsi_debug_lowest_aligned & 0xff;
 
 	if (scsi_debug_dif) {
 		arr[12] = (scsi_debug_dif - 1) << 1; /* P_TYPE */
@@ -1577,7 +1608,7 @@ static int do_device_access(struct scsi_cmnd *scmd,
 }
 
 static int prot_verify_read(struct scsi_cmnd *SCpnt, sector_t start_sec,
-			    unsigned int sectors)
+			    unsigned int sectors, u32 ei_lba)
 {
 	unsigned int i, resid;
 	struct scatterlist *psgl;
@@ -1624,13 +1655,23 @@ static int prot_verify_read(struct scsi_cmnd *SCpnt, sector_t start_sec,
 			return 0x01;
 		}
 
-		if (scsi_debug_dif != SD_DIF_TYPE3_PROTECTION &&
+		if (scsi_debug_dif == SD_DIF_TYPE1_PROTECTION &&
 		    be32_to_cpu(sdt[i].ref_tag) != (sector & 0xffffffff)) {
 			printk(KERN_ERR "%s: REF check failed on sector %lu\n",
 			       __func__, (unsigned long)sector);
 			dif_errors++;
 			return 0x03;
 		}
+
+		if (scsi_debug_dif == SD_DIF_TYPE2_PROTECTION &&
+		    be32_to_cpu(sdt[i].ref_tag) != ei_lba) {
+			printk(KERN_ERR "%s: REF check failed on sector %lu\n",
+			       __func__, (unsigned long)sector);
+			dif_errors++;
+			return 0x03;
+		}
+
+		ei_lba++;
 	}
 
 	resid = sectors * 8; /* Bytes of protection data to copy into sgl */
@@ -1658,7 +1699,8 @@ static int prot_verify_read(struct scsi_cmnd *SCpnt, sector_t start_sec,
 }
 
 static int resp_read(struct scsi_cmnd *SCpnt, unsigned long long lba,
-		     unsigned int num, struct sdebug_dev_info *devip)
+		     unsigned int num, struct sdebug_dev_info *devip,
+		     u32 ei_lba)
 {
 	unsigned long iflags;
 	int ret;
@@ -1687,7 +1729,7 @@ static int resp_read(struct scsi_cmnd *SCpnt, unsigned long long lba,
 
 	/* DIX + T10 DIF */
 	if (scsi_debug_dix && scsi_prot_sg_count(SCpnt)) {
-		int prot_ret = prot_verify_read(SCpnt, lba, num);
+		int prot_ret = prot_verify_read(SCpnt, lba, num, ei_lba);
 
 		if (prot_ret) {
 			mk_sense_buffer(devip, ABORTED_COMMAND, 0x10, prot_ret);
@@ -1723,7 +1765,7 @@ void dump_sector(unsigned char *buf, int len)
 }
 
 static int prot_verify_write(struct scsi_cmnd *SCpnt, sector_t start_sec,
-			     unsigned int sectors)
+			     unsigned int sectors, u32 ei_lba)
 {
 	int i, j, ret;
 	struct sd_dif_tuple *sdt;
@@ -1736,11 +1778,6 @@ static int prot_verify_write(struct scsi_cmnd *SCpnt, sector_t start_sec,
 	unsigned short csum;
 
 	sector = do_div(tmp_sec, sdebug_store_sectors);
-
-	if (((SCpnt->cmnd[1] >> 5) & 7) != 1) {
-		printk(KERN_WARNING "scsi_debug: WRPROTECT != 1\n");
-		return 0;
-	}
 
 	BUG_ON(scsi_sg_count(SCpnt) == 0);
 	BUG_ON(scsi_prot_sg_count(SCpnt) == 0);
@@ -1796,9 +1833,19 @@ static int prot_verify_write(struct scsi_cmnd *SCpnt, sector_t start_sec,
 				goto out;
 			}
 
-			if (scsi_debug_dif != SD_DIF_TYPE3_PROTECTION &&
+			if (scsi_debug_dif == SD_DIF_TYPE1_PROTECTION &&
 			    be32_to_cpu(sdt->ref_tag)
 			    != (start_sec & 0xffffffff)) {
+				printk(KERN_ERR
+				       "%s: REF check failed on sector %lu\n",
+				       __func__, (unsigned long)sector);
+				ret = 0x03;
+				dump_sector(daddr, scsi_debug_sector_size);
+				goto out;
+			}
+
+			if (scsi_debug_dif == SD_DIF_TYPE2_PROTECTION &&
+			    be32_to_cpu(sdt->ref_tag) != ei_lba) {
 				printk(KERN_ERR
 				       "%s: REF check failed on sector %lu\n",
 				       __func__, (unsigned long)sector);
@@ -1820,6 +1867,7 @@ static int prot_verify_write(struct scsi_cmnd *SCpnt, sector_t start_sec,
 				sector = 0;	/* Force wrap */
 
 			start_sec++;
+			ei_lba++;
 			daddr += scsi_debug_sector_size;
 			ppage_offset += sizeof(struct sd_dif_tuple);
 		}
@@ -1841,7 +1889,8 @@ out:
 }
 
 static int resp_write(struct scsi_cmnd *SCpnt, unsigned long long lba,
-		      unsigned int num, struct sdebug_dev_info *devip)
+		      unsigned int num, struct sdebug_dev_info *devip,
+		      u32 ei_lba)
 {
 	unsigned long iflags;
 	int ret;
@@ -1852,7 +1901,7 @@ static int resp_write(struct scsi_cmnd *SCpnt, unsigned long long lba,
 
 	/* DIX + T10 DIF */
 	if (scsi_debug_dix && scsi_prot_sg_count(SCpnt)) {
-		int prot_ret = prot_verify_write(SCpnt, lba, num);
+		int prot_ret = prot_verify_write(SCpnt, lba, num, ei_lba);
 
 		if (prot_ret) {
 			mk_sense_buffer(devip, ILLEGAL_REQUEST, 0x10, prot_ret);
@@ -2380,6 +2429,8 @@ module_param_named(dix, scsi_debug_dix, int, S_IRUGO);
 module_param_named(dif, scsi_debug_dif, int, S_IRUGO);
 module_param_named(guard, scsi_debug_guard, int, S_IRUGO);
 module_param_named(ato, scsi_debug_ato, int, S_IRUGO);
+module_param_named(physblk_exp, scsi_debug_physblk_exp, int, S_IRUGO);
+module_param_named(lowest_aligned, scsi_debug_lowest_aligned, int, S_IRUGO);
 
 MODULE_AUTHOR("Eric Youngdale + Douglas Gilbert");
 MODULE_DESCRIPTION("SCSI debug adapter driver");
@@ -2401,7 +2452,9 @@ MODULE_PARM_DESC(ptype, "SCSI peripheral type(def=0[disk])");
 MODULE_PARM_DESC(scsi_level, "SCSI level to simulate(def=5[SPC-3])");
 MODULE_PARM_DESC(virtual_gb, "virtual gigabyte size (def=0 -> use dev_size_mb)");
 MODULE_PARM_DESC(vpd_use_hostno, "0 -> dev ids ignore hostno (def=1 -> unique dev ids)");
-MODULE_PARM_DESC(sector_size, "hardware sector size in bytes (def=512)");
+MODULE_PARM_DESC(sector_size, "logical block size in bytes (def=512)");
+MODULE_PARM_DESC(physblk_exp, "physical block exponent (def=0)");
+MODULE_PARM_DESC(lowest_aligned, "lowest aligned lba (def=0)");
 MODULE_PARM_DESC(dix, "data integrity extensions mask (def=0)");
 MODULE_PARM_DESC(dif, "data integrity field type: 0-3 (def=0)");
 MODULE_PARM_DESC(guard, "protection checksum: 0=crc, 1=ip (def=0)");
@@ -2856,11 +2909,12 @@ static int __init scsi_debug_init(void)
 
 	case SD_DIF_TYPE0_PROTECTION:
 	case SD_DIF_TYPE1_PROTECTION:
+	case SD_DIF_TYPE2_PROTECTION:
 	case SD_DIF_TYPE3_PROTECTION:
 		break;
 
 	default:
-		printk(KERN_ERR "scsi_debug_init: dif must be 0, 1 or 3\n");
+		printk(KERN_ERR "scsi_debug_init: dif must be 0, 1, 2 or 3\n");
 		return -EINVAL;
 	}
 
@@ -2871,6 +2925,18 @@ static int __init scsi_debug_init(void)
 
 	if (scsi_debug_ato > 1) {
 		printk(KERN_ERR "scsi_debug_init: ato must be 0 or 1\n");
+		return -EINVAL;
+	}
+
+	if (scsi_debug_physblk_exp > 15) {
+		printk(KERN_ERR "scsi_debug_init: invalid physblk_exp %u\n",
+		       scsi_debug_physblk_exp);
+		return -EINVAL;
+	}
+
+	if (scsi_debug_lowest_aligned > 0x3fff) {
+		printk(KERN_ERR "scsi_debug_init: lowest_aligned too big: %u\n",
+		       scsi_debug_lowest_aligned);
 		return -EINVAL;
 	}
 
@@ -3093,6 +3159,7 @@ int scsi_debug_queuecommand(struct scsi_cmnd *SCpnt, done_funct_t done)
 	int len, k;
 	unsigned int num;
 	unsigned long long lba;
+	u32 ei_lba;
 	int errsts = 0;
 	int target = SCpnt->device->id;
 	struct sdebug_dev_info *devip = NULL;
@@ -3226,14 +3293,30 @@ int scsi_debug_queuecommand(struct scsi_cmnd *SCpnt, done_funct_t done)
 	case READ_16:
 	case READ_12:
 	case READ_10:
+		/* READ{10,12,16} and DIF Type 2 are natural enemies */
+		if (scsi_debug_dif == SD_DIF_TYPE2_PROTECTION &&
+		    cmd[1] & 0xe0) {
+			mk_sense_buffer(devip, ILLEGAL_REQUEST,
+					INVALID_COMMAND_OPCODE, 0);
+			errsts = check_condition_result;
+			break;
+		}
+
+		if ((scsi_debug_dif == SD_DIF_TYPE1_PROTECTION ||
+		     scsi_debug_dif == SD_DIF_TYPE3_PROTECTION) &&
+		    (cmd[1] & 0xe0) == 0)
+			printk(KERN_ERR "Unprotected RD/WR to DIF device\n");
+
+		/* fall through */
 	case READ_6:
+read:
 		errsts = check_readiness(SCpnt, 0, devip);
 		if (errsts)
 			break;
 		if (scsi_debug_fake_rw)
 			break;
-		get_data_transfer_info(cmd, &lba, &num);
-		errsts = resp_read(SCpnt, lba, num, devip);
+		get_data_transfer_info(cmd, &lba, &num, &ei_lba);
+		errsts = resp_read(SCpnt, lba, num, devip, ei_lba);
 		if (inj_recovered && (0 == errsts)) {
 			mk_sense_buffer(devip, RECOVERED_ERROR,
 					THRESHOLD_EXCEEDED, 0);
@@ -3260,14 +3343,30 @@ int scsi_debug_queuecommand(struct scsi_cmnd *SCpnt, done_funct_t done)
 	case WRITE_16:
 	case WRITE_12:
 	case WRITE_10:
+		/* WRITE{10,12,16} and DIF Type 2 are natural enemies */
+		if (scsi_debug_dif == SD_DIF_TYPE2_PROTECTION &&
+		    cmd[1] & 0xe0) {
+			mk_sense_buffer(devip, ILLEGAL_REQUEST,
+					INVALID_COMMAND_OPCODE, 0);
+			errsts = check_condition_result;
+			break;
+		}
+
+		if ((scsi_debug_dif == SD_DIF_TYPE1_PROTECTION ||
+		     scsi_debug_dif == SD_DIF_TYPE3_PROTECTION) &&
+		    (cmd[1] & 0xe0) == 0)
+			printk(KERN_ERR "Unprotected RD/WR to DIF device\n");
+
+		/* fall through */
 	case WRITE_6:
+write:
 		errsts = check_readiness(SCpnt, 0, devip);
 		if (errsts)
 			break;
 		if (scsi_debug_fake_rw)
 			break;
-		get_data_transfer_info(cmd, &lba, &num);
-		errsts = resp_write(SCpnt, lba, num, devip);
+		get_data_transfer_info(cmd, &lba, &num, &ei_lba);
+		errsts = resp_write(SCpnt, lba, num, devip, ei_lba);
 		if (inj_recovered && (0 == errsts)) {
 			mk_sense_buffer(devip, RECOVERED_ERROR,
 					THRESHOLD_EXCEEDED, 0);
@@ -3313,15 +3412,38 @@ int scsi_debug_queuecommand(struct scsi_cmnd *SCpnt, done_funct_t done)
 			break;
 		if (scsi_debug_fake_rw)
 			break;
-		get_data_transfer_info(cmd, &lba, &num);
-		errsts = resp_read(SCpnt, lba, num, devip);
+		get_data_transfer_info(cmd, &lba, &num, &ei_lba);
+		errsts = resp_read(SCpnt, lba, num, devip, ei_lba);
 		if (errsts)
 			break;
-		errsts = resp_write(SCpnt, lba, num, devip);
+		errsts = resp_write(SCpnt, lba, num, devip, ei_lba);
 		if (errsts)
 			break;
 		errsts = resp_xdwriteread(SCpnt, lba, num, devip);
 		break;
+	case VARIABLE_LENGTH_CMD:
+		if (scsi_debug_dif == SD_DIF_TYPE2_PROTECTION) {
+
+			if ((cmd[10] & 0xe0) == 0)
+				printk(KERN_ERR
+				       "Unprotected RD/WR to DIF device\n");
+
+			if (cmd[9] == READ_32) {
+				BUG_ON(SCpnt->cmd_len < 32);
+				goto read;
+			}
+
+			if (cmd[9] == WRITE_32) {
+				BUG_ON(SCpnt->cmd_len < 32);
+				goto write;
+			}
+		}
+
+		mk_sense_buffer(devip, ILLEGAL_REQUEST,
+				INVALID_FIELD_IN_CDB, 0);
+		errsts = check_condition_result;
+		break;
+
 	default:
 		if (SCSI_DEBUG_OPT_NOISE & scsi_debug_opts)
 			printk(KERN_INFO "scsi_debug: Opcode: 0x%x not "

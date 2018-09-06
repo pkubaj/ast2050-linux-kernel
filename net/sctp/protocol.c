@@ -160,6 +160,7 @@ static void sctp_proc_exit(void)
 		remove_proc_entry("sctp", init_net.proc_net);
 	}
 #endif
+	percpu_counter_destroy(&sctp_sockets_allocated);
 }
 
 /* Private helper to extract ipv4 address and stash them in
@@ -393,7 +394,7 @@ static int sctp_v4_addr_valid(union sctp_addr *addr,
 		return 0;
 
 	/* Is this a broadcast address? */
-	if (skb && skb->rtable->rt_flags & RTCF_BROADCAST)
+	if (skb && skb_rtable(skb)->rt_flags & RTCF_BROADCAST)
 		return 0;
 
 	return 1;
@@ -430,15 +431,13 @@ static int sctp_v4_available(union sctp_addr *addr, struct sctp_sock *sp)
  * of requested destination address, sender and receiver
  * SHOULD include all of its addresses with level greater
  * than or equal to L.
+ *
+ * IPv4 scoping can be controlled through sysctl option
+ * net.sctp.addr_scope_policy
  */
 static sctp_scope_t sctp_v4_scope(union sctp_addr *addr)
 {
 	sctp_scope_t retval;
-
-	/* Should IPv4 scoping be a sysctl configurable option
-	 * so users can turn it off (default on) for certain
-	 * unconventional networking environments?
-	 */
 
 	/* Check for unusable SCTP addresses. */
 	if (IS_IPV4_UNUSABLE_ADDRESS(addr->v4.sin_addr.s_addr)) {
@@ -572,7 +571,7 @@ static void sctp_v4_get_saddr(struct sctp_sock *sk,
 /* What interface did this skb arrive on? */
 static int sctp_v4_skb_iif(const struct sk_buff *skb)
 {
-	return skb->rtable->rt_iif;
+	return skb_rtable(skb)->rt_iif;
 }
 
 /* Was this packet marked by Explicit Congestion Notification? */
@@ -848,8 +847,8 @@ static inline int sctp_v4_xmit(struct sk_buff *skb,
 
 	SCTP_DEBUG_PRINTK("%s: skb:%p, len:%d, src:%pI4, dst:%pI4\n",
 			  __func__, skb, skb->len,
-			  &skb->rtable->rt_src,
-			  &skb->rtable->rt_dst);
+			  &skb_rtable(skb)->rt_src,
+			  &skb_rtable(skb)->rt_dst);
 
 	inet->pmtudisc = transport->param_flags & SPP_PMTUD_ENABLE ?
 			 IP_PMTUDISC_DO : IP_PMTUDISC_DONT;
@@ -925,7 +924,7 @@ static struct inet_protosw sctp_stream_protosw = {
 };
 
 /* Register with IP layer.  */
-static struct net_protocol sctp_protocol = {
+static const struct net_protocol sctp_protocol = {
 	.handler     = sctp_rcv,
 	.err_handler = sctp_v4_err,
 	.no_policy   = 1,
@@ -1158,7 +1157,8 @@ SCTP_STATIC __init int sctp_init(void)
 
 	/* Set the pressure threshold to be a fraction of global memory that
 	 * is up to 1/2 at 256 MB, decreasing toward zero with the amount of
-	 * memory, with a floor of 128 pages.
+	 * memory, with a floor of 128 pages, and a ceiling that prevents an
+	 * integer overflow.
 	 * Note this initalizes the data in sctpv6_prot too
 	 * Unabashedly stolen from tcp_init
 	 */
@@ -1166,6 +1166,7 @@ SCTP_STATIC __init int sctp_init(void)
 	limit = min(nr_pages, 1UL<<(28-PAGE_SHIFT)) >> (20-PAGE_SHIFT);
 	limit = (limit * (nr_pages >> (20-PAGE_SHIFT))) >> (PAGE_SHIFT-11);
 	limit = max(limit, 128UL);
+	limit = min(limit, INT_MAX * 4UL / 3 / 2);
 	sysctl_sctp_mem[0] = limit / 4 * 3;
 	sysctl_sctp_mem[1] = limit;
 	sysctl_sctp_mem[2] = sysctl_sctp_mem[0] * 2;
@@ -1185,10 +1186,10 @@ SCTP_STATIC __init int sctp_init(void)
 	/* Size and allocate the association hash table.
 	 * The methodology is similar to that of the tcp hash tables.
 	 */
-	if (num_physpages >= (128 * 1024))
-		goal = num_physpages >> (22 - PAGE_SHIFT);
+	if (totalram_pages >= (128 * 1024))
+		goal = totalram_pages >> (22 - PAGE_SHIFT);
 	else
-		goal = num_physpages >> (24 - PAGE_SHIFT);
+		goal = totalram_pages >> (24 - PAGE_SHIFT);
 
 	for (order = 0; (1UL << order) < goal; order++)
 		;
@@ -1257,6 +1258,9 @@ SCTP_STATIC __init int sctp_init(void)
 
 	/* Disable AUTH by default. */
 	sctp_auth_enable = 0;
+
+	/* Set SCOPE policy to enabled */
+	sctp_scope_policy = SCTP_SCOPE_POLICY_ENABLE;
 
 	sctp_sysctl_register();
 
@@ -1369,6 +1373,8 @@ SCTP_STATIC __exit void sctp_exit(void)
 	sctp_dbg_objcnt_exit();
 	sctp_proc_exit();
 	cleanup_sctp_mibs();
+
+	rcu_barrier(); /* Wait for completion of call_rcu()'s */
 
 	kmem_cache_destroy(sctp_chunk_cachep);
 	kmem_cache_destroy(sctp_bucket_cachep);

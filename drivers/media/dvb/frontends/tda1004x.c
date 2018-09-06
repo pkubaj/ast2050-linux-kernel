@@ -898,8 +898,17 @@ static int tda1004x_set_fe(struct dvb_frontend* fe,
 static int tda1004x_get_fe(struct dvb_frontend* fe, struct dvb_frontend_parameters *fe_params)
 {
 	struct tda1004x_state* state = fe->demodulator_priv;
+	int status;
 
 	dprintk("%s\n", __func__);
+
+	status = tda1004x_read_byte(state, TDA1004X_STATUS_CD);
+	if (status == -1)
+		return -EIO;
+
+	/* Only update the properties cache if device is locked */
+	if (!(status & 8))
+		return 0;
 
 	// inversion status
 	fe_params->inversion = INVERSION_OFF;
@@ -1269,7 +1278,7 @@ struct dvb_frontend* tda10045_attach(const struct tda1004x_config* config,
 	int id;
 
 	/* allocate memory for the internal state */
-	state = kmalloc(sizeof(struct tda1004x_state), GFP_KERNEL);
+	state = kzalloc(sizeof(struct tda1004x_state), GFP_KERNEL);
 	if (!state) {
 		printk(KERN_ERR "Can't alocate memory for tda10045 state\n");
 		return NULL;
@@ -1339,7 +1348,7 @@ struct dvb_frontend* tda10046_attach(const struct tda1004x_config* config,
 	int id;
 
 	/* allocate memory for the internal state */
-	state = kmalloc(sizeof(struct tda1004x_state), GFP_KERNEL);
+	state = kzalloc(sizeof(struct tda1004x_state), GFP_KERNEL);
 	if (!state) {
 		printk(KERN_ERR "Can't alocate memory for tda10046 state\n");
 		return NULL;

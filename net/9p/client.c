@@ -60,9 +60,9 @@ static struct p9_req_t *
 p9_client_rpc(struct p9_client *c, int8_t type, const char *fmt, ...);
 
 /**
- * v9fs_parse_options - parse mount options into session structure
- * @options: options string passed from mount
- * @v9ses: existing v9fs session information
+ * parse_options - parse mount options into client structure
+ * @opts: options string passed from mount
+ * @clnt: existing v9fs client information
  *
  * Return 0 upon success, -ERRNO upon failure
  */
@@ -116,9 +116,6 @@ static int parse_opts(char *opts, struct p9_client *clnt)
 			continue;
 		}
 	}
-
-	if (!clnt->trans_mod)
-		clnt->trans_mod = v9fs_get_default_trans();
 
 	kfree(options);
 	return ret;
@@ -224,7 +221,8 @@ struct p9_req_t *p9_tag_lookup(struct p9_client *c, u16 tag)
 	 * buffer to read the data into */
 	tag++;
 
-	BUG_ON(tag >= c->max_tag);
+	if(tag >= c->max_tag)
+		return NULL;
 
 	row = tag / P9_ROW_MAXTAG;
 	col = tag % P9_ROW_MAXTAG;
@@ -235,7 +233,7 @@ EXPORT_SYMBOL(p9_tag_lookup);
 
 /**
  * p9_tag_init - setup tags structure and contents
- * @tags: tags structure from the client struct
+ * @c:  v9fs client struct
  *
  * This initializes the tags structure for each client instance.
  *
@@ -261,7 +259,7 @@ error:
 
 /**
  * p9_tag_cleanup - cleans up tags structure and reclaims resources
- * @tags: tags structure from the client struct
+ * @c:  v9fs client struct
  *
  * This frees resources associated with the tags structure
  *
@@ -414,13 +412,8 @@ static int p9_check_errors(struct p9_client *c, struct p9_req_t *req)
 		if (c->dotu)
 			err = -ecode;
 
-		if (!err) {
+		if (!err || !IS_ERR_VALUE(err))
 			err = p9_errstr2errno(ename, strlen(ename));
-
-			/* string match failed */
-			if (!err)
-				err = -ESERVERFAULT;
-		}
 
 		P9_DPRINTK(P9_DEBUG_9P, "<<< RERROR (%d) %s\n", -ecode, ename);
 
@@ -433,8 +426,8 @@ static int p9_check_errors(struct p9_client *c, struct p9_req_t *req)
 
 /**
  * p9_client_flush - flush (cancel) a request
- * c: client state
- * req: request to cancel
+ * @c: client state
+ * @oldreq: request to cancel
  *
  * This sents a flush for a particular requests and links
  * the flush request to the original request.  The current
@@ -590,11 +583,9 @@ static struct p9_fid *p9_fid_create(struct p9_client *clnt)
 
 	memset(&fid->qid, 0, sizeof(struct p9_qid));
 	fid->mode = -1;
-	fid->rdir_fpos = 0;
 	fid->uid = current_fsuid();
 	fid->clnt = clnt;
-	fid->aux = NULL;
-
+	fid->rdir = NULL;
 	spin_lock_irqsave(&clnt->lock, flags);
 	list_add(&fid->flist, &clnt->fidlist);
 	spin_unlock_irqrestore(&clnt->lock, flags);
@@ -617,6 +608,7 @@ static void p9_fid_destroy(struct p9_fid *fid)
 	spin_lock_irqsave(&clnt->lock, flags);
 	list_del(&fid->flist);
 	spin_unlock_irqrestore(&clnt->lock, flags);
+	kfree(fid->rdir);
 	kfree(fid);
 }
 
@@ -689,6 +681,9 @@ struct p9_client *p9_client_create(const char *dev_name, char *options)
 	if (err < 0)
 		goto error;
 
+	if (!clnt->trans_mod)
+		clnt->trans_mod = v9fs_get_default_trans();
+
 	if (clnt->trans_mod == NULL) {
 		err = -EPROTONOSUPPORT;
 		P9_DPRINTK(P9_DEBUG_ERROR,
@@ -703,8 +698,8 @@ struct p9_client *p9_client_create(const char *dev_name, char *options)
 	if (err)
 		goto error;
 
-	if ((clnt->msize+P9_IOHDRSZ) > clnt->trans_mod->maxsize)
-		clnt->msize = clnt->trans_mod->maxsize-P9_IOHDRSZ;
+	if (clnt->msize > clnt->trans_mod->maxsize)
+		clnt->msize = clnt->trans_mod->maxsize;
 
 	err = p9_client_version(clnt);
 	if (err)
@@ -1027,9 +1022,11 @@ int p9_client_clunk(struct p9_fid *fid)
 	P9_DPRINTK(P9_DEBUG_9P, "<<< RCLUNK fid %d\n", fid->fid);
 
 	p9_free_req(clnt, req);
-	p9_fid_destroy(fid);
-
 error:
+	/*
+	 * Fid is not valid even after a failed clunk
+	 */
+	p9_fid_destroy(fid);
 	return err;
 }
 EXPORT_SYMBOL(p9_client_clunk);
@@ -1098,7 +1095,6 @@ p9_client_read(struct p9_fid *fid, char *data, char __user *udata, u64 offset,
 
 	if (data) {
 		memmove(data, dataptr, count);
-		data += count;
 	}
 
 	if (udata) {
@@ -1192,9 +1188,9 @@ struct p9_wstat *p9_client_stat(struct p9_fid *fid)
 
 	err = p9pdu_readf(req->rc, clnt->dotu, "wS", &ignored, ret);
 	if (err) {
-		ret = ERR_PTR(err);
 		p9pdu_dump(1, req->rc);
-		goto free_and_error;
+		p9_free_req(clnt, req);
+		goto error;
 	}
 
 	P9_DPRINTK(P9_DEBUG_9P,
@@ -1211,8 +1207,6 @@ struct p9_wstat *p9_client_stat(struct p9_fid *fid)
 	p9_free_req(clnt, req);
 	return ret;
 
-free_and_error:
-	p9_free_req(clnt, req);
 error:
 	kfree(ret);
 	return ERR_PTR(err);

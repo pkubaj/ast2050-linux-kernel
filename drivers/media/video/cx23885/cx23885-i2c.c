@@ -283,7 +283,6 @@ static struct i2c_algorithm cx23885_i2c_algo_template = {
 static struct i2c_adapter cx23885_i2c_adap_template = {
 	.name              = "cx23885",
 	.owner             = THIS_MODULE,
-	.id                = I2C_HW_B_CX23885,
 	.algo              = &cx23885_i2c_algo_template,
 };
 
@@ -356,6 +355,28 @@ int cx23885_i2c_register(struct cx23885_i2c *bus)
 	} else
 		printk(KERN_WARNING "%s: i2c bus %d register FAILED\n",
 			dev->name, bus->nr);
+
+	/* Instantiate the IR receiver device, if present */
+	if (0 == bus->i2c_rc) {
+		struct i2c_board_info info;
+		const unsigned short addr_list[] = {
+			0x6b, I2C_CLIENT_END
+		};
+
+		memset(&info, 0, sizeof(struct i2c_board_info));
+		strlcpy(info.type, "ir_video", I2C_NAME_SIZE);
+		/*
+		 * We can't call i2c_new_probed_device() because it uses
+		 * quick writes for probing and the IR receiver device only
+		 * replies to reads.
+		 */
+		if (i2c_smbus_xfer(&bus->i2c_adap, addr_list[0], 0,
+				   I2C_SMBUS_READ, 0, I2C_SMBUS_QUICK,
+				   NULL) >= 0) {
+			info.addr = addr_list[0];
+			i2c_new_device(&bus->i2c_adap, &info);
+		}
+	}
 
 	return bus->i2c_rc;
 }

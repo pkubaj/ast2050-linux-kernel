@@ -161,19 +161,19 @@ int ivtv_i2c_register(struct ivtv *itv, unsigned idx)
 		return -1;
 	if (hw == IVTV_HW_TUNER) {
 		/* special tuner handling */
-		sd = v4l2_i2c_new_probed_subdev(&itv->v4l2_dev,
+		sd = v4l2_i2c_new_subdev(&itv->v4l2_dev,
 				adap, mod, type,
-				itv->card_i2c->radio);
+				0, itv->card_i2c->radio);
 		if (sd)
 			sd->grp_id = 1 << idx;
-		sd = v4l2_i2c_new_probed_subdev(&itv->v4l2_dev,
+		sd = v4l2_i2c_new_subdev(&itv->v4l2_dev,
 				adap, mod, type,
-				itv->card_i2c->demod);
+				0, itv->card_i2c->demod);
 		if (sd)
 			sd->grp_id = 1 << idx;
-		sd = v4l2_i2c_new_probed_subdev(&itv->v4l2_dev,
+		sd = v4l2_i2c_new_subdev(&itv->v4l2_dev,
 				adap, mod, type,
-				itv->card_i2c->tv);
+				0, itv->card_i2c->tv);
 		if (sd)
 			sd->grp_id = 1 << idx;
 		return sd ? 0 : -1;
@@ -181,11 +181,11 @@ int ivtv_i2c_register(struct ivtv *itv, unsigned idx)
 	if (!hw_addrs[idx])
 		return -1;
 	if (hw == IVTV_HW_UPD64031A || hw == IVTV_HW_UPD6408X) {
-		sd = v4l2_i2c_new_probed_subdev_addr(&itv->v4l2_dev,
-				adap, mod, type, hw_addrs[idx]);
+		sd = v4l2_i2c_new_subdev(&itv->v4l2_dev,
+				adap, mod, type, 0, I2C_ADDRS(hw_addrs[idx]));
 	} else {
 		sd = v4l2_i2c_new_subdev(&itv->v4l2_dev,
-				adap, mod, type, hw_addrs[idx]);
+				adap, mod, type, hw_addrs[idx], NULL);
 	}
 	if (sd)
 		sd->grp_id = 1 << idx;
@@ -509,7 +509,6 @@ static struct i2c_algorithm ivtv_algo = {
 /* template for our-bit banger */
 static struct i2c_adapter ivtv_i2c_adap_hw_template = {
 	.name = "ivtv i2c driver",
-	.id = I2C_HW_B_CX2341X,
 	.algo = &ivtv_algo,
 	.algo_data = NULL,			/* filled from template */
 	.owner = THIS_MODULE,
@@ -560,7 +559,6 @@ static int ivtv_getsda_old(void *data)
 /* template for i2c-bit-algo */
 static struct i2c_adapter ivtv_i2c_adap_template = {
 	.name = "ivtv i2c driver",
-	.id = I2C_HW_B_CX2341X,
 	.algo = NULL,                   /* set by i2c-algo-bit */
 	.algo_data = NULL,              /* filled from template */
 	.owner = THIS_MODULE,
@@ -579,9 +577,11 @@ static struct i2c_client ivtv_i2c_client_template = {
 	.name = "ivtv internal",
 };
 
-/* init + register i2c algo-bit adapter */
+/* init + register i2c adapter + instantiate IR receiver */
 int init_ivtv_i2c(struct ivtv *itv)
 {
+	int retval;
+
 	IVTV_DEBUG_I2C("i2c init\n");
 
 	/* Sanity checks for the I2C hardware arrays. They must be the
@@ -619,9 +619,37 @@ int init_ivtv_i2c(struct ivtv *itv)
 	ivtv_setsda(itv, 1);
 
 	if (itv->options.newi2c > 0)
-		return i2c_add_adapter(&itv->i2c_adap);
+		retval = i2c_add_adapter(&itv->i2c_adap);
 	else
-		return i2c_bit_add_bus(&itv->i2c_adap);
+		retval = i2c_bit_add_bus(&itv->i2c_adap);
+
+	/* Instantiate the IR receiver device, if present */
+	if (retval == 0) {
+		struct i2c_board_info info;
+		/* The external IR receiver is at i2c address 0x34 (0x35 for
+		   reads).  Future Hauppauge cards will have an internal
+		   receiver at 0x30 (0x31 for reads).  In theory, both can be
+		   fitted, and Hauppauge suggest an external overrides an
+		   internal.
+
+		   That's why we probe 0x1a (~0x34) first. CB
+		*/
+		const unsigned short addr_list[] = {
+			0x1a,	/* Hauppauge IR external */
+			0x18,	/* Hauppauge IR internal */
+			0x71,	/* Hauppauge IR (PVR150) */
+			0x64,	/* Pixelview IR */
+			0x30,	/* KNC ONE IR */
+			0x6b,	/* Adaptec IR */
+			I2C_CLIENT_END
+		};
+
+		memset(&info, 0, sizeof(struct i2c_board_info));
+		strlcpy(info.type, "ir_video", I2C_NAME_SIZE);
+		i2c_new_probed_device(&itv->i2c_adap, &info, addr_list);
+	}
+
+	return retval;
 }
 
 void exit_ivtv_i2c(struct ivtv *itv)

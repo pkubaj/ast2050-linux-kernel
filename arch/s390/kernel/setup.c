@@ -42,6 +42,8 @@
 #include <linux/ctype.h>
 #include <linux/reboot.h>
 #include <linux/topology.h>
+#include <linux/ftrace.h>
+#include <linux/compat.h>
 
 #include <asm/ipl.h>
 #include <asm/uaccess.h>
@@ -153,6 +155,16 @@ static int __init condev_setup(char *str)
 
 __setup("condev=", condev_setup);
 
+static void __init set_preferred_console(void)
+{
+	if (MACHINE_IS_KVM)
+		add_preferred_console("hvc", 0, NULL);
+	else if (CONSOLE_IS_3215 || CONSOLE_IS_SCLP)
+		add_preferred_console("ttyS", 0, NULL);
+	else if (CONSOLE_IS_3270)
+		add_preferred_console("tty3270", 0, NULL);
+}
+
 static int __init conmode_setup(char *str)
 {
 #if defined(CONFIG_SCLP_CONSOLE) || defined(CONFIG_SCLP_VT220_CONSOLE)
@@ -167,6 +179,7 @@ static int __init conmode_setup(char *str)
 	if (strncmp(str, "3270", 5) == 0)
 		SET_CONSOLE_3270;
 #endif
+	set_preferred_console();
         return 1;
 }
 
@@ -442,6 +455,7 @@ setup_lowcore(void)
 	lc->steal_timer = S390_lowcore.steal_timer;
 	lc->last_update_timer = S390_lowcore.last_update_timer;
 	lc->last_update_clock = S390_lowcore.last_update_clock;
+	lc->ftrace_func = S390_lowcore.ftrace_func;
 	set_prefix((u32)(unsigned long) lc);
 	lowcore_ptr[0] = lc;
 }
@@ -716,7 +730,7 @@ static void __init setup_hwcaps(void)
 
 	if ((facility_list & (1UL << (31 - 22)))
 	    && (facility_list & (1UL << (31 - 30))))
-		elf_hwcap |= 1UL << 8;
+		elf_hwcap |= HWCAP_S390_ETF3EH;
 
 	/*
 	 * Check for additional facilities with store-facility-list-extended.
@@ -735,11 +749,20 @@ static void __init setup_hwcaps(void)
 	    __stfle(&facility_list_extended, 1) > 0) {
 		if ((facility_list_extended & (1ULL << (63 - 42)))
 		    && (facility_list_extended & (1ULL << (63 - 44))))
-			elf_hwcap |= 1UL << 6;
+			elf_hwcap |= HWCAP_S390_DFP;
 	}
 
+	/*
+	 * Huge page support HWCAP_S390_HPAGE is bit 7.
+	 */
 	if (MACHINE_HAS_HPAGE)
-		elf_hwcap |= 1UL << 7;
+		elf_hwcap |= HWCAP_S390_HPAGE;
+
+	/*
+	 * 64-bit register support for 31-bit processes
+	 * HWCAP_S390_HIGH_GPRS is bit 9.
+	 */
+	elf_hwcap |= HWCAP_S390_HIGH_GPRS;
 
 	switch (S390_lowcore.cpu_id.machine) {
 	case 0x9672:
@@ -778,9 +801,6 @@ static void __init setup_hwcaps(void)
 void __init
 setup_arch(char **cmdline_p)
 {
-	/* set up preferred console */
-	add_preferred_console("ttyS", 0, NULL);
-
         /*
          * print what head.S has found out about the machine
          */
@@ -800,11 +820,9 @@ setup_arch(char **cmdline_p)
 	if (MACHINE_IS_VM)
 		pr_info("Linux is running as a z/VM "
 			"guest operating system in 64-bit mode\n");
-	else if (MACHINE_IS_KVM) {
+	else if (MACHINE_IS_KVM)
 		pr_info("Linux is running under KVM in 64-bit mode\n");
-		add_preferred_console("hvc", 0, NULL);
-		s390_virtio_console_init();
-	} else
+	else
 		pr_info("Linux is running natively in 64-bit mode\n");
 #endif /* CONFIG_64BIT */
 
@@ -849,6 +867,7 @@ setup_arch(char **cmdline_p)
 
         /* Setup default console */
 	conmode_default();
+	set_preferred_console();
 
 	/* Setup zfcpdump support */
 	setup_zfcpdump(console_devno);

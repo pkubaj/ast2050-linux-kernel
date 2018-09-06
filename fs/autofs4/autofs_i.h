@@ -125,6 +125,7 @@ struct autofs_sb_info {
 	int sub_version;
 	int min_proto;
 	int max_proto;
+	int compat_daemon;
 	unsigned long exp_timeout;
 	unsigned int type;
 	int reghost_enabled;
@@ -223,12 +224,12 @@ int autofs4_wait(struct autofs_sb_info *,struct dentry *, enum autofs_notify);
 int autofs4_wait_release(struct autofs_sb_info *,autofs_wqt_t,int);
 void autofs4_catatonic_mode(struct autofs_sb_info *);
 
-static inline int autofs4_follow_mount(struct vfsmount **mnt, struct dentry **dentry)
+static inline int autofs4_follow_mount(struct path *path)
 {
 	int res = 0;
 
-	while (d_mountpoint(*dentry)) {
-		int followed = follow_down(mnt, dentry);
+	while (d_mountpoint(path->dentry)) {
+		int followed = follow_down(path);
 		if (!followed)
 			break;
 		res = 1;

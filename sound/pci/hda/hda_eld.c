@@ -383,7 +383,7 @@ static void hdmi_show_short_audio_desc(struct cea_sad *a)
 	snd_print_pcm_rates(a->rates, buf, sizeof(buf));
 
 	if (a->format == AUDIO_CODING_TYPE_LPCM)
-		snd_print_pcm_bits(a->sample_bits, buf2 + 8, sizeof(buf2 - 8));
+		snd_print_pcm_bits(a->sample_bits, buf2 + 8, sizeof(buf2) - 8);
 	else if (a->max_bitrate)
 		snprintf(buf2, sizeof(buf2),
 				", max bitrate = %d", a->max_bitrate);
@@ -508,7 +508,7 @@ static void hdmi_write_eld_info(struct snd_info_entry *entry,
 	char name[64];
 	char *sname;
 	long long val;
-	int n;
+	unsigned int n;
 
 	while (!snd_info_get_line(buffer, line, sizeof(line))) {
 		if (sscanf(line, "%s %llx", name, &val) != 2)
@@ -539,7 +539,7 @@ static void hdmi_write_eld_info(struct snd_info_entry *entry,
 				sname++;
 				n = 10 * n + name[4] - '0';
 			}
-			if (n < 0 || n > 31) /* double the CEA limit */
+			if (n >= ELD_MAX_SAD)
 				continue;
 			if (!strcmp(sname, "_coding_type"))
 				e->sad[n].format = val;

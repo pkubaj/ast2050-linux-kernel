@@ -101,7 +101,8 @@ static int netfs_trans_send_pages(struct netfs_trans *t, struct netfs_state *st)
 			goto err_out;
 		}
 
-		msg.msg_flags = MSG_WAITALL|(attached_pages == 1)?0:MSG_MORE;
+		msg.msg_flags = MSG_WAITALL | (attached_pages == 1 ? 0 :
+				MSG_MORE);
 
 		err = kernel_sendpage(st->socket, page, 0, size, msg.msg_flags);
 		if (err <= 0) {
@@ -177,9 +178,9 @@ int netfs_trans_send(struct netfs_trans *t, struct netfs_state *st)
 
 err_out_unlock_return:
 
-	if (st->need_reset) {
+	if (st->need_reset)
 		netfs_state_exit(st);
-	}
+
 	netfs_state_unlock_send(st);
 
 	dprintk("%s: t: %p, gen: %u, err: %d.\n",
@@ -467,7 +468,8 @@ int netfs_trans_finish_send(struct netfs_trans *t, struct pohmelfs_sb *psb)
 				continue;
 		}
 
-		if (psb->active_state && (psb->active_state->state.ctl.prio >= st->ctl.prio))
+		if (psb->active_state && (psb->active_state->state.ctl.prio >= st->ctl.prio) &&
+				(t->flags & NETFS_TRANS_SINGLE_DST))
 			st = &psb->active_state->state;
 
 		err = netfs_trans_push(t, st);

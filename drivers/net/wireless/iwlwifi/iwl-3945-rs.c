@@ -38,6 +38,7 @@
 
 #include "iwl-commands.h"
 #include "iwl-3945.h"
+#include "iwl-sta.h"
 
 #define RS_NAME "iwl-3945-rs"
 
@@ -672,32 +673,17 @@ static void rs_get_rate(void *priv_r, struct ieee80211_sta *sta,
 	s8 scale_action = 0;
 	unsigned long flags;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
-	u16 fc;
-	u16 rate_mask = 0;
+	u16 rate_mask = sta ? sta->supp_rates[sband->band] : 0;
 	s8 max_rate_idx = -1;
 	struct iwl_priv *priv = (struct iwl_priv *)priv_r;
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 
 	IWL_DEBUG_RATE(priv, "enter\n");
 
-	if (sta)
-		rate_mask = sta->supp_rates[sband->band];
-
-	/* Send management frames and broadcast/multicast data using lowest
-	 * rate. */
-	fc = le16_to_cpu(hdr->frame_control);
-	if ((fc & IEEE80211_FCTL_FTYPE) != IEEE80211_FTYPE_DATA ||
-	    is_multicast_ether_addr(hdr->addr1) ||
-	    !sta || !priv_sta) {
-		IWL_DEBUG_RATE(priv, "leave: No STA priv data to update!\n");
-		if (!rate_mask)
-			info->control.rates[0].idx =
-					rate_lowest_index(sband, NULL);
-		else
-			info->control.rates[0].idx =
-					rate_lowest_index(sband, sta);
+	if (rate_control_send_low(sta, priv_sta, txrc))
 		return;
-	}
+
+	rate_mask = sta->supp_rates[sband->band];
 
 	/* get user max rate if set */
 	max_rate_idx = txrc->max_rate_idx;
@@ -713,13 +699,13 @@ static void rs_get_rate(void *priv_r, struct ieee80211_sta *sta,
 
 	if ((priv->iw_mode == NL80211_IFTYPE_ADHOC) &&
 	    !rs_sta->ibss_sta_added) {
-		u8 sta_id = iwl3945_hw_find_station(priv, hdr->addr1);
+		u8 sta_id = iwl_find_station(priv, hdr->addr1);
 
 		if (sta_id == IWL_INVALID_STATION) {
-			IWL_DEBUG_RATE(priv, "LQ: ADD station %pm\n",
+			IWL_DEBUG_RATE(priv, "LQ: ADD station %pM\n",
 				       hdr->addr1);
-			sta_id = iwl3945_add_station(priv,
-				    hdr->addr1, 0, CMD_ASYNC);
+			sta_id = iwl_add_station(priv, hdr->addr1, false,
+				CMD_ASYNC, NULL);
 		}
 		if (sta_id != IWL_INVALID_STATION)
 			rs_sta->ibss_sta_added = 1;
@@ -974,7 +960,7 @@ void iwl3945_rate_scale_init(struct ieee80211_hw *hw, s32 sta_id)
 
 	rcu_read_lock();
 
-	sta = ieee80211_find_sta(hw, priv->stations_39[sta_id].sta.sta.addr);
+	sta = ieee80211_find_sta(hw, priv->stations[sta_id].sta.sta.addr);
 	if (!sta) {
 		rcu_read_unlock();
 		return;

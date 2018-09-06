@@ -28,6 +28,7 @@ config IA64
 	select HAVE_DMA_ATTRS
 	select HAVE_KVM
 	select HAVE_ARCH_TRACEHOOK
+	select HAVE_DMA_API_DEBUG
 	default y
 	help
 	  The Itanium Processor Family is Intel's 64-bit successor to
@@ -59,9 +60,7 @@ config IOMMU_HELPER
        bool
 
 config GENERIC_LOCKBREAK
-	bool
-	default y
-	depends on SMP && PREEMPT
+	def_bool n
 
 config RWSEM_XCHGADD_ALGORITHM
 	bool
@@ -88,6 +87,9 @@ config GENERIC_TIME_VSYSCALL
 	bool
 	default y
 
+config HAVE_LEGACY_PER_CPU_AREA
+	def_bool y
+
 config HAVE_SETUP_PER_CPU_AREA
 	def_bool y
 
@@ -110,6 +112,10 @@ config SCHED_OMIT_FRAME_POINTER
 config IA64_UNCACHED_ALLOCATOR
 	bool
 	select GENERIC_ALLOCATOR
+
+config ARCH_USES_PG_UNCACHED
+	def_bool y
+	depends on IA64_UNCACHED_ALLOCATOR
 
 config AUDIT_ARCH
 	bool
@@ -492,22 +498,9 @@ config HAVE_ARCH_NODEDATA_EXTENSION
 	def_bool y
 	depends on NUMA
 
-config IA32_SUPPORT
-	bool "Support for Linux/x86 binaries"
-	help
-	  IA-64 processors can execute IA-32 (X86) instructions.  By
-	  saying Y here, the kernel will include IA-32 system call
-	  emulation support which makes it possible to transparently
-	  run IA-32 Linux binaries on an IA-64 Linux system.
-	  If in doubt, say Y.
-
-config COMPAT
-	bool
-	depends on IA32_SUPPORT
-	default y
-
-config COMPAT_FOR_U64_ALIGNMENT
-	def_bool COMPAT
+config ARCH_PROC_KCORE_TEXT
+	def_bool y
+	depends on PROC_KCORE
 
 config IA64_MCA_RECOVERY
 	tristate "MCA recovery from errors other than TLB."

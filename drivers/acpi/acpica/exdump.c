@@ -120,9 +120,11 @@ static struct acpi_exdump_info acpi_ex_dump_event[2] = {
 	{ACPI_EXD_POINTER, ACPI_EXD_OFFSET(event.os_semaphore), "OsSemaphore"}
 };
 
-static struct acpi_exdump_info acpi_ex_dump_method[8] = {
+static struct acpi_exdump_info acpi_ex_dump_method[9] = {
 	{ACPI_EXD_INIT, ACPI_EXD_TABLE_SIZE(acpi_ex_dump_method), NULL},
-	{ACPI_EXD_UINT8, ACPI_EXD_OFFSET(method.param_count), "ParamCount"},
+	{ACPI_EXD_UINT8, ACPI_EXD_OFFSET(method.method_flags), "Method Flags"},
+	{ACPI_EXD_UINT8, ACPI_EXD_OFFSET(method.param_count),
+	 "Parameter Count"},
 	{ACPI_EXD_UINT8, ACPI_EXD_OFFSET(method.sync_level), "Sync Level"},
 	{ACPI_EXD_POINTER, ACPI_EXD_OFFSET(method.mutex), "Mutex"},
 	{ACPI_EXD_UINT8, ACPI_EXD_OFFSET(method.owner_id), "Owner Id"},
@@ -416,9 +418,9 @@ acpi_ex_dump_object(union acpi_operand_object *obj_desc,
 		case ACPI_EXD_REFERENCE:
 
 			acpi_ex_out_string("Class Name",
-					   (char *)
-					   acpi_ut_get_reference_name
-					   (obj_desc));
+					   ACPI_CAST_PTR(char,
+							 acpi_ut_get_reference_name
+							 (obj_desc)));
 			acpi_ex_dump_reference_obj(obj_desc);
 			break;
 
