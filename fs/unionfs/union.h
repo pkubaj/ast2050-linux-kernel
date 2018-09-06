@@ -485,6 +485,15 @@ static inline int set_branchperms(struct super_block *sb, int index, int perms)
 	return perms;
 }
 
+/* check if readonly lower inode, but possibly unlinked (no inode->i_sb) */
+static inline int __is_rdonly(const struct inode *inode)
+{
+	/* if unlinked, can't be readonly (?) */
+	if (!inode->i_sb)
+		return 0;
+	return IS_RDONLY(inode);
+
+}
 /* Is this file on a read-only branch? */
 static inline int is_robranch_super(const struct super_block *sb, int index)
 {
