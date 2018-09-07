@@ -2686,6 +2686,15 @@ static int ftgmac100_open(struct net_device *netdev)
 	return 0;
 }
 
+static const struct net_device_ops ftgmac100_netdev_ops = {
+	.ndo_open		= ftgmac100_open,
+	.ndo_stop		= ftgmac100_stop,
+	.ndo_start_xmit		= ftgmac100_hard_start_xmit,
+	.ndo_set_mac_address	= eth_mac_addr,
+	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_do_ioctl		= ftgmac100_do_ioctl,
+};
+
 static int __init ast_gmac_probe(struct platform_device *pdev)
 {
 	struct resource *res;
@@ -2719,24 +2728,7 @@ static int __init ast_gmac_probe(struct platform_device *pdev)
 
 //	SET_ETHTOOL_OPS(netdev, &ftgmac100_ethtool_ops);
 
-#if 0
 	netdev->netdev_ops 			= &ftgmac100_netdev_ops;
-#else
-	printk("ast_gmac_probe 5\n");
-
-	ether_setup(netdev);
-
-	netdev->open				= ftgmac100_open;
-	netdev->stop				= ast_gmac_stop;
-	netdev->hard_start_xmit 	= ftgmac100_wait_to_send_packet;
-	netdev->tx_timeout 			= ftgmac100_timeout;
-	netdev->get_stats 			= ftgmac100_query_statistics;
-#ifdef	HAVE_MULTICAST
-	netdev->set_multicast_list 	= &ftgmac100_set_multicast_list;
-#endif
-
-#endif
-
 
 #ifdef CONFIG_AST_NPAI
 //	netdev->features = NETIF_F_GRO;
