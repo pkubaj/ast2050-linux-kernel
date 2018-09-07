@@ -2719,7 +2719,7 @@ static int __init ast_gmac_probe(struct platform_device *pdev)
 
 //	SET_ETHTOOL_OPS(netdev, &ftgmac100_ethtool_ops);
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,30))
+#if 0
 	netdev->netdev_ops 			= &ftgmac100_netdev_ops;
 #else
 	printk("ast_gmac_probe 5\n");
