@@ -387,7 +387,7 @@ static int ipip_rcv(struct sk_buff *skb)
  *	and that skb is filled properly by that function.
  */
 
-static netdev_tx_t ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ip_tunnel *tunnel = netdev_priv(dev);
 	struct net_device_stats *stats = &tunnel->dev->stats;
@@ -402,13 +402,17 @@ static netdev_tx_t ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	__be32 dst = tiph->daddr;
 	int    mtu;
 
+	if (tunnel->recursion++) {
+		stats->collisions++;
+		goto tx_error;
+	}
+
 	if (skb->protocol != htons(ETH_P_IP))
 		goto tx_error;
 
 	if (tos&1)
 		tos = old_iph->tos;
 
-	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 	if (!dst) {
 		/* NBMA tunnel */
 		if ((rt = skb_rtable(skb)) == NULL) {
@@ -439,27 +443,25 @@ static netdev_tx_t ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		goto tx_error;
 	}
 
-	df |= old_iph->frag_off & htons(IP_DF);
-
-	if (df) {
+	if (tiph->frag_off)
 		mtu = dst_mtu(&rt->u.dst) - sizeof(struct iphdr);
+	else
+		mtu = skb_dst(skb) ? dst_mtu(skb_dst(skb)) : dev->mtu;
 
-		if (mtu < 68) {
-			stats->collisions++;
-			ip_rt_put(rt);
-			goto tx_error;
-		}
+	if (mtu < 68) {
+		stats->collisions++;
+		ip_rt_put(rt);
+		goto tx_error;
+	}
+	if (skb_dst(skb))
+		skb_dst(skb)->ops->update_pmtu(skb_dst(skb), mtu);
 
-		if (skb_dst(skb))
-			skb_dst(skb)->ops->update_pmtu(skb_dst(skb), mtu);
+	df |= (old_iph->frag_off&htons(IP_DF));
 
-		if ((old_iph->frag_off & htons(IP_DF)) &&
-		    mtu < ntohs(old_iph->tot_len)) {
-			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
-				  htonl(mtu));
-			ip_rt_put(rt);
-			goto tx_error;
-		}
+	if ((old_iph->frag_off&htons(IP_DF)) && mtu < ntohs(old_iph->tot_len)) {
+		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED, htonl(mtu));
+		ip_rt_put(rt);
+		goto tx_error;
 	}
 
 	if (tunnel->err_count > 0) {
@@ -483,7 +485,8 @@ static netdev_tx_t ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 			ip_rt_put(rt);
 			stats->tx_dropped++;
 			dev_kfree_skb(skb);
-			return NETDEV_TX_OK;
+			tunnel->recursion--;
+			return 0;
 		}
 		if (skb->sk)
 			skb_set_owner_w(new_skb, skb->sk);
@@ -495,6 +498,7 @@ static netdev_tx_t ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	skb->transport_header = skb->network_header;
 	skb_push(skb, sizeof(struct iphdr));
 	skb_reset_network_header(skb);
+	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED |
 			      IPSKB_REROUTED);
 	skb_dst_drop(skb);
@@ -519,14 +523,16 @@ static netdev_tx_t ipip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	nf_reset(skb);
 
 	IPTUNNEL_XMIT();
-	return NETDEV_TX_OK;
+	tunnel->recursion--;
+	return 0;
 
 tx_error_icmp:
 	dst_link_failure(skb);
 tx_error:
 	stats->tx_errors++;
 	dev_kfree_skb(skb);
-	return NETDEV_TX_OK;
+	tunnel->recursion--;
+	return 0;
 }
 
 static void ipip_tunnel_bind_dev(struct net_device *dev)
@@ -830,14 +836,15 @@ static int __init ipip_init(void)
 
 	printk(banner);
 
-	err = register_pernet_gen_device(&ipip_net_id, &ipip_net_ops);
-	if (err < 0)
-		return err;
-	err = xfrm4_tunnel_register(&ipip_handler, AF_INET);
-	if (err < 0) {
-		unregister_pernet_device(&ipip_net_ops);
+	if (xfrm4_tunnel_register(&ipip_handler, AF_INET)) {
 		printk(KERN_INFO "ipip init: can't register tunnel\n");
+		return -EAGAIN;
 	}
+
+	err = register_pernet_gen_device(&ipip_net_id, &ipip_net_ops);
+	if (err)
+		xfrm4_tunnel_deregister(&ipip_handler, AF_INET);
+
 	return err;
 }
 
@@ -852,4 +859,3 @@ static void __exit ipip_fini(void)
 module_init(ipip_init);
 module_exit(ipip_fini);
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_NETDEV("tunl0");

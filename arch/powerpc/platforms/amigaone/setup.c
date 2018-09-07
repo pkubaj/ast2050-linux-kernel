@@ -110,16 +110,13 @@ void __init amigaone_init_IRQ(void)
 	irq_set_default_host(i8259_get_host());
 }
 
-static int __init request_isa_regions(void)
+void __init amigaone_init(void)
 {
 	request_region(0x00, 0x20, "dma1");
 	request_region(0x40, 0x20, "timer");
 	request_region(0x80, 0x10, "dma page reg");
 	request_region(0xc0, 0x20, "dma2");
-
-	return 0;
 }
-machine_device_initcall(amigaone, request_isa_regions);
 
 void amigaone_restart(char *cmd)
 {
@@ -164,6 +161,7 @@ define_machine(amigaone) {
 	.name			= "AmigaOne",
 	.probe			= amigaone_probe,
 	.setup_arch		= amigaone_setup_arch,
+	.init			= amigaone_init,
 	.show_cpuinfo		= amigaone_show_cpuinfo,
 	.init_IRQ		= amigaone_init_IRQ,
 	.restart		= amigaone_restart,

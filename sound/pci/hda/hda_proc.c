@@ -39,8 +39,6 @@ static const char *get_wid_type_name(unsigned int wid_value)
 		[AC_WID_BEEP] = "Beep Generator Widget",
 		[AC_WID_VENDOR] = "Vendor Defined Widget",
 	};
-	if (wid_value == -1)
-		return "UNKNOWN Widget";
 	wid_value &= 0xf;
 	if (names[wid_value])
 		return names[wid_value];
@@ -340,7 +338,7 @@ static void print_digital_conv(struct snd_info_buffer *buffer,
 	if (digi1 & AC_DIG1_EMPHASIS)
 		snd_iprintf(buffer, " Preemphasis");
 	if (digi1 & AC_DIG1_COPYRIGHT)
-		snd_iprintf(buffer, " Non-Copyright");
+		snd_iprintf(buffer, " Copyright");
 	if (digi1 & AC_DIG1_NONAUDIO)
 		snd_iprintf(buffer, " Non-Audio");
 	if (digi1 & AC_DIG1_PROFESSIONAL)
@@ -510,14 +508,17 @@ static void print_codec_info(struct snd_info_entry *entry,
 		unsigned int wid_caps =
 			snd_hda_param_read(codec, nid,
 					   AC_PAR_AUDIO_WIDGET_CAP);
-		unsigned int wid_type = get_wcaps_type(wid_caps);
+		unsigned int wid_type =
+			(wid_caps & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT;
 		hda_nid_t conn[HDA_MAX_CONNECTIONS];
 		int conn_len = 0;
 
 		snd_iprintf(buffer, "Node 0x%02x [%s] wcaps 0x%x:", nid,
 			    get_wid_type_name(wid_type), wid_caps);
 		if (wid_caps & AC_WCAP_STEREO) {
-			unsigned int chans = get_wcaps_channels(wid_caps);
+			unsigned int chans;
+			chans = (wid_caps & AC_WCAP_CHAN_CNT_EXT) >> 13;
+			chans = ((chans << 1) | 1) + 1;
 			if (chans == 2)
 				snd_iprintf(buffer, " Stereo");
 			else

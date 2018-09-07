@@ -108,9 +108,10 @@ int ubifs_scan_a_node(const struct ubifs_info *c, void *buf, int len, int lnum,
 
 		/* Make the node pads to 8-byte boundary */
 		if ((node_len + pad_len) & 7) {
-			if (!quiet)
+			if (!quiet) {
 				dbg_err("bad padding length %d - %d",
 					offs, offs + node_len + pad_len);
+			}
 			return SCANNED_A_BAD_PAD_NODE;
 		}
 
@@ -252,19 +253,15 @@ void ubifs_scanned_corruption(const struct ubifs_info *c, int lnum, int offs,
  * @c: UBIFS file-system description object
  * @lnum: logical eraseblock number
  * @offs: offset to start at (usually zero)
- * @sbuf: scan buffer (must be of @c->leb_size bytes in size)
- * @quiet: print no messages
+ * @sbuf: scan buffer (must be c->leb_size)
  *
  * This function scans LEB number @lnum and returns complete information about
  * its contents. Returns the scaned information in case of success and,
  * %-EUCLEAN if the LEB neads recovery, and other negative error codes in case
  * of failure.
- *
- * If @quiet is non-zero, this function does not print large and scary
- * error messages and flash dumps in case of errors.
  */
 struct ubifs_scan_leb *ubifs_scan(const struct ubifs_info *c, int lnum,
-				  int offs, void *sbuf, int quiet)
+				  int offs, void *sbuf)
 {
 	void *buf = sbuf + offs;
 	int err, len = c->leb_size - offs;
@@ -283,7 +280,7 @@ struct ubifs_scan_leb *ubifs_scan(const struct ubifs_info *c, int lnum,
 
 		cond_resched();
 
-		ret = ubifs_scan_a_node(c, buf, len, lnum, offs, quiet);
+		ret = ubifs_scan_a_node(c, buf, len, lnum, offs, 0);
 		if (ret > 0) {
 			/* Padding bytes or a valid padding node */
 			offs += ret;
@@ -323,9 +320,7 @@ struct ubifs_scan_leb *ubifs_scan(const struct ubifs_info *c, int lnum,
 	}
 
 	if (offs % c->min_io_size) {
-		if (!quiet)
-			ubifs_err("empty space starts at non-aligned offset %d",
-				  offs);
+		ubifs_err("empty space starts at non-aligned offset %d", offs);
 		goto corrupted;;
 	}
 
@@ -336,25 +331,18 @@ struct ubifs_scan_leb *ubifs_scan(const struct ubifs_info *c, int lnum,
 			break;
 	for (; len; offs++, buf++, len--)
 		if (*(uint8_t *)buf != 0xff) {
-			if (!quiet)
-				ubifs_err("corrupt empty space at LEB %d:%d",
-					  lnum, offs);
+			ubifs_err("corrupt empty space at LEB %d:%d",
+				  lnum, offs);
 			goto corrupted;
 		}
 
 	return sleb;
 
 corrupted:
-	if (!quiet) {
-		ubifs_scanned_corruption(c, lnum, offs, buf);
-		ubifs_err("LEB %d scanning failed", lnum);
-	}
+	ubifs_scanned_corruption(c, lnum, offs, buf);
 	err = -EUCLEAN;
-	ubifs_scan_destroy(sleb);
-	return ERR_PTR(err);
-
 error:
-	ubifs_err("LEB %d scanning failed, error %d", lnum, err);
+	ubifs_err("LEB %d scanning failed", lnum);
 	ubifs_scan_destroy(sleb);
 	return ERR_PTR(err);
 }

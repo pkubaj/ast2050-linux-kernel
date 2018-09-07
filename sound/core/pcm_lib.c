@@ -197,16 +197,12 @@ static int snd_pcm_update_hw_ptr_post(struct snd_pcm_substream *substream,
 		avail = snd_pcm_capture_avail(runtime);
 	if (avail > runtime->avail_max)
 		runtime->avail_max = avail;
-	if (runtime->status->state == SNDRV_PCM_STATE_DRAINING) {
-		if (avail >= runtime->buffer_size) {
+	if (avail >= runtime->stop_threshold) {
+		if (substream->runtime->status->state == SNDRV_PCM_STATE_DRAINING)
 			snd_pcm_drain_done(substream);
-			return -EPIPE;
-		}
-	} else {
-		if (avail >= runtime->stop_threshold) {
+		else
 			xrun(substream);
-			return -EPIPE;
-		}
+		return -EPIPE;
 	}
 	if (avail >= runtime->control->avail_min)
 		wake_up(&runtime->sleep);

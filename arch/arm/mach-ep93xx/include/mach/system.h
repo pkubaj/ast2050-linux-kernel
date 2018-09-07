@@ -11,13 +11,15 @@ static inline void arch_idle(void)
 
 static inline void arch_reset(char mode, const char *cmd)
 {
+	u32 devicecfg;
+
 	local_irq_disable();
 
-	/*
-	 * Set then clear the SWRST bit to initiate a software reset
-	 */
-	ep93xx_devcfg_set_bits(EP93XX_SYSCON_DEVCFG_SWRST);
-	ep93xx_devcfg_clear_bits(EP93XX_SYSCON_DEVCFG_SWRST);
+	devicecfg = __raw_readl(EP93XX_SYSCON_DEVICE_CONFIG);
+	__raw_writel(0xaa, EP93XX_SYSCON_SWLOCK);
+	__raw_writel(devicecfg | 0x80000000, EP93XX_SYSCON_DEVICE_CONFIG);
+	__raw_writel(0xaa, EP93XX_SYSCON_SWLOCK);
+	__raw_writel(devicecfg & ~0x80000000, EP93XX_SYSCON_DEVICE_CONFIG);
 
 	while (1)
 		;

@@ -365,7 +365,7 @@ static inline struct nlmsghdr *nlmsg_next(struct nlmsghdr *nlh, int *remaining)
  *
  * See nla_parse()
  */
-static inline int nlmsg_parse(const struct nlmsghdr *nlh, int hdrlen,
+static inline int nlmsg_parse(struct nlmsghdr *nlh, int hdrlen,
 			      struct nlattr *tb[], int maxtype,
 			      const struct nla_policy *policy)
 {
@@ -384,7 +384,7 @@ static inline int nlmsg_parse(const struct nlmsghdr *nlh, int hdrlen,
  *
  * Returns the first attribute which matches the specified type.
  */
-static inline struct nlattr *nlmsg_find_attr(const struct nlmsghdr *nlh,
+static inline struct nlattr *nlmsg_find_attr(struct nlmsghdr *nlh,
 					     int hdrlen, int attrtype)
 {
 	return nla_find(nlmsg_attrdata(nlh, hdrlen),
@@ -414,7 +414,7 @@ static inline int nlmsg_validate(struct nlmsghdr *nlh, int hdrlen, int maxtype,
  *
  * Returns 1 if a report back to the application is requested.
  */
-static inline int nlmsg_report(const struct nlmsghdr *nlh)
+static inline int nlmsg_report(struct nlmsghdr *nlh)
 {
 	return !!(nlh->nlmsg_flags & NLM_F_ECHO);
 }

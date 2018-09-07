@@ -107,7 +107,6 @@
 #ifdef CONFIG_SYSCTL
 #include <linux/sysctl.h>
 #endif
-#include <net/secure_seq.h>
 
 #define RT_FL_TOS(oldflp) \
     ((u32)(oldflp->fl4_tos & (IPTOS_RT_MASK | RTO_ONLINK)))
@@ -1412,7 +1411,7 @@ void ip_rt_redirect(__be32 old_gw, __be32 daddr, __be32 new_gw,
 					dev_hold(rt->u.dst.dev);
 				if (rt->idev)
 					in_dev_hold(rt->idev);
-				rt->u.dst.obsolete	= -1;
+				rt->u.dst.obsolete	= 0;
 				rt->u.dst.lastuse	= jiffies;
 				rt->u.dst.path		= &rt->u.dst;
 				rt->u.dst.neighbour	= NULL;
@@ -1477,7 +1476,7 @@ static struct dst_entry *ipv4_negative_advice(struct dst_entry *dst)
 	struct dst_entry *ret = dst;
 
 	if (rt) {
-		if (dst->obsolete > 0) {
+		if (dst->obsolete) {
 			ip_rt_put(rt);
 			ret = NULL;
 		} else if ((rt->rt_flags & RTCF_REDIRECTED) ||
@@ -1515,17 +1514,13 @@ static struct dst_entry *ipv4_negative_advice(struct dst_entry *dst)
 void ip_rt_send_redirect(struct sk_buff *skb)
 {
 	struct rtable *rt = skb_rtable(skb);
-	struct in_device *in_dev;
-	int log_martians;
+	struct in_device *in_dev = in_dev_get(rt->u.dst.dev);
 
-	rcu_read_lock();
-	in_dev = __in_dev_get_rcu(rt->u.dst.dev);
-	if (!in_dev || !IN_DEV_TX_REDIRECTS(in_dev)) {
-		rcu_read_unlock();
+	if (!in_dev)
 		return;
-	}
-	log_martians = IN_DEV_LOG_MARTIANS(in_dev);
-	rcu_read_unlock();
+
+	if (!IN_DEV_TX_REDIRECTS(in_dev))
+		goto out;
 
 	/* No redirected packets during ip_rt_redirect_silence;
 	 * reset the algorithm.
@@ -1538,7 +1533,7 @@ void ip_rt_send_redirect(struct sk_buff *skb)
 	 */
 	if (rt->u.dst.rate_tokens >= ip_rt_redirect_number) {
 		rt->u.dst.rate_last = jiffies;
-		return;
+		goto out;
 	}
 
 	/* Check for load limit; set rate_last to the latest sent
@@ -1552,7 +1547,7 @@ void ip_rt_send_redirect(struct sk_buff *skb)
 		rt->u.dst.rate_last = jiffies;
 		++rt->u.dst.rate_tokens;
 #ifdef CONFIG_IP_ROUTE_VERBOSE
-		if (log_martians &&
+		if (IN_DEV_LOG_MARTIANS(in_dev) &&
 		    rt->u.dst.rate_tokens == ip_rt_redirect_number &&
 		    net_ratelimit())
 			printk(KERN_WARNING "host %pI4/if%d ignores redirects for %pI4 to %pI4.\n",
@@ -1560,6 +1555,8 @@ void ip_rt_send_redirect(struct sk_buff *skb)
 				&rt->rt_dst, &rt->rt_gateway);
 #endif
 	}
+out:
+	in_dev_put(in_dev);
 }
 
 static int ip_error(struct sk_buff *skb)
@@ -1700,9 +1697,7 @@ static void ip_rt_update_pmtu(struct dst_entry *dst, u32 mtu)
 
 static struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie)
 {
-	if (rt_is_expired((struct rtable *)dst))
-		return NULL;
-	return dst;
+	return NULL;
 }
 
 static void ipv4_dst_destroy(struct dst_entry *dst)
@@ -1857,15 +1852,14 @@ static int ip_route_input_mc(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			goto e_inval;
 		spec_dst = inet_select_addr(dev, 0, RT_SCOPE_LINK);
 	} else if (fib_validate_source(saddr, 0, tos, 0,
-					dev, &spec_dst, &itag, 0) < 0)
+					dev, &spec_dst, &itag) < 0)
 		goto e_inval;
 
 	rth = dst_alloc(&ipv4_dst_ops);
 	if (!rth)
 		goto e_nobufs;
 
-	rth->u.dst.output = ip_rt_bug;
-	rth->u.dst.obsolete = -1;
+	rth->u.dst.output= ip_rt_bug;
 
 	atomic_set(&rth->u.dst.__refcnt, 1);
 	rth->u.dst.flags= DST_HOST;
@@ -1971,7 +1965,7 @@ static int __mkroute_input(struct sk_buff *skb,
 
 
 	err = fib_validate_source(saddr, daddr, tos, FIB_RES_OIF(*res),
-				  in_dev->dev, &spec_dst, &itag, skb->mark);
+				  in_dev->dev, &spec_dst, &itag);
 	if (err < 0) {
 		ip_handle_martian_source(in_dev->dev, in_dev, skb, daddr,
 					 saddr);
@@ -2026,7 +2020,6 @@ static int __mkroute_input(struct sk_buff *skb,
 	rth->fl.oif 	= 0;
 	rth->rt_spec_dst= spec_dst;
 
-	rth->u.dst.obsolete = -1;
 	rth->u.dst.input = ip_forward;
 	rth->u.dst.output = ip_output;
 	rth->rt_genid = rt_genid(dev_net(rth->u.dst.dev));
@@ -2146,7 +2139,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		int result;
 		result = fib_validate_source(saddr, daddr, tos,
 					     net->loopback_dev->ifindex,
-					     dev, &spec_dst, &itag, skb->mark);
+					     dev, &spec_dst, &itag);
 		if (result < 0)
 			goto martian_source;
 		if (result)
@@ -2175,7 +2168,7 @@ brd_input:
 		spec_dst = inet_select_addr(dev, 0, RT_SCOPE_LINK);
 	else {
 		err = fib_validate_source(saddr, 0, tos, 0, dev, &spec_dst,
-					  &itag, skb->mark);
+					  &itag);
 		if (err < 0)
 			goto martian_source;
 		if (err)
@@ -2191,7 +2184,6 @@ local_input:
 		goto e_nobufs;
 
 	rth->u.dst.output= ip_rt_bug;
-	rth->u.dst.obsolete = -1;
 	rth->rt_genid = rt_genid(net);
 
 	atomic_set(&rth->u.dst.__refcnt, 1);
@@ -2416,8 +2408,7 @@ static int __mkroute_output(struct rtable **result,
 	rth->rt_gateway = fl->fl4_dst;
 	rth->rt_spec_dst= fl->fl4_src;
 
-	rth->u.dst.output = ip_output;
-	rth->u.dst.obsolete = -1;
+	rth->u.dst.output=ip_output;
 	rth->rt_genid = rt_genid(dev_net(dev_out));
 
 	RT_CACHE_STAT_INC(out_slow_tot);
@@ -2719,11 +2710,6 @@ slow_output:
 
 EXPORT_SYMBOL_GPL(__ip_route_output_key);
 
-static struct dst_entry *ipv4_blackhole_dst_check(struct dst_entry *dst, u32 cookie)
-{
-	return NULL;
-}
-
 static void ipv4_rt_blackhole_update_pmtu(struct dst_entry *dst, u32 mtu)
 {
 }
@@ -2732,7 +2718,7 @@ static struct dst_ops ipv4_dst_blackhole_ops = {
 	.family			=	AF_INET,
 	.protocol		=	cpu_to_be16(ETH_P_IP),
 	.destroy		=	ipv4_dst_destroy,
-	.check			=	ipv4_blackhole_dst_check,
+	.check			=	ipv4_dst_check,
 	.update_pmtu		=	ipv4_rt_blackhole_update_pmtu,
 	.entries		=	ATOMIC_INIT(0),
 };
@@ -2747,7 +2733,6 @@ static int ipv4_dst_blackhole(struct net *net, struct rtable **rp, struct flowi 
 	if (rt) {
 		struct dst_entry *new = &rt->u.dst;
 
-		new->obsolete = -1;
 		atomic_set(&new->__refcnt, 1);
 		new->__use = 1;
 		new->input = dst_discard;
@@ -3049,7 +3034,7 @@ void ip_rt_multicast_event(struct in_device *in_dev)
 
 #ifdef CONFIG_SYSCTL
 static int ipv4_sysctl_rtcache_flush(ctl_table *__ctl, int write,
-					void __user *buffer,
+					struct file *filp, void __user *buffer,
 					size_t *lenp, loff_t *ppos)
 {
 	if (write) {
@@ -3059,7 +3044,7 @@ static int ipv4_sysctl_rtcache_flush(ctl_table *__ctl, int write,
 
 		memcpy(&ctl, __ctl, sizeof(ctl));
 		ctl.data = &flush_delay;
-		proc_dointvec(&ctl, write, buffer, lenp, ppos);
+		proc_dointvec(&ctl, write, filp, buffer, lenp, ppos);
 
 		net = (struct net *)__ctl->extra1;
 		rt_cache_flush(net, flush_delay);
@@ -3119,11 +3104,12 @@ static void rt_secret_reschedule(int old)
 }
 
 static int ipv4_sysctl_rt_secret_interval(ctl_table *ctl, int write,
+					  struct file *filp,
 					  void __user *buffer, size_t *lenp,
 					  loff_t *ppos)
 {
 	int old = ip_rt_secret_interval;
-	int ret = proc_dointvec_jiffies(ctl, write, buffer, lenp, ppos);
+	int ret = proc_dointvec_jiffies(ctl, write, filp, buffer, lenp, ppos);
 
 	rt_secret_reschedule(old);
 
@@ -3456,7 +3442,7 @@ int __init ip_rt_init(void)
 		printk(KERN_ERR "Unable to create route proc files\n");
 #ifdef CONFIG_XFRM
 	xfrm_init();
-	xfrm4_init(ip_rt_max_size);
+	xfrm4_init();
 #endif
 	rtnl_register(PF_INET, RTM_GETROUTE, inet_rtm_getroute, NULL);
 

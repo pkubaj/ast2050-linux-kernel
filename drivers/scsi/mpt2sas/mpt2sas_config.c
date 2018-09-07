@@ -2,7 +2,7 @@
  * This module provides common API for accessing firmware configuration pages
  *
  * This code is based on drivers/scsi/mpt2sas/mpt2_base.c
- * Copyright (C) 2007-2009  LSI Corporation
+ * Copyright (C) 2007-2008  LSI Corporation
  *  (mailto:DL-MPTFusionLinux@lsi.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -72,15 +72,15 @@
 
 /**
  * struct config_request - obtain dma memory via routine
- * @sz: size
- * @page: virt pointer
- * @page_dma: phys pointer
+ * @config_page_sz: size
+ * @config_page: virt pointer
+ * @config_page_dma: phys pointer
  *
  */
 struct config_request{
-	u16			sz;
-	void			*page;
-	dma_addr_t		page_dma;
+	u16			config_page_sz;
+	void			*config_page;
+	dma_addr_t		config_page_dma;
 };
 
 #ifdef CONFIG_SCSI_MPT2SAS_LOGGING
@@ -175,6 +175,157 @@ _config_display_some_debug(struct MPT2SAS_ADAPTER *ioc, u16 smid,
 #endif
 
 /**
+ * mpt2sas_config_done - config page completion routine
+ * @ioc: per adapter object
+ * @smid: system request message index
+ * @VF_ID: virtual function id
+ * @reply: reply message frame(lower 32bit addr)
+ * Context: none.
+ *
+ * The callback handler when using _config_request.
+ *
+ * Return nothing.
+ */
+void
+mpt2sas_config_done(struct MPT2SAS_ADAPTER *ioc, u16 smid, u8 VF_ID, u32 reply)
+{
+	MPI2DefaultReply_t *mpi_reply;
+
+	if (ioc->config_cmds.status == MPT2_CMD_NOT_USED)
+		return;
+	if (ioc->config_cmds.smid != smid)
+		return;
+	ioc->config_cmds.status |= MPT2_CMD_COMPLETE;
+	mpi_reply =  mpt2sas_base_get_reply_virt_addr(ioc, reply);
+	if (mpi_reply) {
+		ioc->config_cmds.status |= MPT2_CMD_REPLY_VALID;
+		memcpy(ioc->config_cmds.reply, mpi_reply,
+		    mpi_reply->MsgLength*4);
+	}
+	ioc->config_cmds.status &= ~MPT2_CMD_PENDING;
+#ifdef CONFIG_SCSI_MPT2SAS_LOGGING
+	_config_display_some_debug(ioc, smid, "config_done", mpi_reply);
+#endif
+	complete(&ioc->config_cmds.done);
+}
+
+/**
+ * _config_request - main routine for sending config page requests
+ * @ioc: per adapter object
+ * @mpi_request: request message frame
+ * @mpi_reply: reply mf payload returned from firmware
+ * @timeout: timeout in seconds
+ * Context: sleep, the calling function needs to acquire the config_cmds.mutex
+ *
+ * A generic API for config page requests to firmware.
+ *
+ * The ioc->config_cmds.status flag should be MPT2_CMD_NOT_USED before calling
+ * this API.
+ *
+ * The callback index is set inside `ioc->config_cb_idx.
+ *
+ * Returns 0 for success, non-zero for failure.
+ */
+static int
+_config_request(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigRequest_t
+    *mpi_request, Mpi2ConfigReply_t *mpi_reply, int timeout)
+{
+	u16 smid;
+	u32 ioc_state;
+	unsigned long timeleft;
+	Mpi2ConfigRequest_t *config_request;
+	int r;
+	u8 retry_count;
+	u8 issue_host_reset = 0;
+	u16 wait_state_count;
+
+	mutex_lock(&ioc->config_cmds.mutex);
+	if (ioc->config_cmds.status != MPT2_CMD_NOT_USED) {
+		printk(MPT2SAS_ERR_FMT "%s: config_cmd in use\n",
+		    ioc->name, __func__);
+		mutex_unlock(&ioc->config_cmds.mutex);
+		return -EAGAIN;
+	}
+	retry_count = 0;
+
+ retry_config:
+	if (retry_count) {
+		if (retry_count > 2) /* attempt only 2 retries */
+			return -EFAULT;
+		printk(MPT2SAS_INFO_FMT "%s: attempting retry (%d)\n",
+		    ioc->name, __func__, retry_count);
+	}
+	wait_state_count = 0;
+	ioc_state = mpt2sas_base_get_iocstate(ioc, 1);
+	while (ioc_state != MPI2_IOC_STATE_OPERATIONAL) {
+		if (wait_state_count++ == MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT) {
+			printk(MPT2SAS_ERR_FMT
+			    "%s: failed due to ioc not operational\n",
+			    ioc->name, __func__);
+			r = -EFAULT;
+			goto out;
+		}
+		ssleep(1);
+		ioc_state = mpt2sas_base_get_iocstate(ioc, 1);
+		printk(MPT2SAS_INFO_FMT "%s: waiting for "
+		    "operational state(count=%d)\n", ioc->name,
+		    __func__, wait_state_count);
+	}
+	if (wait_state_count)
+		printk(MPT2SAS_INFO_FMT "%s: ioc is operational\n",
+		    ioc->name, __func__);
+
+	smid = mpt2sas_base_get_smid(ioc, ioc->config_cb_idx);
+	if (!smid) {
+		printk(MPT2SAS_ERR_FMT "%s: failed obtaining a smid\n",
+		    ioc->name, __func__);
+		r = -EAGAIN;
+		goto out;
+	}
+
+	r = 0;
+	memset(mpi_reply, 0, sizeof(Mpi2ConfigReply_t));
+	ioc->config_cmds.status = MPT2_CMD_PENDING;
+	config_request = mpt2sas_base_get_msg_frame(ioc, smid);
+	ioc->config_cmds.smid = smid;
+	memcpy(config_request, mpi_request, sizeof(Mpi2ConfigRequest_t));
+#ifdef CONFIG_SCSI_MPT2SAS_LOGGING
+	_config_display_some_debug(ioc, smid, "config_request", NULL);
+#endif
+	mpt2sas_base_put_smid_default(ioc, smid, config_request->VF_ID);
+	timeleft = wait_for_completion_timeout(&ioc->config_cmds.done,
+	    timeout*HZ);
+	if (!(ioc->config_cmds.status & MPT2_CMD_COMPLETE)) {
+		printk(MPT2SAS_ERR_FMT "%s: timeout\n",
+		    ioc->name, __func__);
+		_debug_dump_mf(mpi_request,
+		    sizeof(Mpi2ConfigRequest_t)/4);
+		retry_count++;
+		if (ioc->config_cmds.smid == smid)
+			mpt2sas_base_free_smid(ioc, smid);
+		if ((ioc->shost_recovery) ||
+		    (ioc->config_cmds.status & MPT2_CMD_RESET))
+			goto retry_config;
+		issue_host_reset = 1;
+		r = -EFAULT;
+		goto out;
+	}
+	if (ioc->config_cmds.status & MPT2_CMD_REPLY_VALID)
+		memcpy(mpi_reply, ioc->config_cmds.reply,
+		    sizeof(Mpi2ConfigReply_t));
+	if (retry_count)
+		printk(MPT2SAS_INFO_FMT "%s: retry completed!!\n",
+		    ioc->name, __func__);
+out:
+	ioc->config_cmds.status = MPT2_CMD_NOT_USED;
+	mutex_unlock(&ioc->config_cmds.mutex);
+	if (issue_host_reset)
+		mpt2sas_base_hard_reset_handler(ioc, CAN_SLEEP,
+		    FORCE_BIG_HAMMER);
+	return r;
+}
+
+/**
  * _config_alloc_config_dma_memory - obtain physical memory
  * @ioc: per adapter object
  * @mem: struct config_request
@@ -189,19 +340,10 @@ _config_alloc_config_dma_memory(struct MPT2SAS_ADAPTER *ioc,
 {
 	int r = 0;
 
-	if (mem->sz > ioc->config_page_sz) {
-		mem->page = dma_alloc_coherent(&ioc->pdev->dev, mem->sz,
-		    &mem->page_dma, GFP_KERNEL);
-		if (!mem->page) {
-			printk(MPT2SAS_ERR_FMT "%s: dma_alloc_coherent"
-			    " failed asking for (%d) bytes!!\n",
-			    ioc->name, __func__, mem->sz);
-			r = -ENOMEM;
-		}
-	} else { /* use tmp buffer if less than 512 bytes */
-		mem->page = ioc->config_page;
-		mem->page_dma = ioc->config_page_dma;
-	}
+	mem->config_page = pci_alloc_consistent(ioc->pdev, mem->config_page_sz,
+	    &mem->config_page_dma);
+	if (!mem->config_page)
+		r = -ENOMEM;
 	return r;
 }
 
@@ -218,214 +360,8 @@ static void
 _config_free_config_dma_memory(struct MPT2SAS_ADAPTER *ioc,
     struct config_request *mem)
 {
-	if (mem->sz > ioc->config_page_sz)
-		dma_free_coherent(&ioc->pdev->dev, mem->sz, mem->page,
-		    mem->page_dma);
-}
-
-/**
- * mpt2sas_config_done - config page completion routine
- * @ioc: per adapter object
- * @smid: system request message index
- * @msix_index: MSIX table index supplied by the OS
- * @reply: reply message frame(lower 32bit addr)
- * Context: none.
- *
- * The callback handler when using _config_request.
- *
- * Return 1 meaning mf should be freed from _base_interrupt
- *        0 means the mf is freed from this function.
- */
-u8
-mpt2sas_config_done(struct MPT2SAS_ADAPTER *ioc, u16 smid, u8 msix_index,
-    u32 reply)
-{
-	MPI2DefaultReply_t *mpi_reply;
-
-	if (ioc->config_cmds.status == MPT2_CMD_NOT_USED)
-		return 1;
-	if (ioc->config_cmds.smid != smid)
-		return 1;
-	ioc->config_cmds.status |= MPT2_CMD_COMPLETE;
-	mpi_reply =  mpt2sas_base_get_reply_virt_addr(ioc, reply);
-	if (mpi_reply) {
-		ioc->config_cmds.status |= MPT2_CMD_REPLY_VALID;
-		memcpy(ioc->config_cmds.reply, mpi_reply,
-		    mpi_reply->MsgLength*4);
-	}
-	ioc->config_cmds.status &= ~MPT2_CMD_PENDING;
-#ifdef CONFIG_SCSI_MPT2SAS_LOGGING
-	_config_display_some_debug(ioc, smid, "config_done", mpi_reply);
-#endif
-	ioc->config_cmds.smid = USHORT_MAX;
-	complete(&ioc->config_cmds.done);
-	return 1;
-}
-
-/**
- * _config_request - main routine for sending config page requests
- * @ioc: per adapter object
- * @mpi_request: request message frame
- * @mpi_reply: reply mf payload returned from firmware
- * @timeout: timeout in seconds
- * @config_page: contents of the config page
- * @config_page_sz: size of config page
- * Context: sleep
- *
- * A generic API for config page requests to firmware.
- *
- * The ioc->config_cmds.status flag should be MPT2_CMD_NOT_USED before calling
- * this API.
- *
- * The callback index is set inside `ioc->config_cb_idx.
- *
- * Returns 0 for success, non-zero for failure.
- */
-static int
-_config_request(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigRequest_t
-    *mpi_request, Mpi2ConfigReply_t *mpi_reply, int timeout,
-    void *config_page, u16 config_page_sz)
-{
-	u16 smid;
-	u32 ioc_state;
-	unsigned long timeleft;
-	Mpi2ConfigRequest_t *config_request;
-	int r;
-	u8 retry_count, issue_host_reset = 0;
-	u16 wait_state_count;
-	struct config_request mem;
-
-	mutex_lock(&ioc->config_cmds.mutex);
-	if (ioc->config_cmds.status != MPT2_CMD_NOT_USED) {
-		printk(MPT2SAS_ERR_FMT "%s: config_cmd in use\n",
-		    ioc->name, __func__);
-		mutex_unlock(&ioc->config_cmds.mutex);
-		return -EAGAIN;
-	}
-
-	retry_count = 0;
-	memset(&mem, 0, sizeof(struct config_request));
-
-	mpi_request->VF_ID = 0; /* TODO */
-	mpi_request->VP_ID = 0;
-
-	if (config_page) {
-		mpi_request->Header.PageVersion = mpi_reply->Header.PageVersion;
-		mpi_request->Header.PageNumber = mpi_reply->Header.PageNumber;
-		mpi_request->Header.PageType = mpi_reply->Header.PageType;
-		mpi_request->Header.PageLength = mpi_reply->Header.PageLength;
-		mpi_request->ExtPageLength = mpi_reply->ExtPageLength;
-		mpi_request->ExtPageType = mpi_reply->ExtPageType;
-		if (mpi_request->Header.PageLength)
-			mem.sz = mpi_request->Header.PageLength * 4;
-		else
-			mem.sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
-		r = _config_alloc_config_dma_memory(ioc, &mem);
-		if (r != 0)
-			goto out;
-		if (mpi_request->Action ==
-		    MPI2_CONFIG_ACTION_PAGE_WRITE_CURRENT) {
-			ioc->base_add_sg_single(&mpi_request->PageBufferSGE,
-			    MPT2_CONFIG_COMMON_WRITE_SGLFLAGS | mem.sz,
-			    mem.page_dma);
-			memcpy(mem.page, config_page, min_t(u16, mem.sz,
-			    config_page_sz));
-		} else {
-			memset(config_page, 0, config_page_sz);
-			ioc->base_add_sg_single(&mpi_request->PageBufferSGE,
-			    MPT2_CONFIG_COMMON_SGLFLAGS | mem.sz, mem.page_dma);
-		}
-	}
-
- retry_config:
-	if (retry_count) {
-		if (retry_count > 2) { /* attempt only 2 retries */
-			r = -EFAULT;
-			goto free_mem;
-		}
-		printk(MPT2SAS_INFO_FMT "%s: attempting retry (%d)\n",
-		    ioc->name, __func__, retry_count);
-	}
-	wait_state_count = 0;
-	ioc_state = mpt2sas_base_get_iocstate(ioc, 1);
-	while (ioc_state != MPI2_IOC_STATE_OPERATIONAL) {
-		if (wait_state_count++ == MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT) {
-			printk(MPT2SAS_ERR_FMT
-			    "%s: failed due to ioc not operational\n",
-			    ioc->name, __func__);
-			ioc->config_cmds.status = MPT2_CMD_NOT_USED;
-			r = -EFAULT;
-			goto free_mem;
-		}
-		ssleep(1);
-		ioc_state = mpt2sas_base_get_iocstate(ioc, 1);
-		printk(MPT2SAS_INFO_FMT "%s: waiting for "
-		    "operational state(count=%d)\n", ioc->name,
-		    __func__, wait_state_count);
-	}
-	if (wait_state_count)
-		printk(MPT2SAS_INFO_FMT "%s: ioc is operational\n",
-		    ioc->name, __func__);
-
-	smid = mpt2sas_base_get_smid(ioc, ioc->config_cb_idx);
-	if (!smid) {
-		printk(MPT2SAS_ERR_FMT "%s: failed obtaining a smid\n",
-		    ioc->name, __func__);
-		ioc->config_cmds.status = MPT2_CMD_NOT_USED;
-		r = -EAGAIN;
-		goto free_mem;
-	}
-
-	r = 0;
-	memset(mpi_reply, 0, sizeof(Mpi2ConfigReply_t));
-	ioc->config_cmds.status = MPT2_CMD_PENDING;
-	config_request = mpt2sas_base_get_msg_frame(ioc, smid);
-	ioc->config_cmds.smid = smid;
-	memcpy(config_request, mpi_request, sizeof(Mpi2ConfigRequest_t));
-#ifdef CONFIG_SCSI_MPT2SAS_LOGGING
-	_config_display_some_debug(ioc, smid, "config_request", NULL);
-#endif
-	init_completion(&ioc->config_cmds.done);
-	mpt2sas_base_put_smid_default(ioc, smid);
-	timeleft = wait_for_completion_timeout(&ioc->config_cmds.done,
-	    timeout*HZ);
-	if (!(ioc->config_cmds.status & MPT2_CMD_COMPLETE)) {
-		printk(MPT2SAS_ERR_FMT "%s: timeout\n",
-		    ioc->name, __func__);
-		_debug_dump_mf(mpi_request,
-		    sizeof(Mpi2ConfigRequest_t)/4);
-		retry_count++;
-		if (ioc->config_cmds.smid == smid)
-			mpt2sas_base_free_smid(ioc, smid);
-		if ((ioc->shost_recovery) || (ioc->config_cmds.status &
-		    MPT2_CMD_RESET))
-			goto retry_config;
-		issue_host_reset = 1;
-		r = -EFAULT;
-		goto free_mem;
-	}
-
-	if (ioc->config_cmds.status & MPT2_CMD_REPLY_VALID)
-		memcpy(mpi_reply, ioc->config_cmds.reply,
-		    sizeof(Mpi2ConfigReply_t));
-	if (retry_count)
-		printk(MPT2SAS_INFO_FMT "%s: retry (%d) completed!!\n",
-		    ioc->name, __func__, retry_count);
-	if (config_page && mpi_request->Action ==
-	    MPI2_CONFIG_ACTION_PAGE_READ_CURRENT)
-		memcpy(config_page, mem.page, min_t(u16, mem.sz,
-		    config_page_sz));
- free_mem:
-	if (config_page)
-		_config_free_config_dma_memory(ioc, &mem);
- out:
-	ioc->config_cmds.status = MPT2_CMD_NOT_USED;
-	mutex_unlock(&ioc->config_cmds.mutex);
-
-	if (issue_host_reset)
-		mpt2sas_base_hard_reset_handler(ioc, CAN_SLEEP,
-		    FORCE_BIG_HAMMER);
-	return r;
+	pci_free_consistent(ioc->pdev, mem->config_page_sz, mem->config_page,
+	    mem->config_page_dma);
 }
 
 /**
@@ -443,7 +379,9 @@ mpt2sas_config_get_manufacturing_pg0(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2ManufacturingPage0_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -452,14 +390,37 @@ mpt2sas_config_get_manufacturing_pg0(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_MANUFACTURING0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2ManufacturingPage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -479,7 +440,9 @@ mpt2sas_config_get_manufacturing_pg10(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2ManufacturingPage10_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -488,14 +451,37 @@ mpt2sas_config_get_manufacturing_pg10(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_MANUFACTURING0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2ManufacturingPage10_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -515,7 +501,9 @@ mpt2sas_config_get_bios_pg2(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2BiosPage2_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -524,14 +512,37 @@ mpt2sas_config_get_bios_pg2(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_BIOSPAGE2_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2BiosPage2_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -551,7 +562,9 @@ mpt2sas_config_get_bios_pg3(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2BiosPage3_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -560,14 +573,37 @@ mpt2sas_config_get_bios_pg3(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_BIOSPAGE3_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2BiosPage3_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -587,7 +623,9 @@ mpt2sas_config_get_iounit_pg0(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2IOUnitPage0_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -596,14 +634,37 @@ mpt2sas_config_get_iounit_pg0(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_IOUNITPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2IOUnitPage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -623,7 +684,9 @@ mpt2sas_config_get_iounit_pg1(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2IOUnitPage1_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -632,14 +695,37 @@ mpt2sas_config_get_iounit_pg1(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_IOUNITPAGE1_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2IOUnitPage1_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -655,10 +741,11 @@ mpt2sas_config_get_iounit_pg1(struct MPT2SAS_ADAPTER *ioc,
  */
 int
 mpt2sas_config_set_iounit_pg1(struct MPT2SAS_ADAPTER *ioc,
-    Mpi2ConfigReply_t *mpi_reply, Mpi2IOUnitPage1_t *config_page)
+    Mpi2ConfigReply_t *mpi_reply, Mpi2IOUnitPage1_t config_page)
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
@@ -668,14 +755,38 @@ mpt2sas_config_set_iounit_pg1(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_IOUNITPAGE1_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_WRITE_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+
+	memset(mem.config_page, 0, mem.config_page_sz);
+	memcpy(mem.config_page, &config_page,
+	    sizeof(Mpi2IOUnitPage1_t));
+
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_WRITE_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -695,7 +806,9 @@ mpt2sas_config_get_ioc_pg8(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2IOCPage8_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -704,14 +817,37 @@ mpt2sas_config_get_ioc_pg8(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_IOCPAGE8_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2IOCPage8_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -733,7 +869,9 @@ mpt2sas_config_get_sas_device_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2SasDevicePage0_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -743,15 +881,39 @@ mpt2sas_config_get_sas_device_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageNumber = 0;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2SasDevicePage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -773,7 +935,9 @@ mpt2sas_config_get_sas_device_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2SasDevicePage1_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -783,15 +947,39 @@ mpt2sas_config_get_sas_device_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageNumber = 1;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2SasDevicePage1_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -809,11 +997,11 @@ mpt2sas_config_get_number_hba_phys(struct MPT2SAS_ADAPTER *ioc, u8 *num_phys)
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 	u16 ioc_status;
 	Mpi2ConfigReply_t mpi_reply;
 	Mpi2SasIOUnitPage0_t config_page;
 
-	*num_phys = 0;
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -823,20 +1011,44 @@ mpt2sas_config_get_number_hba_phys(struct MPT2SAS_ADAPTER *ioc, u8 *num_phys)
 	mpi_request.Header.PageVersion = MPI2_SASIOUNITPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, &mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply.Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply.Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply.Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply.ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply.ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply.ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, &mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, &config_page,
-	    sizeof(Mpi2SasIOUnitPage0_t));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (!r) {
 		ioc_status = le16_to_cpu(mpi_reply.IOCStatus) &
 		    MPI2_IOCSTATUS_MASK;
-		if (ioc_status == MPI2_IOCSTATUS_SUCCESS)
+		if (ioc_status == MPI2_IOCSTATUS_SUCCESS) {
+			memcpy(&config_page, mem.config_page,
+			    min_t(u16, mem.config_page_sz,
+			    sizeof(Mpi2SasIOUnitPage0_t)));
 			*num_phys = config_page.NumPhys;
+		}
 	}
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -860,7 +1072,8 @@ mpt2sas_config_get_sas_iounit_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
-
+	struct config_request mem;
+	memset(config_page, 0, sz);
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -870,13 +1083,37 @@ mpt2sas_config_get_sas_iounit_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASIOUNITPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page, sz);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, sz, mem.config_page_sz));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -900,7 +1137,9 @@ mpt2sas_config_get_sas_iounit_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sz);
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -910,13 +1149,37 @@ mpt2sas_config_get_sas_iounit_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASIOUNITPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page, sz);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, sz, mem.config_page_sz));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -938,7 +1201,9 @@ mpt2sas_config_get_expander_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2ExpanderPage0_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -948,15 +1213,39 @@ mpt2sas_config_get_expander_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASEXPANDER0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2ExpanderPage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -979,7 +1268,9 @@ mpt2sas_config_get_expander_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2ExpanderPage1_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -989,7 +1280,7 @@ mpt2sas_config_get_expander_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASEXPANDER1_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
@@ -997,9 +1288,33 @@ mpt2sas_config_get_expander_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	    cpu_to_le32(MPI2_SAS_EXPAND_PGAD_FORM_HNDL_PHY_NUM |
 	    (phy_number << MPI2_SAS_EXPAND_PGAD_PHYNUM_SHIFT) | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2ExpanderPage1_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1021,7 +1336,9 @@ mpt2sas_config_get_enclosure_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2SasEnclosurePage0_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -1031,15 +1348,39 @@ mpt2sas_config_get_enclosure_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASENCLOSURE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2SasEnclosurePage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1060,7 +1401,9 @@ mpt2sas_config_get_phy_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2SasPhyPage0_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -1070,16 +1413,40 @@ mpt2sas_config_get_phy_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASPHY0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress =
 	    cpu_to_le32(MPI2_SAS_PHY_PGAD_FORM_PHY_NUMBER | phy_number);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2SasPhyPage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1100,7 +1467,9 @@ mpt2sas_config_get_phy_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2SasPhyPage1_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -1110,16 +1479,40 @@ mpt2sas_config_get_phy_pg1(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_SASPHY1_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress =
 	    cpu_to_le32(MPI2_SAS_PHY_PGAD_FORM_PHY_NUMBER | phy_number);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply->ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply->ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2SasPhyPage1_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1142,7 +1535,9 @@ mpt2sas_config_get_raid_volume_pg1(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
+	memset(config_page, 0, sizeof(Mpi2RaidVolPage1_t));
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
@@ -1151,15 +1546,38 @@ mpt2sas_config_get_raid_volume_pg1(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_RAIDVOLPAGE1_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2RaidVolPage1_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1178,9 +1596,10 @@ mpt2sas_config_get_number_pds(struct MPT2SAS_ADAPTER *ioc, u16 handle,
     u8 *num_pds)
 {
 	Mpi2ConfigRequest_t mpi_request;
-	Mpi2RaidVolPage0_t config_page;
+	Mpi2RaidVolPage0_t *config_page;
 	Mpi2ConfigReply_t mpi_reply;
 	int r;
+	struct config_request mem;
 	u16 ioc_status;
 
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
@@ -1192,22 +1611,42 @@ mpt2sas_config_get_number_pds(struct MPT2SAS_ADAPTER *ioc, u16 handle,
 	mpi_request.Header.PageVersion = MPI2_RAIDVOLPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, &mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress =
 	    cpu_to_le32(MPI2_RAID_VOLUME_PGAD_FORM_HANDLE | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply.Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply.Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply.Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply.Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply.Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, &mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, &config_page,
-	    sizeof(Mpi2RaidVolPage0_t));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (!r) {
 		ioc_status = le16_to_cpu(mpi_reply.IOCStatus) &
 		    MPI2_IOCSTATUS_MASK;
-		if (ioc_status == MPI2_IOCSTATUS_SUCCESS)
-			*num_pds = config_page.NumPhysDisks;
+		if (ioc_status == MPI2_IOCSTATUS_SUCCESS) {
+			config_page = mem.config_page;
+			*num_pds = config_page->NumPhysDisks;
+		}
 	}
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
 
  out:
 	return r;
@@ -1232,8 +1671,10 @@ mpt2sas_config_get_raid_volume_pg0(struct MPT2SAS_ADAPTER *ioc,
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
+	memset(config_page, 0, sz);
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
 	mpi_request.Header.PageType = MPI2_CONFIG_PAGETYPE_RAID_VOLUME;
@@ -1241,14 +1682,37 @@ mpt2sas_config_get_raid_volume_pg0(struct MPT2SAS_ADAPTER *ioc,
 	mpi_request.Header.PageVersion = MPI2_RAIDVOLPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | handle);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page, sz);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, sz, mem.config_page_sz));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1271,8 +1735,10 @@ mpt2sas_config_get_phys_disk_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 {
 	Mpi2ConfigRequest_t mpi_request;
 	int r;
+	struct config_request mem;
 
 	memset(&mpi_request, 0, sizeof(Mpi2ConfigRequest_t));
+	memset(config_page, 0, sizeof(Mpi2RaidPhysDiskPage0_t));
 	mpi_request.Function = MPI2_FUNCTION_CONFIG;
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_HEADER;
 	mpi_request.Header.PageType = MPI2_CONFIG_PAGETYPE_RAID_PHYSDISK;
@@ -1280,15 +1746,38 @@ mpt2sas_config_get_phys_disk_pg0(struct MPT2SAS_ADAPTER *ioc, Mpi2ConfigReply_t
 	mpi_request.Header.PageVersion = MPI2_RAIDPHYSDISKPAGE0_PAGEVERSION;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress = cpu_to_le32(form | form_specific);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
+	mpi_request.Header.PageVersion = mpi_reply->Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply->Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply->Header.PageType;
+	mpi_request.Header.PageLength = mpi_reply->Header.PageLength;
+	mem.config_page_sz = le16_to_cpu(mpi_reply->Header.PageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    sizeof(*config_page));
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
+	if (!r)
+		memcpy(config_page, mem.config_page,
+		    min_t(u16, mem.config_page_sz,
+		    sizeof(Mpi2RaidPhysDiskPage0_t)));
+
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
 	return r;
 }
@@ -1306,10 +1795,11 @@ int
 mpt2sas_config_get_volume_handle(struct MPT2SAS_ADAPTER *ioc, u16 pd_handle,
     u16 *volume_handle)
 {
-	Mpi2RaidConfigurationPage0_t *config_page = NULL;
+	Mpi2RaidConfigurationPage0_t *config_page;
 	Mpi2ConfigRequest_t mpi_request;
 	Mpi2ConfigReply_t mpi_reply;
-	int r, i, config_page_sz;
+	int r, i;
+	struct config_request mem;
 	u16 ioc_status;
 
 	*volume_handle = 0;
@@ -1322,27 +1812,40 @@ mpt2sas_config_get_volume_handle(struct MPT2SAS_ADAPTER *ioc, u16 pd_handle,
 	mpi_request.Header.PageNumber = 0;
 	mpt2sas_base_build_zero_len_sge(ioc, &mpi_request.PageBufferSGE);
 	r = _config_request(ioc, &mpi_request, &mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, NULL, 0);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	mpi_request.PageAddress =
 	    cpu_to_le32(MPI2_RAID_PGAD_FORM_ACTIVE_CONFIG);
 	mpi_request.Action = MPI2_CONFIG_ACTION_PAGE_READ_CURRENT;
-	config_page_sz = (le16_to_cpu(mpi_reply.ExtPageLength) * 4);
-	config_page = kmalloc(config_page_sz, GFP_KERNEL);
-	if (!config_page)
-		goto out;
+	mpi_request.Header.PageVersion = mpi_reply.Header.PageVersion;
+	mpi_request.Header.PageNumber = mpi_reply.Header.PageNumber;
+	mpi_request.Header.PageType = mpi_reply.Header.PageType;
+	mpi_request.ExtPageLength = mpi_reply.ExtPageLength;
+	mpi_request.ExtPageType = mpi_reply.ExtPageType;
+	mem.config_page_sz = le16_to_cpu(mpi_reply.ExtPageLength) * 4;
+	if (mem.config_page_sz > ioc->config_page_sz) {
+		r = _config_alloc_config_dma_memory(ioc, &mem);
+		if (r)
+			goto out;
+	} else {
+		mem.config_page_dma = ioc->config_page_dma;
+		mem.config_page = ioc->config_page;
+	}
+	ioc->base_add_sg_single(&mpi_request.PageBufferSGE,
+	    MPT2_CONFIG_COMMON_SGLFLAGS | mem.config_page_sz,
+	    mem.config_page_dma);
 	r = _config_request(ioc, &mpi_request, &mpi_reply,
-	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT, config_page,
-	    config_page_sz);
+	    MPT2_CONFIG_PAGE_DEFAULT_TIMEOUT);
 	if (r)
 		goto out;
 
 	r = -1;
 	ioc_status = le16_to_cpu(mpi_reply.IOCStatus) & MPI2_IOCSTATUS_MASK;
 	if (ioc_status != MPI2_IOCSTATUS_SUCCESS)
-		goto out;
+		goto done;
+	config_page = mem.config_page;
 	for (i = 0; i < config_page->NumElements; i++) {
 		if ((config_page->ConfigElement[i].ElementFlags &
 		    MPI2_RAIDCONFIG0_EFLAGS_MASK_ELEMENT_TYPE) !=
@@ -1353,11 +1856,15 @@ mpt2sas_config_get_volume_handle(struct MPT2SAS_ADAPTER *ioc, u16 pd_handle,
 			*volume_handle = le16_to_cpu(config_page->
 			    ConfigElement[i].VolDevHandle);
 			r = 0;
-			goto out;
+			goto done;
 		}
 	}
+
+ done:
+	if (mem.config_page_sz > ioc->config_page_sz)
+		_config_free_config_dma_memory(ioc, &mem);
+
  out:
-	kfree(config_page);
 	return r;
 }
 

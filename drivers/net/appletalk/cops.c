@@ -192,8 +192,7 @@ static irqreturn_t cops_interrupt (int irq, void *dev_id);
 static void cops_poll (unsigned long ltdev);
 static void cops_timeout(struct net_device *dev);
 static void cops_rx (struct net_device *dev);
-static netdev_tx_t  cops_send_packet (struct sk_buff *skb,
-					    struct net_device *dev);
+static int  cops_send_packet (struct sk_buff *skb, struct net_device *dev);
 static void set_multicast_list (struct net_device *dev);
 static int  cops_ioctl (struct net_device *dev, struct ifreq *rq, int cmd);
 static int  cops_close (struct net_device *dev);
@@ -876,8 +875,7 @@ static void cops_timeout(struct net_device *dev)
  *	Make the card transmit a LocalTalk packet.
  */
 
-static netdev_tx_t cops_send_packet(struct sk_buff *skb,
-					  struct net_device *dev)
+static int cops_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
         struct cops_local *lp = netdev_priv(dev);
         int ioaddr = dev->base_addr;
@@ -922,7 +920,7 @@ static netdev_tx_t cops_send_packet(struct sk_buff *skb,
 	dev->stats.tx_bytes += skb->len;
 	dev->trans_start = jiffies;
 	dev_kfree_skb (skb);
-        return NETDEV_TX_OK;
+        return 0;
 }
 
 /*

@@ -21,7 +21,7 @@ struct i2c_pnx_mif {
 	int			mode;		/* Interface mode */
 	struct completion	complete;	/* I/O completion */
 	struct timer_list	timer;		/* Timeout */
-	u8 *			buf;		/* Data buffer */
+	char *			buf;		/* Data buffer */
 	int			len;		/* Length of data buffer */
 };
 

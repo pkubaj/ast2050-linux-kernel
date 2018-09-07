@@ -186,79 +186,41 @@ xfs_destroy_ioend(
 }
 
 /*
- * If the end of the current ioend is beyond the current EOF,
- * return the new EOF value, otherwise zero.
+ * Update on-disk file size now that data has been written to disk.
+ * The current in-memory file size is i_size.  If a write is beyond
+ * eof i_new_size will be the intended file size until i_size is
+ * updated.  If this write does not extend all the way to the valid
+ * file size then restrict this update to the end of the write.
  */
-STATIC xfs_fsize_t
-xfs_ioend_new_eof(
+STATIC void
+xfs_setfilesize(
 	xfs_ioend_t		*ioend)
 {
 	xfs_inode_t		*ip = XFS_I(ioend->io_inode);
 	xfs_fsize_t		isize;
 	xfs_fsize_t		bsize;
 
-	bsize = ioend->io_offset + ioend->io_size;
-	isize = MAX(ip->i_size, ip->i_new_size);
-	isize = MIN(isize, bsize);
-	return isize > ip->i_d.di_size ? isize : 0;
-}
-
-/*
- * Update on-disk file size now that data has been written to disk.  The
- * current in-memory file size is i_size.  If a write is beyond eof i_new_size
- * will be the intended file size until i_size is updated.  If this write does
- * not extend all the way to the valid file size then restrict this update to
- * the end of the write.
- *
- * This function does not block as blocking on the inode lock in IO completion
- * can lead to IO completion order dependency deadlocks.. If it can't get the
- * inode ilock it will return EAGAIN. Callers must handle this.
- */
-STATIC int
-xfs_setfilesize(
-	xfs_ioend_t		*ioend)
-{
-	xfs_inode_t		*ip = XFS_I(ioend->io_inode);
-	xfs_fsize_t		isize;
-
 	ASSERT((ip->i_d.di_mode & S_IFMT) == S_IFREG);
 	ASSERT(ioend->io_type != IOMAP_READ);
 
 	if (unlikely(ioend->io_error))
-		return 0;
+		return;
 
-	if (!xfs_ilock_nowait(ip, XFS_ILOCK_EXCL))
-		return EAGAIN;
+	bsize = ioend->io_offset + ioend->io_size;
 
-	isize = xfs_ioend_new_eof(ioend);
-	if (isize) {
+	xfs_ilock(ip, XFS_ILOCK_EXCL);
+
+	isize = MAX(ip->i_size, ip->i_new_size);
+	isize = MIN(isize, bsize);
+
+	if (ip->i_d.di_size < isize) {
 		ip->i_d.di_size = isize;
+		ip->i_update_core = 1;
+		ip->i_update_size = 1;
 		xfs_mark_inode_dirty_sync(ip);
 	}
 
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	return 0;
-}
-
-/*
- * Schedule IO completion handling on a xfsdatad if this was
- * the final hold on this ioend. If we are asked to wait,
- * flush the workqueue.
- */
-STATIC void
-xfs_finish_ioend(
-	xfs_ioend_t	*ioend,
-	int		wait)
-{
-	if (atomic_dec_and_test(&ioend->io_remaining)) {
-		struct workqueue_struct *wq;
-
-		wq = (ioend->io_type == IOMAP_UNWRITTEN) ?
-			xfsconvertd_workqueue : xfsdatad_workqueue;
-		queue_work(wq, &ioend->io_work);
-		if (wait)
-			flush_workqueue(wq);
-	}
 }
 
 /*
@@ -270,23 +232,9 @@ xfs_end_bio_delalloc(
 {
 	xfs_ioend_t		*ioend =
 		container_of(work, xfs_ioend_t, io_work);
-	int			error;
 
-	/*
-	 * If we didn't complete processing of the ioend, requeue it to the
-	 * tail of the workqueue for another attempt later. Otherwise destroy
-	 * it.
-	 */
-	error = xfs_setfilesize(ioend);
-	if (error == EAGAIN) {
-		atomic_inc(&ioend->io_remaining);
-		xfs_finish_ioend(ioend, 0);
-		/* ensure we don't spin on blocked ioends */
-		delay(1);
-	} else {
-		ASSERT(!error);
-		xfs_destroy_ioend(ioend);
-	}
+	xfs_setfilesize(ioend);
+	xfs_destroy_ioend(ioend);
 }
 
 /*
@@ -298,23 +246,9 @@ xfs_end_bio_written(
 {
 	xfs_ioend_t		*ioend =
 		container_of(work, xfs_ioend_t, io_work);
-	int			error;
 
-	/*
-	 * If we didn't complete processing of the ioend, requeue it to the
-	 * tail of the workqueue for another attempt later. Otherwise destroy
-	 * it.
-	 */
-	error = xfs_setfilesize(ioend);
-	if (error == EAGAIN) {
-		atomic_inc(&ioend->io_remaining);
-		xfs_finish_ioend(ioend, 0);
-		/* ensure we don't spin on blocked ioends */
-		delay(1);
-	} else {
-		ASSERT(!error);
-		xfs_destroy_ioend(ioend);
-	}
+	xfs_setfilesize(ioend);
+	xfs_destroy_ioend(ioend);
 }
 
 /*
@@ -334,25 +268,13 @@ xfs_end_bio_unwritten(
 	size_t			size = ioend->io_size;
 
 	if (likely(!ioend->io_error)) {
-		int	error;
 		if (!XFS_FORCED_SHUTDOWN(ip->i_mount)) {
+			int error;
 			error = xfs_iomap_write_unwritten(ip, offset, size);
 			if (error)
 				ioend->io_error = error;
 		}
-		/*
-		 * If we didn't complete processing of the ioend, requeue it to the
-		 * tail of the workqueue for another attempt later. Otherwise destroy
-		 * it.
-		 */
-		error = xfs_setfilesize(ioend);
-		if (error == EAGAIN) {
-			atomic_inc(&ioend->io_remaining);
-			xfs_finish_ioend(ioend, 0);
-			/* ensure we don't spin on blocked ioends */
-			delay(1);
-			return;
-		}
+		xfs_setfilesize(ioend);
 	}
 	xfs_destroy_ioend(ioend);
 }
@@ -368,6 +290,27 @@ xfs_end_bio_read(
 		container_of(work, xfs_ioend_t, io_work);
 
 	xfs_destroy_ioend(ioend);
+}
+
+/*
+ * Schedule IO completion handling on a xfsdatad if this was
+ * the final hold on this ioend. If we are asked to wait,
+ * flush the workqueue.
+ */
+STATIC void
+xfs_finish_ioend(
+	xfs_ioend_t	*ioend,
+	int		wait)
+{
+	if (atomic_dec_and_test(&ioend->io_remaining)) {
+		struct workqueue_struct *wq = xfsdatad_workqueue;
+		if (ioend->io_work.func == xfs_end_bio_unwritten)
+			wq = xfsconvertd_workqueue;
+
+		queue_work(wq, &ioend->io_work);
+		if (wait)
+			flush_workqueue(wq);
+	}
 }
 
 /*
@@ -462,15 +405,9 @@ xfs_submit_ioend_bio(
 	struct bio	*bio)
 {
 	atomic_inc(&ioend->io_remaining);
+
 	bio->bi_private = ioend;
 	bio->bi_end_io = xfs_end_bio;
-
-	/*
-	 * If the I/O is beyond EOF we mark the inode dirty immediately
-	 * but don't update the inode size until I/O completion.
-	 */
-	if (xfs_ioend_new_eof(ioend))
-		xfs_mark_inode_dirty_sync(XFS_I(ioend->io_inode));
 
 	submit_bio(WRITE, bio);
 	ASSERT(!bio_flagged(bio, BIO_EOPNOTSUPP));
@@ -1699,5 +1636,4 @@ const struct address_space_operations xfs_address_space_operations = {
 	.direct_IO		= xfs_vm_direct_IO,
 	.migratepage		= buffer_migrate_page,
 	.is_partially_uptodate  = block_is_partially_uptodate,
-	.error_remove_page	= generic_error_remove_page,
 };

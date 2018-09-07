@@ -2,7 +2,6 @@
  *
  * Copyright (C) 2007 David S. Miller <davem@davemloft.net>
  */
-#include <linux/sched.h>
 #include <linux/sysdev.h>
 #include <linux/cpu.h>
 #include <linux/smp.h>

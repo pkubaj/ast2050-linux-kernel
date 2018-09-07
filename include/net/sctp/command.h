@@ -106,9 +106,6 @@ typedef enum {
 	SCTP_CMD_ASSOC_SHKEY,    /* generate the association shared keys */
 	SCTP_CMD_T1_RETRAN,	 /* Mark for retransmission after T1 timeout  */
 	SCTP_CMD_UPDATE_INITTAG, /* Update peer inittag */
-	SCTP_CMD_SEND_MSG,	 /* Send the whole use message */
-	SCTP_CMD_SEND_NEXT_ASCONF, /* Send the next ASCONF after ACK */
-	SCTP_CMD_SET_ASOC,	 /* Restore association context */
 	SCTP_CMD_LAST
 } sctp_verb_t;
 
@@ -142,7 +139,6 @@ typedef union {
 	struct sctp_ulpevent *ulpevent;
 	struct sctp_packet *packet;
 	sctp_sackhdr_t *sackh;
-	struct sctp_datamsg *msg;
 } sctp_arg_t;
 
 /* We are simulating ML type constructors here.
@@ -192,7 +188,6 @@ SCTP_ARG_CONSTRUCTOR(PEER_INIT,	sctp_init_chunk_t *, init)
 SCTP_ARG_CONSTRUCTOR(ULPEVENT,  struct sctp_ulpevent *, ulpevent)
 SCTP_ARG_CONSTRUCTOR(PACKET,	struct sctp_packet *, packet)
 SCTP_ARG_CONSTRUCTOR(SACKH,	sctp_sackhdr_t *, sackh)
-SCTP_ARG_CONSTRUCTOR(DATAMSG,	struct sctp_datamsg *, msg)
 
 typedef struct {
 	sctp_arg_t obj;

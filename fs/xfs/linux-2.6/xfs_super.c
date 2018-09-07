@@ -67,7 +67,7 @@
 #include <linux/freezer.h>
 #include <linux/parser.h>
 
-static const struct super_operations xfs_super_operations;
+static struct super_operations xfs_super_operations;
 static kmem_zone_t *xfs_ioend_zone;
 mempool_t *xfs_ioend_pool;
 
@@ -579,19 +579,15 @@ xfs_showargs(
 	else if (mp->m_qflags & XFS_UQUOTA_ACCT)
 		seq_puts(m, "," MNTOPT_UQUOTANOENF);
 
-	/* Either project or group quotas can be active, not both */
+	if (mp->m_qflags & (XFS_PQUOTA_ACCT|XFS_OQUOTA_ENFD))
+		seq_puts(m, "," MNTOPT_PRJQUOTA);
+	else if (mp->m_qflags & XFS_PQUOTA_ACCT)
+		seq_puts(m, "," MNTOPT_PQUOTANOENF);
 
-	if (mp->m_qflags & XFS_PQUOTA_ACCT) {
-		if (mp->m_qflags & XFS_OQUOTA_ENFD)
-			seq_puts(m, "," MNTOPT_PRJQUOTA);
-		else
-			seq_puts(m, "," MNTOPT_PQUOTANOENF);
-	} else if (mp->m_qflags & XFS_GQUOTA_ACCT) {
-		if (mp->m_qflags & XFS_OQUOTA_ENFD)
-			seq_puts(m, "," MNTOPT_GRPQUOTA);
-		else
-			seq_puts(m, "," MNTOPT_GQUOTANOENF);
-	}
+	if (mp->m_qflags & (XFS_GQUOTA_ACCT|XFS_OQUOTA_ENFD))
+		seq_puts(m, "," MNTOPT_GRPQUOTA);
+	else if (mp->m_qflags & XFS_GQUOTA_ACCT)
+		seq_puts(m, "," MNTOPT_GQUOTANOENF);
 
 	if (!(mp->m_qflags & XFS_ALL_QUOTA_ACCT))
 		seq_puts(m, "," MNTOPT_NOQUOTA);
@@ -691,7 +687,7 @@ xfs_barrier_test(
 	return error;
 }
 
-STATIC void
+void
 xfs_mountfs_check_barriers(xfs_mount_t *mp)
 {
 	int error;
@@ -930,37 +926,13 @@ xfs_fs_alloc_inode(
  */
 STATIC void
 xfs_fs_destroy_inode(
-	struct inode		*inode)
+	struct inode	*inode)
 {
-	struct xfs_inode	*ip = XFS_I(inode);
-
-	xfs_itrace_entry(ip);
+	xfs_inode_t		*ip = XFS_I(inode);
 
 	XFS_STATS_INC(vn_reclaim);
-
-	/* bad inode, get out here ASAP */
-	if (is_bad_inode(inode))
-		goto out_reclaim;
-
-	xfs_ioend_wait(ip);
-
-	ASSERT(XFS_FORCED_SHUTDOWN(ip->i_mount) || ip->i_delayed_blks == 0);
-
-	/*
-	 * We should never get here with one of the reclaim flags already set.
-	 */
-	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIMABLE));
-	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIM));
-
-	/*
-	 * We always use background reclaim here because even if the
-	 * inode is clean, it still may be under IO and hence we have
-	 * to take the flush lock. The background reclaim path handles
-	 * this more efficiently than we can here, so simply let background
-	 * reclaim tear down all inodes.
-	 */
-out_reclaim:
-	xfs_inode_set_reclaim_tag(ip);
+	if (xfs_reclaim(ip))
+		panic("%s: cannot reclaim 0x%p\n", __func__, inode);
 }
 
 /*
@@ -998,28 +970,6 @@ xfs_fs_inode_init_once(
 	mrlock_init(&ip->i_lock, MRLOCK_ALLOW_EQUAL_PRI|MRLOCK_BARRIER,
 		     "xfsino", ip->i_ino);
 	mrlock_init(&ip->i_iolock, MRLOCK_BARRIER, "xfsio", ip->i_ino);
-}
-
-/*
- * Dirty the XFS inode when mark_inode_dirty_sync() is called so that
- * we catch unlogged VFS level updates to the inode. Care must be taken
- * here - the transaction code calls mark_inode_dirty_sync() to mark the
- * VFS inode dirty in a transaction and clears the i_update_core field;
- * it must clear the field after calling mark_inode_dirty_sync() to
- * correctly indicate that the dirty state has been propagated into the
- * inode log item.
- *
- * We need the barrier() to maintain correct ordering between unlogged
- * updates and the transaction commit code that clears the i_update_core
- * field. This requires all updates to be completed before marking the
- * inode dirty.
- */
-STATIC void
-xfs_fs_dirty_inode(
-	struct inode	*inode)
-{
-	barrier();
-	XFS_I(inode)->i_update_core = 1;
 }
 
 /*
@@ -1164,7 +1114,6 @@ xfs_fs_put_super(
 
 	xfs_unmountfs(mp);
 	xfs_freesb(mp);
-	xfs_inode_shrinker_unregister(mp);
 	xfs_icsb_destroy_counters(mp);
 	xfs_close_devices(mp);
 	xfs_dmops_put(mp);
@@ -1173,7 +1122,7 @@ xfs_fs_put_super(
 }
 
 STATIC int
-xfs_fs_sync_fs(
+xfs_fs_sync_super(
 	struct super_block	*sb,
 	int			wait)
 {
@@ -1181,23 +1130,23 @@ xfs_fs_sync_fs(
 	int			error;
 
 	/*
-	 * Not much we can do for the first async pass.  Writing out the
-	 * superblock would be counter-productive as we are going to redirty
-	 * when writing out other data and metadata (and writing out a single
-	 * block is quite fast anyway).
-	 *
-	 * Try to asynchronously kick off quota syncing at least.
+	 * Treat a sync operation like a freeze.  This is to work
+	 * around a race in sync_inodes() which works in two phases
+	 * - an asynchronous flush, which can write out an inode
+	 * without waiting for file size updates to complete, and a
+	 * synchronous flush, which wont do anything because the
+	 * async flush removed the inode's dirty flag.  Also
+	 * sync_inodes() will not see any files that just have
+	 * outstanding transactions to be flushed because we don't
+	 * dirty the Linux inode until after the transaction I/O
+	 * completes.
 	 */
-	if (!wait) {
-		xfs_qm_sync(mp, SYNC_TRYLOCK);
-		return 0;
-	}
+	if (wait || unlikely(sb->s_frozen == SB_FREEZE_WRITE))
+		error = xfs_quiesce_data(mp);
+	else
+		error = xfs_sync_fsdata(mp, 0);
 
-	error = xfs_quiesce_data(mp);
-	if (error)
-		return -error;
-
-	if (laptop_mode) {
+	if (unlikely(laptop_mode)) {
 		int	prev_sync_seq = mp->m_sync_seq;
 
 		/*
@@ -1216,7 +1165,7 @@ xfs_fs_sync_fs(
 				mp->m_sync_seq != prev_sync_seq);
 	}
 
-	return 0;
+	return -error;
 }
 
 STATIC int
@@ -1324,8 +1273,6 @@ xfs_fs_remount(
 
 	/* ro -> rw */
 	if ((mp->m_flags & XFS_MOUNT_RDONLY) && !(*flags & MS_RDONLY)) {
-		__uint64_t resblks;
-
 		mp->m_flags &= ~XFS_MOUNT_RDONLY;
 		if (mp->m_flags & XFS_MOUNT_BARRIER)
 			xfs_mountfs_check_barriers(mp);
@@ -1343,37 +1290,11 @@ xfs_fs_remount(
 			}
 			mp->m_update_flags = 0;
 		}
-
-		/*
-		 * Fill out the reserve pool if it is empty. Use the stashed
-		 * value if it is non-zero, otherwise go with the default.
-		 */
-		if (mp->m_resblks_save) {
-			resblks = mp->m_resblks_save;
-			mp->m_resblks_save = 0;
-		} else {
-			resblks = mp->m_sb.sb_dblocks;
-			do_div(resblks, 20);
-			resblks = min_t(__uint64_t, resblks, 1024);
-		}
-		xfs_reserve_blocks(mp, &resblks, NULL);
 	}
 
 	/* rw -> ro */
 	if (!(mp->m_flags & XFS_MOUNT_RDONLY) && (*flags & MS_RDONLY)) {
-		/*
-		 * After we have synced the data but before we sync the
-		 * metadata, we need to free up the reserve block pool so that
-		 * the used block count in the superblock on disk is correct at
-		 * the end of the remount. Stash the current reserve pool size
-		 * so that if we get remounted rw, we can return it to the same
-		 * size.
-		 */
-		__uint64_t resblks = 0;
-
 		xfs_quiesce_data(mp);
-		mp->m_resblks_save = mp->m_resblks;
-		xfs_reserve_blocks(mp, &resblks, NULL);
 		xfs_quiesce_attr(mp);
 		mp->m_flags |= XFS_MOUNT_RDONLY;
 	}
@@ -1556,8 +1477,6 @@ xfs_fs_fill_super(
 	if (error)
 		goto fail_vnrele;
 
-	xfs_inode_shrinker_register(mp);
-
 	kfree(mtpt);
 
 	xfs_itrace_exit(XFS_I(sb->s_root->d_inode));
@@ -1613,14 +1532,13 @@ xfs_fs_get_sb(
 			   mnt);
 }
 
-static const struct super_operations xfs_super_operations = {
+static struct super_operations xfs_super_operations = {
 	.alloc_inode		= xfs_fs_alloc_inode,
 	.destroy_inode		= xfs_fs_destroy_inode,
-	.dirty_inode		= xfs_fs_dirty_inode,
 	.write_inode		= xfs_fs_write_inode,
 	.clear_inode		= xfs_fs_clear_inode,
 	.put_super		= xfs_fs_put_super,
-	.sync_fs		= xfs_fs_sync_fs,
+	.sync_fs		= xfs_fs_sync_super,
 	.freeze_fs		= xfs_fs_freeze,
 	.statfs			= xfs_fs_statfs,
 	.remount_fs		= xfs_fs_remount,
@@ -1897,7 +1815,6 @@ init_xfs_fs(void)
 		goto out_cleanup_procfs;
 
 	vfs_initquota();
-	xfs_inode_shrinker_init();
 
 	error = register_filesystem(&xfs_fs_type);
 	if (error)
@@ -1927,7 +1844,6 @@ exit_xfs_fs(void)
 {
 	vfs_exitquota();
 	unregister_filesystem(&xfs_fs_type);
-	xfs_inode_shrinker_destroy();
 	xfs_sysctl_unregister();
 	xfs_cleanup_procfs();
 	xfs_buf_terminate();

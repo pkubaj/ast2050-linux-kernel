@@ -49,7 +49,7 @@
 #define __percpu_arg(x)		"%%"__stringify(__percpu_seg)":%P" #x
 #define __my_cpu_offset		percpu_read(this_cpu_off)
 #else
-#define __percpu_arg(x)		"%P" #x
+#define __percpu_arg(x)		"%" #x
 #endif
 
 /*
@@ -104,48 +104,36 @@ do {							\
 	}						\
 } while (0)
 
-#define percpu_from_op(op, var, constraint)		\
+#define percpu_from_op(op, var)				\
 ({							\
 	typeof(var) ret__;				\
 	switch (sizeof(var)) {				\
 	case 1:						\
 		asm(op "b "__percpu_arg(1)",%0"		\
 		    : "=q" (ret__)			\
-		    : constraint);			\
+		    : "m" (var));			\
 		break;					\
 	case 2:						\
 		asm(op "w "__percpu_arg(1)",%0"		\
 		    : "=r" (ret__)			\
-		    : constraint);			\
+		    : "m" (var));			\
 		break;					\
 	case 4:						\
 		asm(op "l "__percpu_arg(1)",%0"		\
 		    : "=r" (ret__)			\
-		    : constraint);			\
+		    : "m" (var));			\
 		break;					\
 	case 8:						\
 		asm(op "q "__percpu_arg(1)",%0"		\
 		    : "=r" (ret__)			\
-		    : constraint);			\
+		    : "m" (var));			\
 		break;					\
 	default: __bad_percpu_size();			\
 	}						\
 	ret__;						\
 })
 
-/*
- * percpu_read() makes gcc load the percpu variable every time it is
- * accessed while percpu_read_stable() allows the value to be cached.
- * percpu_read_stable() is more efficient and can be used if its value
- * is guaranteed to be valid across cpus.  The current users include
- * get_current() and get_thread_info() both of which are actually
- * per-thread variables implemented as per-cpu variables and thus
- * stable for the duration of the respective task.
- */
-#define percpu_read(var)	percpu_from_op("mov", per_cpu__##var,	\
-					       "m" (per_cpu__##var))
-#define percpu_read_stable(var)	percpu_from_op("mov", per_cpu__##var,	\
-					       "p" (&per_cpu__##var))
+#define percpu_read(var)	percpu_from_op("mov", per_cpu__##var)
 #define percpu_write(var, val)	percpu_to_op("mov", per_cpu__##var, val)
 #define percpu_add(var, val)	percpu_to_op("add", per_cpu__##var, val)
 #define percpu_sub(var, val)	percpu_to_op("sub", per_cpu__##var, val)
@@ -167,6 +155,15 @@ do {							\
 
 /* We can use this directly for local CPU (faster). */
 DECLARE_PER_CPU(unsigned long, this_cpu_off);
+
+#ifdef CONFIG_NEED_MULTIPLE_NODES
+void *pcpu_lpage_remapped(void *kaddr);
+#else
+static inline void *pcpu_lpage_remapped(void *kaddr)
+{
+	return NULL;
+}
+#endif
 
 #endif /* !__ASSEMBLY__ */
 

@@ -345,10 +345,10 @@ void iwl_rx_queue_free(struct iwl_priv *priv, struct iwl_rx_queue *rxq)
 		}
 	}
 
-	dma_free_coherent(&priv->pci_dev->dev, 4 * RX_QUEUE_SIZE, rxq->bd,
-			  rxq->dma_addr);
-	dma_free_coherent(&priv->pci_dev->dev, sizeof(struct iwl_rb_status),
-			  rxq->rb_stts, rxq->rb_stts_dma);
+	pci_free_consistent(priv->pci_dev, 4 * RX_QUEUE_SIZE, rxq->bd,
+			    rxq->dma_addr);
+	pci_free_consistent(priv->pci_dev, sizeof(struct iwl_rb_status),
+			    rxq->rb_stts, rxq->rb_stts_dma);
 	rxq->bd = NULL;
 	rxq->rb_stts  = NULL;
 }
@@ -357,7 +357,7 @@ EXPORT_SYMBOL(iwl_rx_queue_free);
 int iwl_rx_queue_alloc(struct iwl_priv *priv)
 {
 	struct iwl_rx_queue *rxq = &priv->rxq;
-	struct device *dev = &priv->pci_dev->dev;
+	struct pci_dev *dev = priv->pci_dev;
 	int i;
 
 	spin_lock_init(&rxq->lock);
@@ -365,13 +365,12 @@ int iwl_rx_queue_alloc(struct iwl_priv *priv)
 	INIT_LIST_HEAD(&rxq->rx_used);
 
 	/* Alloc the circular buffer of Read Buffer Descriptors (RBDs) */
-	rxq->bd = dma_alloc_coherent(dev, 4 * RX_QUEUE_SIZE, &rxq->dma_addr,
-				     GFP_KERNEL);
+	rxq->bd = pci_alloc_consistent(dev, 4 * RX_QUEUE_SIZE, &rxq->dma_addr);
 	if (!rxq->bd)
 		goto err_bd;
 
-	rxq->rb_stts = dma_alloc_coherent(dev, sizeof(struct iwl_rb_status),
-					  &rxq->rb_stts_dma, GFP_KERNEL);
+	rxq->rb_stts = pci_alloc_consistent(dev, sizeof(struct iwl_rb_status),
+					&rxq->rb_stts_dma);
 	if (!rxq->rb_stts)
 		goto err_rb;
 
@@ -388,8 +387,8 @@ int iwl_rx_queue_alloc(struct iwl_priv *priv)
 	return 0;
 
 err_rb:
-	dma_free_coherent(&priv->pci_dev->dev, 4 * RX_QUEUE_SIZE, rxq->bd,
-			  rxq->dma_addr);
+	pci_free_consistent(priv->pci_dev, 4 * RX_QUEUE_SIZE, rxq->bd,
+			    rxq->dma_addr);
 err_bd:
 	return -ENOMEM;
 }
@@ -425,6 +424,7 @@ void iwl_rx_queue_reset(struct iwl_priv *priv, struct iwl_rx_queue *rxq)
 	rxq->free_count = 0;
 	spin_unlock_irqrestore(&rxq->lock, flags);
 }
+EXPORT_SYMBOL(iwl_rx_queue_reset);
 
 int iwl_rx_init(struct iwl_priv *priv, struct iwl_rx_queue *rxq)
 {
@@ -558,14 +558,13 @@ void iwl_rx_statistics(struct iwl_priv *priv,
 	struct iwl_rx_packet *pkt = (struct iwl_rx_packet *)rxb->skb->data;
 
 	IWL_DEBUG_RX(priv, "Statistics notification received (%d vs %d).\n",
-		     (int)sizeof(priv->statistics),
-		     le32_to_cpu(pkt->len_n_flags) & FH_RSCSR_FRAME_SIZE_MSK);
+		     (int)sizeof(priv->statistics), pkt->len);
 
 	change = ((priv->statistics.general.temperature !=
 		   pkt->u.stats.general.temperature) ||
 		  ((priv->statistics.flag &
-		    STATISTICS_REPLY_FLG_HT40_MODE_MSK) !=
-		   (pkt->u.stats.flag & STATISTICS_REPLY_FLG_HT40_MODE_MSK)));
+		    STATISTICS_REPLY_FLG_FAT_MODE_MSK) !=
+		   (pkt->u.stats.flag & STATISTICS_REPLY_FLG_FAT_MODE_MSK)));
 
 	memcpy(&priv->statistics, &pkt->u.stats, sizeof(priv->statistics));
 
@@ -665,7 +664,7 @@ static void iwl_dbg_report_frame(struct iwl_priv *priv,
 	u32 tsf_low;
 	int rssi;
 
-	if (likely(!(iwl_get_debug_level(priv) & IWL_DL_RX)))
+	if (likely(!(priv->debug_level & IWL_DL_RX)))
 		return;
 
 	/* MAC header */
@@ -764,6 +763,14 @@ static void iwl_dbg_report_frame(struct iwl_priv *priv,
 		iwl_print_hex_dump(priv, IWL_DL_RX, header, length);
 }
 #endif
+
+static void iwl_update_rx_stats(struct iwl_priv *priv, u16 fc, u16 len)
+{
+	/* 0 - mgmt, 1 - cnt, 2 - data */
+	int idx = (fc & IEEE80211_FCTL_FTYPE) >> 2;
+	priv->rx_stats[idx].cnt++;
+	priv->rx_stats[idx].bytes += len;
+}
 
 /*
  * returns non-zero if packet should be dropped
@@ -873,12 +880,61 @@ static u32 iwl_translate_rx_status(struct iwl_priv *priv, u32 decrypt_in)
 }
 
 static void iwl_pass_packet_to_mac80211(struct iwl_priv *priv,
-					struct ieee80211_hdr *hdr,
-					u16 len,
-					u32 ampdu_status,
-					struct iwl_rx_mem_buffer *rxb,
-					struct ieee80211_rx_status *stats)
+				       int include_phy,
+				       struct iwl_rx_mem_buffer *rxb,
+				       struct ieee80211_rx_status *stats)
 {
+	struct iwl_rx_packet *pkt = (struct iwl_rx_packet *)rxb->skb->data;
+	struct iwl_rx_phy_res *rx_start = (include_phy) ?
+	    (struct iwl_rx_phy_res *)&(pkt->u.raw[0]) : NULL;
+	struct ieee80211_hdr *hdr;
+	u16 len;
+	__le32 *rx_end;
+	unsigned int skblen;
+	u32 ampdu_status;
+	u32 ampdu_status_legacy;
+
+	if (!include_phy && priv->last_phy_res[0])
+		rx_start = (struct iwl_rx_phy_res *)&priv->last_phy_res[1];
+
+	if (!rx_start) {
+		IWL_ERR(priv, "MPDU frame without a PHY data\n");
+		return;
+	}
+	if (include_phy) {
+		hdr = (struct ieee80211_hdr *)((u8 *) &rx_start[1] +
+					       rx_start->cfg_phy_cnt);
+
+		len = le16_to_cpu(rx_start->byte_count);
+
+		rx_end = (__le32 *)((u8 *) &pkt->u.raw[0] +
+				  sizeof(struct iwl_rx_phy_res) +
+				  rx_start->cfg_phy_cnt + len);
+
+	} else {
+		struct iwl4965_rx_mpdu_res_start *amsdu =
+		    (struct iwl4965_rx_mpdu_res_start *)pkt->u.raw;
+
+		hdr = (struct ieee80211_hdr *)(pkt->u.raw +
+			       sizeof(struct iwl4965_rx_mpdu_res_start));
+		len =  le16_to_cpu(amsdu->byte_count);
+		rx_start->byte_count = amsdu->byte_count;
+		rx_end = (__le32 *) (((u8 *) hdr) + len);
+	}
+
+	ampdu_status = le32_to_cpu(*rx_end);
+	skblen = ((u8 *) rx_end - (u8 *) &pkt->u.raw[0]) + sizeof(u32);
+
+	if (!include_phy) {
+		/* New status scheme, need to translate */
+		ampdu_status_legacy = ampdu_status;
+		ampdu_status = iwl_translate_rx_status(priv, ampdu_status);
+	}
+
+	/* start from MAC */
+	skb_reserve(rxb->skb, (void *)hdr - (void *)pkt);
+	skb_put(rxb->skb, len);	/* end where data ends */
+
 	/* We only process data packets if the interface is open */
 	if (unlikely(!priv->is_open)) {
 		IWL_DEBUG_DROP_LIMIT(priv,
@@ -886,18 +942,15 @@ static void iwl_pass_packet_to_mac80211(struct iwl_priv *priv,
 		return;
 	}
 
-	/* In case of HW accelerated crypto and bad decryption, drop */
-	if (!priv->cfg->mod_params->sw_crypto &&
+	hdr = (struct ieee80211_hdr *)rxb->skb->data;
+
+	/*  in case of HW accelerated crypto and bad decryption, drop */
+	if (!priv->hw_params.sw_crypto &&
 	    iwl_set_decrypted_flag(priv, hdr, ampdu_status, stats))
 		return;
 
-	/* Resize SKB from mac header to end of packet */
-	skb_reserve(rxb->skb, (void *)hdr - (void *)rxb->skb->data);
-	skb_put(rxb->skb, len);
-
-	iwl_update_stats(priv, false, hdr->frame_control, len);
-	memcpy(IEEE80211_SKB_RXCB(rxb->skb), stats, sizeof(*stats));
-	ieee80211_rx_irqsafe(priv->hw, rxb->skb);
+	iwl_update_rx_stats(priv, le16_to_cpu(hdr->frame_control), len);
+	ieee80211_rx_irqsafe(priv->hw, rxb->skb, stats);
 	priv->alloc_rxb_skb--;
 	rxb->skb = NULL;
 }
@@ -928,80 +981,82 @@ void iwl_rx_reply_rx(struct iwl_priv *priv,
 	struct ieee80211_hdr *header;
 	struct ieee80211_rx_status rx_status;
 	struct iwl_rx_packet *pkt = (struct iwl_rx_packet *)rxb->skb->data;
-	struct iwl_rx_phy_res *phy_res;
-	__le32 rx_pkt_status;
-	struct iwl4965_rx_mpdu_res_start *amsdu;
-	u32 len;
-	u32 ampdu_status;
+	/* Use phy data (Rx signal strength, etc.) contained within
+	 *   this rx packet for legacy frames,
+	 *   or phy data cached from REPLY_RX_PHY_CMD for HT frames. */
+	int include_phy = (pkt->hdr.cmd == REPLY_RX);
+	struct iwl_rx_phy_res *rx_start = (include_phy) ?
+		(struct iwl_rx_phy_res *)&(pkt->u.raw[0]) :
+		(struct iwl_rx_phy_res *)&priv->last_phy_res[1];
+	__le32 *rx_end;
+	unsigned int len = 0;
 	u16 fc;
-	u32 rate_n_flags;
+	u8 network_packet;
 
-	/**
-	 * REPLY_RX and REPLY_RX_MPDU_CMD are handled differently.
-	 *	REPLY_RX: physical layer info is in this buffer
-	 *	REPLY_RX_MPDU_CMD: physical layer info was sent in separate
-	 *		command and cached in priv->last_phy_res
-	 *
-	 * Here we set up local variables depending on which command is
-	 * received.
-	 */
-	if (pkt->hdr.cmd == REPLY_RX) {
-		phy_res = (struct iwl_rx_phy_res *)pkt->u.raw;
-		header = (struct ieee80211_hdr *)(pkt->u.raw + sizeof(*phy_res)
-				+ phy_res->cfg_phy_cnt);
-
-		len = le16_to_cpu(phy_res->byte_count);
-		rx_pkt_status = *(__le32 *)(pkt->u.raw + sizeof(*phy_res) +
-				phy_res->cfg_phy_cnt + len);
-		ampdu_status = le32_to_cpu(rx_pkt_status);
-	} else {
-		if (!priv->last_phy_res[0]) {
-			IWL_ERR(priv, "MPDU frame without cached PHY data\n");
-			return;
-		}
-		phy_res = (struct iwl_rx_phy_res *)&priv->last_phy_res[1];
-		amsdu = (struct iwl4965_rx_mpdu_res_start *)pkt->u.raw;
-		header = (struct ieee80211_hdr *)(pkt->u.raw + sizeof(*amsdu));
-		len = le16_to_cpu(amsdu->byte_count);
-		rx_pkt_status = *(__le32 *)(pkt->u.raw + sizeof(*amsdu) + len);
-		ampdu_status = iwl_translate_rx_status(priv,
-				le32_to_cpu(rx_pkt_status));
-	}
-
-	if ((unlikely(phy_res->cfg_phy_cnt > 20))) {
-		IWL_DEBUG_DROP(priv, "dsp size out of range [0,20]: %d/n",
-				phy_res->cfg_phy_cnt);
-		return;
-	}
-
-	if (!(rx_pkt_status & RX_RES_STATUS_NO_CRC32_ERROR) ||
-	    !(rx_pkt_status & RX_RES_STATUS_NO_RXE_OVERFLOW)) {
-		IWL_DEBUG_RX(priv, "Bad CRC or FIFO: 0x%08X.\n",
-				le32_to_cpu(rx_pkt_status));
-		return;
-	}
-
-	/* This will be used in several places later */
-	rate_n_flags = le32_to_cpu(phy_res->rate_n_flags);
-
-	/* rx_status carries information about the packet to mac80211 */
-	rx_status.mactime = le64_to_cpu(phy_res->timestamp);
+	rx_status.mactime = le64_to_cpu(rx_start->timestamp);
 	rx_status.freq =
-		ieee80211_channel_to_frequency(le16_to_cpu(phy_res->channel));
-	rx_status.band = (phy_res->phy_flags & RX_RES_PHY_FLAGS_BAND_24_MSK) ?
+		ieee80211_channel_to_frequency(le16_to_cpu(rx_start->channel));
+	rx_status.band = (rx_start->phy_flags & RX_RES_PHY_FLAGS_BAND_24_MSK) ?
 				IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
 	rx_status.rate_idx =
-		iwl_hwrate_to_mac80211_idx(rate_n_flags, rx_status.band);
+		iwl_hwrate_to_plcp_idx(le32_to_cpu(rx_start->rate_n_flags));
+	if (rx_status.band == IEEE80211_BAND_5GHZ)
+		rx_status.rate_idx -= IWL_FIRST_OFDM_RATE;
+
 	rx_status.flag = 0;
 
 	/* TSF isn't reliable. In order to allow smooth user experience,
 	 * this W/A doesn't propagate it to the mac80211 */
 	/*rx_status.flag |= RX_FLAG_TSFT;*/
 
-	priv->ucode_beacon_time = le32_to_cpu(phy_res->beacon_time_stamp);
+	if ((unlikely(rx_start->cfg_phy_cnt > 20))) {
+		IWL_DEBUG_DROP(priv, "dsp size out of range [0,20]: %d/n",
+				rx_start->cfg_phy_cnt);
+		return;
+	}
+
+	if (!include_phy) {
+		if (priv->last_phy_res[0])
+			rx_start = (struct iwl_rx_phy_res *)
+				&priv->last_phy_res[1];
+		else
+			rx_start = NULL;
+	}
+
+	if (!rx_start) {
+		IWL_ERR(priv, "MPDU frame without a PHY data\n");
+		return;
+	}
+
+	if (include_phy) {
+		header = (struct ieee80211_hdr *)((u8 *) &rx_start[1]
+						  + rx_start->cfg_phy_cnt);
+
+		len = le16_to_cpu(rx_start->byte_count);
+		rx_end = (__le32 *)(pkt->u.raw + rx_start->cfg_phy_cnt +
+				  sizeof(struct iwl_rx_phy_res) + len);
+	} else {
+		struct iwl4965_rx_mpdu_res_start *amsdu =
+			(struct iwl4965_rx_mpdu_res_start *)pkt->u.raw;
+
+		header = (void *)(pkt->u.raw +
+			sizeof(struct iwl4965_rx_mpdu_res_start));
+		len = le16_to_cpu(amsdu->byte_count);
+		rx_end = (__le32 *) (pkt->u.raw +
+			sizeof(struct iwl4965_rx_mpdu_res_start) + len);
+	}
+
+	if (!(*rx_end & RX_RES_STATUS_NO_CRC32_ERROR) ||
+	    !(*rx_end & RX_RES_STATUS_NO_RXE_OVERFLOW)) {
+		IWL_DEBUG_RX(priv, "Bad CRC or FIFO: 0x%08X.\n",
+				le32_to_cpu(*rx_end));
+		return;
+	}
+
+	priv->ucode_beacon_time = le32_to_cpu(rx_start->beacon_time_stamp);
 
 	/* Find max signal strength (dBm) among 3 antenna/receiver chains */
-	rx_status.signal = iwl_calc_rssi(priv, phy_res);
+	rx_status.signal = iwl_calc_rssi(priv, rx_start);
 
 	/* Meaningful noise values are available only from beacon statistics,
 	 *   which are gathered only when associated, and indicate noise
@@ -1021,14 +1076,13 @@ void iwl_rx_reply_rx(struct iwl_priv *priv,
 	if (!iwl_is_associated(priv))
 		priv->last_rx_noise = IWL_NOISE_MEAS_NOT_AVAILABLE;
 
-#ifdef CONFIG_IWLWIFI_DEBUG
 	/* Set "1" to report good data frames in groups of 100 */
-	if (unlikely(iwl_get_debug_level(priv) & IWL_DL_RX))
-		iwl_dbg_report_frame(priv, phy_res, len, header, 1);
+#ifdef CONFIG_IWLWIFI_DEBUG
+	if (unlikely(priv->debug_level & IWL_DL_RX))
+		iwl_dbg_report_frame(priv, rx_start, len, header, 1);
 #endif
-	iwl_dbg_log_rx_data_frame(priv, len, header);
 	IWL_DEBUG_STATS_LIMIT(priv, "Rssi %d, noise %d, qual %d, TSF %llu\n",
-		rx_status.signal, rx_status.noise, rx_status.qual,
+		rx_status.signal, rx_status.noise, rx_status.signal,
 		(unsigned long long)rx_status.mactime);
 
 	/*
@@ -1044,26 +1098,18 @@ void iwl_rx_reply_rx(struct iwl_priv *priv,
 	 * new 802.11n radiotap field "RX chains" that is defined
 	 * as a bitmask.
 	 */
-	rx_status.antenna =
-		(le16_to_cpu(phy_res->phy_flags) & RX_RES_PHY_FLAGS_ANTENNA_MSK)
-		>> RX_RES_PHY_FLAGS_ANTENNA_POS;
+	rx_status.antenna = le16_to_cpu(rx_start->phy_flags &
+					RX_RES_PHY_FLAGS_ANTENNA_MSK) >> 4;
 
 	/* set the preamble flag if appropriate */
-	if (phy_res->phy_flags & RX_RES_PHY_FLAGS_SHORT_PREAMBLE_MSK)
+	if (rx_start->phy_flags & RX_RES_PHY_FLAGS_SHORT_PREAMBLE_MSK)
 		rx_status.flag |= RX_FLAG_SHORTPRE;
 
-	/* Set up the HT phy flags */
-	if (rate_n_flags & RATE_MCS_HT_MSK)
-		rx_status.flag |= RX_FLAG_HT;
-	if (rate_n_flags & RATE_MCS_HT40_MSK)
-		rx_status.flag |= RX_FLAG_40MHZ;
-	if (rate_n_flags & RATE_MCS_SGI_MSK)
-		rx_status.flag |= RX_FLAG_SHORT_GI;
-
-	if (iwl_is_network_packet(priv, header)) {
+	network_packet = iwl_is_network_packet(priv, header);
+	if (network_packet) {
 		priv->last_rx_rssi = rx_status.signal;
 		priv->last_beacon_time =  priv->ucode_beacon_time;
-		priv->last_tsf = le64_to_cpu(phy_res->timestamp);
+		priv->last_tsf = le64_to_cpu(rx_start->timestamp);
 	}
 
 	fc = le16_to_cpu(header->frame_control);
@@ -1075,8 +1121,8 @@ void iwl_rx_reply_rx(struct iwl_priv *priv,
 						header->addr2);
 		/* fall through */
 	default:
-		iwl_pass_packet_to_mac80211(priv, header, len, ampdu_status,
-				rxb, &rx_status);
+			iwl_pass_packet_to_mac80211(priv, include_phy, rxb,
+				   &rx_status);
 		break;
 
 	}

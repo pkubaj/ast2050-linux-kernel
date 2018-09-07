@@ -53,7 +53,7 @@ NESTED(handle_sysn32, PT_SIZE, sp)
 
 	sd	a3, PT_R26(sp)		# save a3 for syscall restarting
 
-	li	t1, _TIF_WORK_SYSCALL_ENTRY
+	li	t1, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
 	LONG_L	t0, TI_FLAGS($28)	# syscall tracing enabled?
 	and	t0, t1, t0
 	bnez	t0, n32_syscall_trace_entry
@@ -164,7 +164,7 @@ EXPORT(sysn32_call_table)
 	PTR	sys_connect
 	PTR	sys_accept
 	PTR	sys_sendto
-	PTR	compat_sys_recvfrom
+	PTR	sys_recvfrom
 	PTR	compat_sys_sendmsg		/* 6045 */
 	PTR	compat_sys_recvmsg
 	PTR	sys_shutdown
@@ -416,6 +416,6 @@ EXPORT(sysn32_call_table)
 	PTR	sys_preadv
 	PTR	sys_pwritev
 	PTR	compat_sys_rt_tgsigqueueinfo	/* 5295 */
-	PTR	sys_perf_event_open
+	PTR	sys_perf_counter_open
 	PTR	sys_accept4
 	.size	sysn32_call_table,.-sysn32_call_table

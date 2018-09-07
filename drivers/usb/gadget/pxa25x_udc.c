@@ -56,7 +56,6 @@
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
-#include <linux/usb/otg.h>
 
 /*
  * This driver is PXA25x only.  Grab the right register definitions.
@@ -1009,27 +1008,15 @@ static int pxa25x_udc_pullup(struct usb_gadget *_gadget, int is_active)
 	return 0;
 }
 
-/* boards may consume current from VBUS, up to 100-500mA based on config.
- * the 500uA suspend ceiling means that exclusively vbus-powered PXA designs
- * violate USB specs.
- */
-static int pxa25x_udc_vbus_draw(struct usb_gadget *_gadget, unsigned mA)
-{
-	struct pxa25x_udc	*udc;
-
-	udc = container_of(_gadget, struct pxa25x_udc, gadget);
-
-	if (udc->transceiver)
-		return otg_set_power(udc->transceiver, mA);
-	return -EOPNOTSUPP;
-}
-
 static const struct usb_gadget_ops pxa25x_udc_ops = {
 	.get_frame	= pxa25x_udc_get_frame,
 	.wakeup		= pxa25x_udc_wakeup,
 	.vbus_session	= pxa25x_udc_vbus_session,
 	.pullup		= pxa25x_udc_pullup,
-	.vbus_draw	= pxa25x_udc_vbus_draw,
+
+	// .vbus_draw ... boards may consume current from VBUS, up to
+	// 100-500mA based on config.  the 500uA suspend ceiling means
+	// that exclusively vbus-powered PXA designs violate USB specs.
 };
 
 /*-------------------------------------------------------------------------*/
@@ -1316,23 +1303,9 @@ fail:
 	 * for set_configuration as well as eventual disconnect.
 	 */
 	DMSG("registered gadget driver '%s'\n", driver->driver.name);
-
-	/* connect to bus through transceiver */
-	if (dev->transceiver) {
-		retval = otg_set_peripheral(dev->transceiver, &dev->gadget);
-		if (retval) {
-			DMSG("can't bind to transceiver\n");
-			if (driver->unbind)
-				driver->unbind(&dev->gadget);
-			goto bind_fail;
-		}
-	}
-
 	pullup(dev);
 	dump_state(dev);
 	return 0;
-bind_fail:
-	return retval;
 }
 EXPORT_SYMBOL(usb_gadget_register_driver);
 
@@ -1377,9 +1350,6 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	pullup(dev);
 	stop_activity(dev, driver);
 	local_irq_enable();
-
-	if (dev->transceiver)
-		(void) otg_set_peripheral(dev->transceiver, NULL);
 
 	driver->unbind(&dev->gadget);
 	dev->gadget.dev.driver = NULL;
@@ -2192,8 +2162,6 @@ static int __init pxa25x_udc_probe(struct platform_device *pdev)
 	dev->dev = &pdev->dev;
 	dev->mach = pdev->dev.platform_data;
 
-	dev->transceiver = otg_get_transceiver();
-
 	if (gpio_is_valid(dev->mach->gpio_vbus)) {
 		if ((retval = gpio_request(dev->mach->gpio_vbus,
 				"pxa25x_udc GPIO VBUS"))) {
@@ -2296,10 +2264,6 @@ lubbock_fail0:
 	if (gpio_is_valid(dev->mach->gpio_vbus))
 		gpio_free(dev->mach->gpio_vbus);
  err_gpio_vbus:
-	if (dev->transceiver) {
-		otg_put_transceiver(dev->transceiver);
-		dev->transceiver = NULL;
-	}
 	clk_put(dev->clk);
  err_clk:
 	return retval;
@@ -2340,11 +2304,6 @@ static int __exit pxa25x_udc_remove(struct platform_device *pdev)
 		gpio_free(dev->mach->gpio_pullup);
 
 	clk_put(dev->clk);
-
-	if (dev->transceiver) {
-		otg_put_transceiver(dev->transceiver);
-		dev->transceiver = NULL;
-	}
 
 	platform_set_drvdata(pdev, NULL);
 	the_controller = NULL;

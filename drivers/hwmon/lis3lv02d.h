@@ -58,17 +58,15 @@ enum lis3_reg {
 	OUTZ_L		= 0x2C,
 	OUTZ_H		= 0x2D,
 	OUTZ		= 0x2D,
+	FF_WU_CFG	= 0x30,
+	FF_WU_SRC	= 0x31,
+	FF_WU_ACK	= 0x32,
+	FF_WU_THS_L	= 0x34,
+	FF_WU_THS_H	= 0x35,
+	FF_WU_DURATION	= 0x36,
 };
 
 enum lis302d_reg {
-	FF_WU_CFG_1	= 0x30,
-	FF_WU_SRC_1	= 0x31,
-	FF_WU_THS_1	= 0x32,
-	FF_WU_DURATION_1 = 0x33,
-	FF_WU_CFG_2	= 0x34,
-	FF_WU_SRC_2	= 0x35,
-	FF_WU_THS_2	= 0x36,
-	FF_WU_DURATION_2 = 0x37,
 	CLICK_CFG	= 0x38,
 	CLICK_SRC	= 0x39,
 	CLICK_THSY_X	= 0x3B,
@@ -79,12 +77,6 @@ enum lis302d_reg {
 };
 
 enum lis3lv02d_reg {
-	FF_WU_CFG	= 0x30,
-	FF_WU_SRC	= 0x31,
-	FF_WU_ACK	= 0x32,
-	FF_WU_THS_L	= 0x34,
-	FF_WU_THS_H	= 0x35,
-	FF_WU_DURATION	= 0x36,
 	DD_CFG		= 0x38,
 	DD_SRC		= 0x39,
 	DD_ACK		= 0x3A,
@@ -103,7 +95,6 @@ enum lis3lv02d_ctrl1 {
 	CTRL1_DF1	= 0x20,
 	CTRL1_PD0	= 0x40,
 	CTRL1_PD1	= 0x80,
-	CTRL1_DR	= 0x80, /* Data rate on 8 bits */
 };
 enum lis3lv02d_ctrl2 {
 	CTRL2_DAS	= 0x01,
@@ -116,10 +107,6 @@ enum lis3lv02d_ctrl2 {
 	CTRL2_FS	= 0x80, /* Full Scale selection */
 };
 
-enum lis302d_ctrl2 {
-	HP_FF_WU2	= 0x08,
-	HP_FF_WU1	= 0x04,
-};
 
 enum lis3lv02d_ctrl3 {
 	CTRL3_CFS0	= 0x01,

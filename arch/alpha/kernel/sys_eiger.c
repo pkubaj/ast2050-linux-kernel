@@ -81,7 +81,7 @@ eiger_end_irq(unsigned int irq)
 }
 
 static struct irq_chip eiger_irq_type = {
-	.name		= "EIGER",
+	.typename	= "EIGER",
 	.startup	= eiger_startup_irq,
 	.shutdown	= eiger_disable_irq,
 	.enable		= eiger_enable_irq,

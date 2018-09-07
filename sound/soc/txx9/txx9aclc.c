@@ -297,17 +297,15 @@ static int txx9aclc_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
 static bool filter(struct dma_chan *chan, void *param)
 {
 	struct txx9aclc_dmadata *dmadata = param;
-	char *devname;
-	bool found = false;
+	char devname[20 + 2]; /* FIXME: old BUS_ID_SIZE + 2 */
 
-	devname = kasprintf(GFP_KERNEL, "%s.%d", dmadata->dma_res->name,
+	snprintf(devname, sizeof(devname), "%s.%d", dmadata->dma_res->name,
 		(int)dmadata->dma_res->start);
 	if (strcmp(dev_name(chan->device->dev), devname) == 0) {
 		chan->private = &dmadata->dma_slave;
-		found = true;
+		return true;
 	}
-	kfree(devname);
-	return found;
+	return false;
 }
 
 static int txx9aclc_dma_init(struct txx9aclc_soc_device *dev,

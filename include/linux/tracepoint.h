@@ -4,7 +4,7 @@
 /*
  * Kernel Tracepoint API.
  *
- * See Documentation/trace/tracepoints.txt.
+ * See Documentation/tracepoint.txt.
  *
  * (C) Copyright 2008 Mathieu Desnoyers <mathieu.desnoyers@polymtl.ca>
  *
@@ -23,8 +23,6 @@ struct tracepoint;
 struct tracepoint {
 	const char *name;		/* Tracepoint name */
 	int state;			/* State. */
-	void (*regfunc)(void);
-	void (*unregfunc)(void);
 	void **funcs;
 } __attribute__((aligned(32)));		/*
 					 * Aligned on 32 bytes because it is
@@ -36,7 +34,7 @@ struct tracepoint {
 #ifndef DECLARE_TRACE
 
 #define TP_PROTO(args...)	args
-#define TP_ARGS(args...)	args
+#define TP_ARGS(args...)		args
 
 #ifdef CONFIG_TRACEPOINTS
 
@@ -80,16 +78,12 @@ struct tracepoint {
 		return tracepoint_probe_unregister(#name, (void *)probe);\
 	}
 
-
-#define DEFINE_TRACE_FN(name, reg, unreg)				\
+#define DEFINE_TRACE(name)						\
 	static const char __tpstrtab_##name[]				\
 	__attribute__((section("__tracepoints_strings"))) = #name;	\
 	struct tracepoint __tracepoint_##name				\
 	__attribute__((section("__tracepoints"), aligned(32))) =	\
-		{ __tpstrtab_##name, 0, reg, unreg, NULL }
-
-#define DEFINE_TRACE(name)						\
-	DEFINE_TRACE_FN(name, NULL, NULL);
+		{ __tpstrtab_##name, 0, NULL }
 
 #define EXPORT_TRACEPOINT_SYMBOL_GPL(name)				\
 	EXPORT_SYMBOL_GPL(__tracepoint_##name)
@@ -114,7 +108,6 @@ extern void tracepoint_update_probe_range(struct tracepoint *begin,
 		return -ENOSYS;						\
 	}
 
-#define DEFINE_TRACE_FN(name, reg, unreg)
 #define DEFINE_TRACE(name)
 #define EXPORT_TRACEPOINT_SYMBOL_GPL(name)
 #define EXPORT_TRACEPOINT_SYMBOL(name)
@@ -164,15 +157,6 @@ static inline void tracepoint_synchronize_unregister(void)
 }
 
 #define PARAMS(args...) args
-
-#endif /* _LINUX_TRACEPOINT_H */
-
-/*
- * Note: we keep the TRACE_EVENT outside the include file ifdef protection.
- *  This is due to the way trace events work. If a file includes two
- *  trace event headers under one "CREATE_TRACE_POINTS" the first include
- *  will override the TRACE_EVENT and break the second include.
- */
 
 #ifndef TRACE_EVENT
 /*
@@ -275,15 +259,10 @@ static inline void tracepoint_synchronize_unregister(void)
  * can also by used by generic instrumentation like SystemTap), and
  * it is also used to expose a structured trace record in
  * /sys/kernel/debug/tracing/events/.
- *
- * A set of (un)registration functions can be passed to the variant
- * TRACE_EVENT_FN to perform any (un)registration work.
  */
 
 #define TRACE_EVENT(name, proto, args, struct, assign, print)	\
 	DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))
-#define TRACE_EVENT_FN(name, proto, args, struct,		\
-		assign, print, reg, unreg)			\
-	DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))
+#endif
 
-#endif /* ifdef TRACE_EVENT (see note above) */
+#endif

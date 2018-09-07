@@ -35,10 +35,9 @@
 #include <asm/proto.h>
 #include <asm/ds.h>
 
-#include "tls.h"
+#include <trace/syscall.h>
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/syscalls.h>
+#include "tls.h"
 
 enum x86_regset {
 	REGSET_GENERAL,
@@ -325,6 +324,16 @@ static int putreg(struct task_struct *child,
 		return set_flags(child, value);
 
 #ifdef CONFIG_X86_64
+	/*
+	 * Orig_ax is really just a flag with small positive and
+	 * negative values, so make sure to always sign-extend it
+	 * from 32 bits so that it works correctly regardless of
+	 * whether we come from a 32-bit environment or not.
+	 */
+	case offsetof(struct user_regs_struct, orig_ax):
+		value = (long) (s32) value;
+		break;
+
 	case offsetof(struct user_regs_struct,fs_base):
 		if (value >= TASK_SIZE_OF(child))
 			return -EIO;
@@ -1116,15 +1125,10 @@ static int putreg32(struct task_struct *child, unsigned regno, u32 value)
 
 	case offsetof(struct user32, regs.orig_eax):
 		/*
-		 * A 32-bit debugger setting orig_eax means to restore
-		 * the state of the task restarting a 32-bit syscall.
-		 * Make sure we interpret the -ERESTART* codes correctly
-		 * in case the task is not actually still sitting at the
-		 * exit from a 32-bit syscall with TS_COMPAT still set.
+		 * Sign-extend the value so that orig_eax = -1
+		 * causes (long)orig_ax < 0 tests to fire correctly.
 		 */
-		regs->orig_ax = value;
-		if (syscall_get_nr(child, regs) >= 0)
-			task_thread_info(child)->status |= TS_COMPAT;
+		regs->orig_ax = (long) (s32) value;
 		break;
 
 	case offsetof(struct user32, regs.eflags):
@@ -1493,8 +1497,8 @@ asmregparm long syscall_trace_enter(struct pt_regs *regs)
 	    tracehook_report_syscall_entry(regs))
 		ret = -1L;
 
-	if (unlikely(test_thread_flag(TIF_SYSCALL_TRACEPOINT)))
-		trace_sys_enter(regs, regs->orig_ax);
+	if (unlikely(test_thread_flag(TIF_SYSCALL_FTRACE)))
+		ftrace_syscall_enter(regs);
 
 	if (unlikely(current->audit_context)) {
 		if (IS_IA32)
@@ -1519,8 +1523,8 @@ asmregparm void syscall_trace_leave(struct pt_regs *regs)
 	if (unlikely(current->audit_context))
 		audit_syscall_exit(AUDITSC_RESULT(regs->ax), regs->ax);
 
-	if (unlikely(test_thread_flag(TIF_SYSCALL_TRACEPOINT)))
-		trace_sys_exit(regs, regs->ax);
+	if (unlikely(test_thread_flag(TIF_SYSCALL_FTRACE)))
+		ftrace_syscall_exit(regs);
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall_exit(regs, 0);

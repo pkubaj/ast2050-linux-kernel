@@ -4,7 +4,6 @@
 #include "../perf.h"
 #include <linux/list.h>
 #include <linux/rbtree.h>
-#include "util.h"
 #include "symbol.h"
 
 enum chain_mode {
@@ -48,10 +47,6 @@ static inline void callchain_init(struct callchain_node *node)
 	INIT_LIST_HEAD(&node->brothers);
 	INIT_LIST_HEAD(&node->children);
 	INIT_LIST_HEAD(&node->val);
-
-	node->children_hit = 0;
-	node->parent = NULL;
-	node->hit = 0;
 }
 
 static inline u64 cumul_hits(struct callchain_node *node)

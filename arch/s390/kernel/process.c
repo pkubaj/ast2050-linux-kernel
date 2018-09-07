@@ -27,11 +27,12 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
+#include <linux/utsname.h>
 #include <linux/tick.h>
 #include <linux/elfcore.h>
 #include <linux/kernel_stat.h>
 #include <linux/syscalls.h>
-#include <linux/compat.h>
+#include <asm/compat.h>
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/system.h>
@@ -229,11 +230,17 @@ SYSCALL_DEFINE0(fork)
 	return do_fork(SIGCHLD, regs->gprs[15], regs, 0, NULL, NULL);
 }
 
-SYSCALL_DEFINE4(clone, unsigned long, newsp, unsigned long, clone_flags,
-		int __user *, parent_tidptr, int __user *, child_tidptr)
+SYSCALL_DEFINE0(clone)
 {
 	struct pt_regs *regs = task_pt_regs(current);
+	unsigned long clone_flags;
+	unsigned long newsp;
+	int __user *parent_tidptr, *child_tidptr;
 
+	clone_flags = regs->gprs[3];
+	newsp = regs->orig_gpr2;
+	parent_tidptr = (int __user *) regs->gprs[4];
+	child_tidptr = (int __user *) regs->gprs[5];
 	if (!newsp)
 		newsp = regs->gprs[15];
 	return do_fork(clone_flags, newsp, regs, 0,
@@ -261,31 +268,36 @@ asmlinkage void execve_tail(void)
 {
 	current->thread.fp_regs.fpc = 0;
 	if (MACHINE_HAS_IEEE)
-		asm volatile("sfpc %0" : : "d" (0));
+		asm volatile("sfpc %0,%0" : : "d" (0));
 }
 
 /*
  * sys_execve() executes a new program.
  */
-SYSCALL_DEFINE3(execve, char __user *, name, char __user * __user *, argv,
-		char __user * __user *, envp)
+SYSCALL_DEFINE0(execve)
 {
 	struct pt_regs *regs = task_pt_regs(current);
 	char *filename;
-	long rc;
+	unsigned long result;
+	int rc;
 
-	filename = getname(name);
-	rc = PTR_ERR(filename);
-	if (IS_ERR(filename))
-		return rc;
-	rc = do_execve(filename, argv, envp, regs);
-	if (rc)
+	filename = getname((char __user *) regs->orig_gpr2);
+	if (IS_ERR(filename)) {
+		result = PTR_ERR(filename);
 		goto out;
+	}
+	rc = do_execve(filename, (char __user * __user *) regs->gprs[3],
+		       (char __user * __user *) regs->gprs[4], regs);
+	if (rc) {
+		result = rc;
+		goto out_putname;
+	}
 	execve_tail();
-	rc = regs->gprs[2];
-out:
+	result = regs->gprs[2];
+out_putname:
 	putname(filename);
-	return rc;
+out:
+	return result;
 }
 
 /*

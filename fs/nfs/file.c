@@ -27,8 +27,6 @@
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/aio.h>
-#include <linux/gfp.h>
-#include <linux/swap.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -61,7 +59,7 @@ static int nfs_lock(struct file *filp, int cmd, struct file_lock *fl);
 static int nfs_flock(struct file *filp, int cmd, struct file_lock *fl);
 static int nfs_setlease(struct file *file, long arg, struct file_lock **fl);
 
-static const struct vm_operations_struct nfs_file_vm_ops;
+static struct vm_operations_struct nfs_file_vm_ops;
 
 const struct file_operations nfs_file_operations = {
 	.llseek		= nfs_file_llseek,
@@ -220,7 +218,7 @@ static int nfs_do_fsync(struct nfs_open_context *ctx, struct inode *inode)
 	have_error |= test_bit(NFS_CONTEXT_ERROR_WRITE, &ctx->flags);
 	if (have_error)
 		ret = xchg(&ctx->error, 0);
-	if (!ret && status < 0)
+	if (!ret)
 		ret = status;
 	return ret;
 }
@@ -330,42 +328,6 @@ nfs_file_fsync(struct file *file, struct dentry *dentry, int datasync)
 }
 
 /*
- * Decide whether a read/modify/write cycle may be more efficient
- * then a modify/write/read cycle when writing to a page in the
- * page cache.
- *
- * The modify/write/read cycle may occur if a page is read before
- * being completely filled by the writer.  In this situation, the
- * page must be completely written to stable storage on the server
- * before it can be refilled by reading in the page from the server.
- * This can lead to expensive, small, FILE_SYNC mode writes being
- * done.
- *
- * It may be more efficient to read the page first if the file is
- * open for reading in addition to writing, the page is not marked
- * as Uptodate, it is not dirty or waiting to be committed,
- * indicating that it was previously allocated and then modified,
- * that there were valid bytes of data in that range of the file,
- * and that the new data won't completely replace the old data in
- * that range of the file.
- */
-static int nfs_want_read_modify_write(struct file *file, struct page *page,
-			loff_t pos, unsigned len)
-{
-	unsigned int pglen = nfs_page_length(page);
-	unsigned int offset = pos & (PAGE_CACHE_SIZE - 1);
-	unsigned int end = offset + len;
-
-	if ((file->f_mode & FMODE_READ) &&	/* open for read? */
-	    !PageUptodate(page) &&		/* Uptodate? */
-	    !PagePrivate(page) &&		/* i/o request already? */
-	    pglen &&				/* valid bytes of file? */
-	    (end < pglen || offset))		/* replace all valid bytes? */
-		return 1;
-	return 0;
-}
-
-/*
  * This does the "real" work of the write. We must allocate and lock the
  * page to be sent back to the generic routine, which then copies the
  * data from user space.
@@ -378,16 +340,15 @@ static int nfs_write_begin(struct file *file, struct address_space *mapping,
 			struct page **pagep, void **fsdata)
 {
 	int ret;
-	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
+	pgoff_t index;
 	struct page *page;
-	int once_thru = 0;
+	index = pos >> PAGE_CACHE_SHIFT;
 
 	dfprintk(PAGECACHE, "NFS: write_begin(%s/%s(%ld), %u@%lld)\n",
 		file->f_path.dentry->d_parent->d_name.name,
 		file->f_path.dentry->d_name.name,
 		mapping->host->i_ino, len, (long long) pos);
 
-start:
 	/*
 	 * Prevent starvation issues if someone is doing a consistency
 	 * sync-to-disk
@@ -406,13 +367,6 @@ start:
 	if (ret) {
 		unlock_page(page);
 		page_cache_release(page);
-	} else if (!once_thru &&
-		   nfs_want_read_modify_write(file, page, pos, len)) {
-		once_thru = 1;
-		ret = nfs_readpage(file, page);
-		page_cache_release(page);
-		if (!ret)
-			goto start;
 	}
 	return ret;
 }
@@ -486,19 +440,8 @@ static void nfs_invalidate_page(struct page *page, unsigned long offset)
  */
 static int nfs_release_page(struct page *page, gfp_t gfp)
 {
-	struct address_space *mapping = page->mapping;
-
 	dfprintk(PAGECACHE, "NFS: release_page(%p)\n", page);
 
-	/* Only do I/O if gfp is a superset of GFP_KERNEL */
-	if (mapping && (gfp & GFP_KERNEL) == GFP_KERNEL) {
-		int how = FLUSH_SYNC;
-
-		/* Don't let kswapd deadlock waiting for OOM RPC calls */
-		if (current_is_kswapd())
-			how = 0;
-		nfs_commit_inode(mapping->host, how);
-	}
 	/* If PagePrivate() is set, then the page is not freeable */
 	if (PagePrivate(page))
 		return 0;
@@ -536,9 +479,7 @@ const struct address_space_operations nfs_file_aops = {
 	.invalidatepage = nfs_invalidate_page,
 	.releasepage = nfs_release_page,
 	.direct_IO = nfs_direct_IO,
-	.migratepage = nfs_migrate_page,
 	.launder_page = nfs_launder_page,
-	.error_remove_page = generic_error_remove_page,
 };
 
 /*
@@ -585,7 +526,7 @@ out_unlock:
 	return VM_FAULT_SIGBUS;
 }
 
-static const struct vm_operations_struct nfs_file_vm_ops = {
+static struct vm_operations_struct nfs_file_vm_ops = {
 	.fault = filemap_fault,
 	.page_mkwrite = nfs_vm_page_mkwrite,
 };
@@ -680,7 +621,6 @@ static int do_getlk(struct file *filp, int cmd, struct file_lock *fl)
 {
 	struct inode *inode = filp->f_mapping->host;
 	int status = 0;
-	unsigned int saved_type = fl->fl_type;
 
 	/* Try local locking first */
 	posix_test_lock(filp, fl);
@@ -688,7 +628,6 @@ static int do_getlk(struct file *filp, int cmd, struct file_lock *fl)
 		/* found a conflict */
 		goto out;
 	}
-	fl->fl_type = saved_type;
 
 	if (nfs_have_delegation(inode, FMODE_READ))
 		goto out_noconflict;

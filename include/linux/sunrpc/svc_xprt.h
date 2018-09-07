@@ -65,7 +65,6 @@ struct svc_xprt {
 	size_t			xpt_locallen;	/* length of address */
 	struct sockaddr_storage	xpt_remote;	/* remote peer's address */
 	size_t			xpt_remotelen;	/* length of address */
-	struct rpc_wait_queue	xpt_bc_pending;	/* backchannel wait queue */
 };
 
 int	svc_reg_xprt_class(struct svc_xprt_class *);

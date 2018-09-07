@@ -72,7 +72,6 @@ acpi_ex_read_data_from_field(struct acpi_walk_state *walk_state,
 	union acpi_operand_object *buffer_desc;
 	acpi_size length;
 	void *buffer;
-	u32 function;
 
 	ACPI_FUNCTION_TRACE_PTR(ex_read_data_from_field, obj_desc);
 
@@ -98,27 +97,13 @@ acpi_ex_read_data_from_field(struct acpi_walk_state *walk_state,
 		}
 	} else if ((obj_desc->common.type == ACPI_TYPE_LOCAL_REGION_FIELD) &&
 		   (obj_desc->field.region_obj->region.space_id ==
-		    ACPI_ADR_SPACE_SMBUS
-		    || obj_desc->field.region_obj->region.space_id ==
-		    ACPI_ADR_SPACE_IPMI)) {
+		    ACPI_ADR_SPACE_SMBUS)) {
 		/*
-		 * This is an SMBus or IPMI read. We must create a buffer to hold
-		 * the data and then directly access the region handler.
-		 *
-		 * Note: Smbus protocol value is passed in upper 16-bits of Function
+		 * This is an SMBus read.  We must create a buffer to hold the data
+		 * and directly access the region handler.
 		 */
-		if (obj_desc->field.region_obj->region.space_id ==
-		    ACPI_ADR_SPACE_SMBUS) {
-			length = ACPI_SMBUS_BUFFER_SIZE;
-			function =
-			    ACPI_READ | (obj_desc->field.attribute << 16);
-		} else {	/* IPMI */
-
-			length = ACPI_IPMI_BUFFER_SIZE;
-			function = ACPI_READ;
-		}
-
-		buffer_desc = acpi_ut_create_buffer_object(length);
+		buffer_desc =
+		    acpi_ut_create_buffer_object(ACPI_SMBUS_BUFFER_SIZE);
 		if (!buffer_desc) {
 			return_ACPI_STATUS(AE_NO_MEMORY);
 		}
@@ -127,13 +112,16 @@ acpi_ex_read_data_from_field(struct acpi_walk_state *walk_state,
 
 		acpi_ex_acquire_global_lock(obj_desc->common_field.field_flags);
 
-		/* Call the region handler for the read */
-
+		/*
+		 * Perform the read.
+		 * Note: Smbus protocol value is passed in upper 16-bits of Function
+		 */
 		status = acpi_ex_access_region(obj_desc, 0,
 					       ACPI_CAST_PTR(acpi_integer,
 							     buffer_desc->
 							     buffer.pointer),
-					       function);
+					       ACPI_READ | (obj_desc->field.
+							    attribute << 16));
 		acpi_ex_release_global_lock(obj_desc->common_field.field_flags);
 		goto exit;
 	}
@@ -224,7 +212,6 @@ acpi_ex_write_data_to_field(union acpi_operand_object *source_desc,
 	u32 length;
 	void *buffer;
 	union acpi_operand_object *buffer_desc;
-	u32 function;
 
 	ACPI_FUNCTION_TRACE_PTR(ex_write_data_to_field, obj_desc);
 
@@ -247,56 +234,39 @@ acpi_ex_write_data_to_field(union acpi_operand_object *source_desc,
 		}
 	} else if ((obj_desc->common.type == ACPI_TYPE_LOCAL_REGION_FIELD) &&
 		   (obj_desc->field.region_obj->region.space_id ==
-		    ACPI_ADR_SPACE_SMBUS
-		    || obj_desc->field.region_obj->region.space_id ==
-		    ACPI_ADR_SPACE_IPMI)) {
+		    ACPI_ADR_SPACE_SMBUS)) {
 		/*
-		 * This is an SMBus or IPMI write. We will bypass the entire field
-		 * mechanism and handoff the buffer directly to the handler. For
-		 * these address spaces, the buffer is bi-directional; on a write,
-		 * return data is returned in the same buffer.
+		 * This is an SMBus write.  We will bypass the entire field mechanism
+		 * and handoff the buffer directly to the handler.
 		 *
-		 * Source must be a buffer of sufficient size:
-		 * ACPI_SMBUS_BUFFER_SIZE or ACPI_IPMI_BUFFER_SIZE.
-		 *
-		 * Note: SMBus protocol type is passed in upper 16-bits of Function
+		 * Source must be a buffer of sufficient size (ACPI_SMBUS_BUFFER_SIZE).
 		 */
 		if (source_desc->common.type != ACPI_TYPE_BUFFER) {
 			ACPI_ERROR((AE_INFO,
-				    "SMBus or IPMI write requires Buffer, found type %s",
+				    "SMBus write requires Buffer, found type %s",
 				    acpi_ut_get_object_type_name(source_desc)));
 
 			return_ACPI_STATUS(AE_AML_OPERAND_TYPE);
 		}
 
-		if (obj_desc->field.region_obj->region.space_id ==
-		    ACPI_ADR_SPACE_SMBUS) {
-			length = ACPI_SMBUS_BUFFER_SIZE;
-			function =
-			    ACPI_WRITE | (obj_desc->field.attribute << 16);
-		} else {	/* IPMI */
-
-			length = ACPI_IPMI_BUFFER_SIZE;
-			function = ACPI_WRITE;
-		}
-
-		if (source_desc->buffer.length < length) {
+		if (source_desc->buffer.length < ACPI_SMBUS_BUFFER_SIZE) {
 			ACPI_ERROR((AE_INFO,
-				    "SMBus or IPMI write requires Buffer of length %X, found length %X",
-				    length, source_desc->buffer.length));
+				    "SMBus write requires Buffer of length %X, found length %X",
+				    ACPI_SMBUS_BUFFER_SIZE,
+				    source_desc->buffer.length));
 
 			return_ACPI_STATUS(AE_AML_BUFFER_LIMIT);
 		}
 
-		/* Create the bi-directional buffer */
-
-		buffer_desc = acpi_ut_create_buffer_object(length);
+		buffer_desc =
+		    acpi_ut_create_buffer_object(ACPI_SMBUS_BUFFER_SIZE);
 		if (!buffer_desc) {
 			return_ACPI_STATUS(AE_NO_MEMORY);
 		}
 
 		buffer = buffer_desc->buffer.pointer;
-		ACPI_MEMCPY(buffer, source_desc->buffer.pointer, length);
+		ACPI_MEMCPY(buffer, source_desc->buffer.pointer,
+			    ACPI_SMBUS_BUFFER_SIZE);
 
 		/* Lock entire transaction if requested */
 
@@ -305,10 +275,12 @@ acpi_ex_write_data_to_field(union acpi_operand_object *source_desc,
 		/*
 		 * Perform the write (returns status and perhaps data in the
 		 * same buffer)
+		 * Note: SMBus protocol type is passed in upper 16-bits of Function.
 		 */
 		status = acpi_ex_access_region(obj_desc, 0,
 					       (acpi_integer *) buffer,
-					       function);
+					       ACPI_WRITE | (obj_desc->field.
+							     attribute << 16));
 		acpi_ex_release_global_lock(obj_desc->common_field.field_flags);
 
 		*result_desc = buffer_desc;

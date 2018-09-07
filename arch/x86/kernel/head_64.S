@@ -40,7 +40,7 @@ L4_START_KERNEL = pgd_index(__START_KERNEL_map)
 L3_START_KERNEL = pud_index(__START_KERNEL_map)
 
 	.text
-	__HEAD
+	.section .text.head
 	.code64
 	.globl startup_64
 startup_64:
@@ -418,7 +418,7 @@ ENTRY(phys_base)
 ENTRY(idt_table)
 	.skip IDT_ENTRIES * 16
 
-	__PAGE_ALIGNED_BSS
+	.section .bss.page_aligned, "aw", @nobits
 	.align PAGE_SIZE
 ENTRY(empty_zero_page)
 	.skip PAGE_SIZE

@@ -20,7 +20,6 @@
 #include <linux/netdevice.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/sched.h>
 
 #include <asm/io.h>
 #include <asm/system.h>

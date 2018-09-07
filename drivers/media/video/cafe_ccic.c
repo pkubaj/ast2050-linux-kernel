@@ -490,6 +490,7 @@ static int cafe_smbus_setup(struct cafe_camera *cam)
 	int ret;
 
 	cafe_smbus_enable_irq(cam);
+	adap->id = I2C_HW_SMBUS_CAFE;
 	adap->owner = THIS_MODULE;
 	adap->algo = &cafe_smbus_algo;
 	strcpy(adap->name, "cafe_ccic");
@@ -1325,7 +1326,7 @@ static void cafe_v4l_vm_close(struct vm_area_struct *vma)
 	mutex_unlock(&sbuf->cam->s_mutex);
 }
 
-static const struct vm_operations_struct cafe_v4l_vm_ops = {
+static struct vm_operations_struct cafe_v4l_vm_ops = {
 	.open = cafe_v4l_vm_open,
 	.close = cafe_v4l_vm_close
 };
@@ -1955,7 +1956,7 @@ static int cafe_pci_probe(struct pci_dev *pdev,
 
 	cam->sensor_addr = 0x42;
 	cam->sensor = v4l2_i2c_new_subdev(&cam->v4l2_dev, &cam->i2c_adapter,
-			"ov7670", "ov7670", cam->sensor_addr, NULL);
+			"ov7670", "ov7670", cam->sensor_addr);
 	if (cam->sensor == NULL) {
 		ret = -ENODEV;
 		goto out_smbus;

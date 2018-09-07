@@ -607,7 +607,7 @@ static struct cifs_ntsd *get_cifs_acl(struct cifs_sb_info *cifs_sb,
 		return get_cifs_acl_by_path(cifs_sb, path, pacllen);
 
 	pntsd = get_cifs_acl_by_fid(cifs_sb, open_file->netfid, pacllen);
-	cifsFileInfo_put(open_file);
+	atomic_dec(&open_file->wrtPending);
 	return pntsd;
 }
 
@@ -665,7 +665,7 @@ static int set_cifs_acl(struct cifs_ntsd *pnntsd, __u32 acllen,
 		return set_cifs_acl_by_path(cifs_sb, path, pnntsd, acllen);
 
 	rc = set_cifs_acl_by_fid(cifs_sb, open_file->netfid, pnntsd, acllen);
-	cifsFileInfo_put(open_file);
+	atomic_dec(&open_file->wrtPending);
 	return rc;
 }
 

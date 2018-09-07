@@ -24,7 +24,6 @@
  *
  */
 
-#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/errno.h>
@@ -444,7 +443,7 @@ static u32 __emac_calc_base_mr1(struct emac_instance *dev, int tx_size, int rx_s
 		ret |= EMAC_MR1_TFS_2K;
 		break;
 	default:
-		printk(KERN_WARNING "%s: Unknown Tx FIFO size %d\n",
+		printk(KERN_WARNING "%s: Unknown Rx FIFO size %d\n",
 		       dev->ndev->name, tx_size);
 	}
 
@@ -471,9 +470,6 @@ static u32 __emac4_calc_base_mr1(struct emac_instance *dev, int tx_size, int rx_
 	DBG2(dev, "__emac4_calc_base_mr1" NL);
 
 	switch(tx_size) {
-	case 16384:
-		ret |= EMAC4_MR1_TFS_16K;
-		break;
 	case 4096:
 		ret |= EMAC4_MR1_TFS_4K;
 		break;
@@ -481,7 +477,7 @@ static u32 __emac4_calc_base_mr1(struct emac_instance *dev, int tx_size, int rx_
 		ret |= EMAC4_MR1_TFS_2K;
 		break;
 	default:
-		printk(KERN_WARNING "%s: Unknown Tx FIFO size %d\n",
+		printk(KERN_WARNING "%s: Unknown Rx FIFO size %d\n",
 		       dev->ndev->name, tx_size);
 	}
 
@@ -1348,7 +1344,7 @@ static inline int emac_xmit_finish(struct emac_instance *dev, int len)
 	++dev->stats.tx_packets;
 	dev->stats.tx_bytes += len;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* Tx lock BH */
@@ -2213,7 +2209,7 @@ static const struct ethtool_ops emac_ethtool_ops = {
 static int emac_ioctl(struct net_device *ndev, struct ifreq *rq, int cmd)
 {
 	struct emac_instance *dev = netdev_priv(ndev);
-	struct mii_ioctl_data *data = if_mii(rq);
+	uint16_t *data = (uint16_t *) & rq->ifr_ifru;
 
 	DBG(dev, "ioctl %08x" NL, cmd);
 
@@ -2222,16 +2218,19 @@ static int emac_ioctl(struct net_device *ndev, struct ifreq *rq, int cmd)
 
 	switch (cmd) {
 	case SIOCGMIIPHY:
-		data->phy_id = dev->phy.address;
+	case SIOCDEVPRIVATE:
+		data[0] = dev->phy.address;
 		/* Fall through */
 	case SIOCGMIIREG:
-		data->val_out = emac_mdio_read(ndev, dev->phy.address,
-					       data->reg_num);
+	case SIOCDEVPRIVATE + 1:
+		data[3] = emac_mdio_read(ndev, dev->phy.address, data[1]);
 		return 0;
 
 	case SIOCSMIIREG:
-		emac_mdio_write(ndev, dev->phy.address, data->reg_num,
-				data->val_in);
+	case SIOCDEVPRIVATE + 2:
+		if (!capable(CAP_NET_ADMIN))
+			return -EPERM;
+		emac_mdio_write(ndev, dev->phy.address, data[1], data[2]);
 		return 0;
 	default:
 		return -EOPNOTSUPP;
@@ -2560,13 +2559,13 @@ static int __devinit emac_init_config(struct emac_instance *dev)
 	if (emac_read_uint_prop(np, "mdio-device", &dev->mdio_ph, 0))
 		dev->mdio_ph = 0;
 	if (emac_read_uint_prop(np, "zmii-device", &dev->zmii_ph, 0))
-		dev->zmii_ph = 0;
+		dev->zmii_ph = 0;;
 	if (emac_read_uint_prop(np, "zmii-channel", &dev->zmii_port, 0))
-		dev->zmii_port = 0xffffffff;
+		dev->zmii_port = 0xffffffff;;
 	if (emac_read_uint_prop(np, "rgmii-device", &dev->rgmii_ph, 0))
-		dev->rgmii_ph = 0;
+		dev->rgmii_ph = 0;;
 	if (emac_read_uint_prop(np, "rgmii-channel", &dev->rgmii_port, 0))
-		dev->rgmii_port = 0xffffffff;
+		dev->rgmii_port = 0xffffffff;;
 	if (emac_read_uint_prop(np, "fifo-entry-size", &dev->fifo_entry_size, 0))
 		dev->fifo_entry_size = 16;
 	if (emac_read_uint_prop(np, "mal-burst-size", &dev->mal_burst_size, 0))
@@ -2989,7 +2988,6 @@ static struct of_device_id emac_match[] =
 	},
 	{},
 };
-MODULE_DEVICE_TABLE(of, emac_match);
 
 static struct of_platform_driver emac_driver = {
 	.name = "emac",

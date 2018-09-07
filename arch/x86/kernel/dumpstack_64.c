@@ -5,6 +5,7 @@
 #include <linux/kallsyms.h>
 #include <linux/kprobes.h>
 #include <linux/uaccess.h>
+#include <linux/utsname.h>
 #include <linux/hardirq.h>
 #include <linux/kdebug.h>
 #include <linux/module.h>
@@ -23,6 +24,7 @@ static char x86_stack_ids[][8] = {
 		[DEBUG_STACK - 1] = "#DB",
 		[NMI_STACK - 1] = "NMI",
 		[DOUBLEFAULT_STACK - 1] = "#DF",
+		[STACKFAULT_STACK - 1] = "#SS",
 		[MCE_STACK - 1] = "#MC",
 #if DEBUG_STKSZ > EXCEPTION_STKSZ
 		[N_EXCEPTION_STACKS ...

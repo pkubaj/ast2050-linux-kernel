@@ -227,10 +227,7 @@ static void __init clk_pll_init(struct clk *clk)
 	if (ctrl & PLLCTL_PLLEN) {
 		bypass = 0;
 		mult = __raw_readl(pll->base + PLLM);
-		if (cpu_is_davinci_dm365())
-			mult = 2 * (mult & PLLM_PLLM_MASK);
-		else
-			mult = (mult & PLLM_PLLM_MASK) + 1;
+		mult = (mult & PLLM_PLLM_MASK) + 1;
 	} else
 		bypass = 1;
 

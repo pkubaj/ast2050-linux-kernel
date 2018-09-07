@@ -26,12 +26,6 @@ disabled, and more (ftrace allows for tracer plugins, which
 means that the list of tracers can always grow).
 
 
-Implementation Details
-----------------------
-
-See ftrace-design.txt for details for arch porters and such.
-
-
 The File System
 ---------------
 
@@ -91,19 +85,26 @@ of ftrace. Here is a list of some of the key files:
 	This file holds the output of the trace in a human
 	readable format (described below).
 
+  latency_trace:
+
+	This file shows the same trace but the information
+	is organized more to display possible latencies
+	in the system (described below).
+
   trace_pipe:
 
 	The output is the same as the "trace" file but this
 	file is meant to be streamed with live tracing.
-	Reads from this file will block until new data is
-	retrieved.  Unlike the "trace" file, this file is a
-	consumer. This means reading from this file causes
-	sequential reads to display more current data. Once
-	data is read from this file, it is consumed, and
-	will not be read again with a sequential read. The
-	"trace" file is static, and if the tracer is not
-	adding more data,they will display the same
-	information every time they are read.
+	Reads from this file will block until new data
+	is retrieved. Unlike the "trace" and "latency_trace"
+	files, this file is a consumer. This means reading
+	from this file causes sequential reads to display
+	more current data. Once data is read from this
+	file, it is consumed, and will not be read
+	again with a sequential read. The "trace" and
+	"latency_trace" files are static, and if the
+	tracer is not adding more data, they will display
+	the same information every time they are read.
 
   trace_options:
 
@@ -116,10 +117,10 @@ of ftrace. Here is a list of some of the key files:
 	Some of the tracers record the max latency.
 	For example, the time interrupts are disabled.
 	This time is saved in this file. The max trace
-	will also be stored, and displayed by "trace".
-	A new max trace will only be recorded if the
-	latency is greater than the value in this
-	file. (in microseconds)
+	will also be stored, and displayed by either
+	"trace" or "latency_trace".  A new max trace will
+	only be recorded if the latency is greater than
+	the value in this file. (in microseconds)
 
   buffer_size_kb:
 
@@ -133,7 +134,7 @@ of ftrace. Here is a list of some of the key files:
 	than requested, the rest of the page will be used,
 	making the actual allocation bigger than requested.
 	( Note, the size may not be a multiple of the page size
-	  due to buffer management overhead. )
+	  due to buffer managment overhead. )
 
 	This can only be updated when the current_tracer
 	is set to "nop".
@@ -209,7 +210,7 @@ Here is the list of current tracers that may be configured.
 	the trace with the longest max latency.
 	See tracing_max_latency. When a new max is recorded,
 	it replaces the old trace. It is best to view this
-	trace with the latency-format option enabled.
+	trace via the latency_trace file.
 
   "preemptoff"
 
@@ -306,8 +307,8 @@ the lowest priority thread (pid 0).
 Latency trace format
 --------------------
 
-When the latency-format option is enabled, the trace file gives
-somewhat more information to see why a latency happened.
+For traces that display latency times, the latency_trace file
+gives somewhat more information to see why a latency happened.
 Here is a typical trace.
 
 # tracer: irqsoff
@@ -379,10 +380,9 @@ explains which is which.
 
 The above is mostly meaningful for kernel developers.
 
-  time: When the latency-format option is enabled, the trace file
-	output includes a timestamp relative to the start of the
-	trace. This differs from the output when latency-format
-	is disabled, which includes an absolute timestamp.
+  time: This differs from the trace file output. The trace file output
+	includes an absolute timestamp. The timestamp used by the
+	latency_trace file is relative to the start of the trace.
 
   delay: This is just to help catch your eye a bit better. And
 	 needs to be fixed to be only relative to the same CPU.
@@ -440,8 +440,7 @@ Here are the available options:
   sym-addr:
    bash-4000  [01]  1477.606694: simple_strtoul <c0339346>
 
-  verbose - This deals with the trace file when the
-            latency-format option is enabled.
+  verbose - This deals with the latency_trace file.
 
     bash  4000 1 0 00000000 00010a95 [58127d26] 1720.415ms \
     (+0.000ms): simple_strtoul (strict_strtoul)
@@ -473,7 +472,7 @@ Here are the available options:
 		the app is no longer running
 
 		The lookup is performed when you read
-		trace,trace_pipe. Example:
+		trace,trace_pipe,latency_trace. Example:
 
 		a.out-1623  [000] 40874.465068: /root/a.out[+0x480] <-/root/a.out[+0
 x494] <- /root/a.out[+0x4a8] <- /lib/libc-2.7.so[+0x1e1a6]
@@ -482,11 +481,6 @@ x494] <- /root/a.out[+0x4a8] <- /lib/libc-2.7.so[+0x1e1a6]
 	       every scheduling event. Will add overhead if
 	       there's a lot of tasks running at once.
 
-  latency-format - This option changes the trace. When
-                   it is enabled, the trace displays
-                   additional information about the
-                   latencies, as described in "Latency
-                   trace format".
 
 sched_switch
 ------------
@@ -602,13 +596,12 @@ To reset the maximum, echo 0 into tracing_max_latency. Here is
 an example:
 
  # echo irqsoff > current_tracer
- # echo latency-format > trace_options
  # echo 0 > tracing_max_latency
  # echo 1 > tracing_enabled
  # ls -ltr
  [...]
  # echo 0 > tracing_enabled
- # cat trace
+ # cat latency_trace
 # tracer: irqsoff
 #
 irqsoff latency trace v1.1.5 on 2.6.26
@@ -710,13 +703,12 @@ which preemption was disabled. The control of preemptoff tracer
 is much like the irqsoff tracer.
 
  # echo preemptoff > current_tracer
- # echo latency-format > trace_options
  # echo 0 > tracing_max_latency
  # echo 1 > tracing_enabled
  # ls -ltr
  [...]
  # echo 0 > tracing_enabled
- # cat trace
+ # cat latency_trace
 # tracer: preemptoff
 #
 preemptoff latency trace v1.1.5 on 2.6.26-rc8
@@ -858,13 +850,12 @@ Again, using this trace is much like the irqsoff and preemptoff
 tracers.
 
  # echo preemptirqsoff > current_tracer
- # echo latency-format > trace_options
  # echo 0 > tracing_max_latency
  # echo 1 > tracing_enabled
  # ls -ltr
  [...]
  # echo 0 > tracing_enabled
- # cat trace
+ # cat latency_trace
 # tracer: preemptirqsoff
 #
 preemptirqsoff latency trace v1.1.5 on 2.6.26-rc8
@@ -1021,12 +1012,11 @@ Instead of performing an 'ls', we will run 'sleep 1' under
 'chrt' which changes the priority of the task.
 
  # echo wakeup > current_tracer
- # echo latency-format > trace_options
  # echo 0 > tracing_max_latency
  # echo 1 > tracing_enabled
  # chrt -f 5 sleep 1
  # echo 0 > tracing_enabled
- # cat trace
+ # cat latency_trace
 # tracer: wakeup
 #
 wakeup latency trace v1.1.5 on 2.6.26-rc8
@@ -1231,7 +1221,6 @@ something like this simple program:
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <string.h>
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -1266,7 +1255,6 @@ const char *find_debugfs(void)
                return NULL;
        }
 
-       strcat(debugfs, "/tracing/");
        debugfs_found = 1;
 
        return debugfs;

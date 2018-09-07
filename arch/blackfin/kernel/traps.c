@@ -1,7 +1,30 @@
 /*
- * Copyright 2004-2009 Analog Devices Inc.
+ * File:         arch/blackfin/kernel/traps.c
+ * Based on:
+ * Author:       Hamish Macdonald
  *
- * Licensed under the GPL-2 or later
+ * Created:
+ * Description:  uses S/W interrupt 15 for the system calls
+ *
+ * Modified:
+ *               Copyright 2004-2006 Analog Devices Inc.
+ *
+ * Bugs:         Enter bugs at http://blackfin.uclinux.org/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see the file COPYING, or write
+ * to the Free Software Foundation, Inc.,
+ * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include <linux/bug.h>
@@ -77,11 +100,7 @@ static void decode_address(char *buf, unsigned long address)
 	char *modname;
 	char *delim = ":";
 	char namebuf[128];
-#endif
 
-	buf += sprintf(buf, "<0x%08lx> ", address);
-
-#ifdef CONFIG_KALLSYMS
 	/* look up the address and see if we are in kernel space */
 	symname = kallsyms_lookup(address, &symsize, &offset, &modname, namebuf);
 
@@ -89,33 +108,23 @@ static void decode_address(char *buf, unsigned long address)
 		/* yeah! kernel space! */
 		if (!modname)
 			modname = delim = "";
-		sprintf(buf, "{ %s%s%s%s + 0x%lx }",
-		        delim, modname, delim, symname,
-		        (unsigned long)offset);
+		sprintf(buf, "<0x%p> { %s%s%s%s + 0x%lx }",
+		              (void *)address, delim, modname, delim, symname,
+		              (unsigned long)offset);
 		return;
+
 	}
 #endif
 
+	/* Problem in fixed code section? */
 	if (address >= FIXED_CODE_START && address < FIXED_CODE_END) {
-		/* Problem in fixed code section? */
-		strcat(buf, "/* Maybe fixed code section */");
+		sprintf(buf, "<0x%p> /* Maybe fixed code section */", (void *)address);
 		return;
+	}
 
-	} else if (address < CONFIG_BOOT_LOAD) {
-		/* Problem somewhere before the kernel start address */
-		strcat(buf, "/* Maybe null pointer? */");
-		return;
-
-	} else if (address >= COREMMR_BASE) {
-		strcat(buf, "/* core mmrs */");
-		return;
-
-	} else if (address >= SYSMMR_BASE) {
-		strcat(buf, "/* system mmrs */");
-		return;
-
-	} else if (address >= L1_ROM_START && address < L1_ROM_START + L1_ROM_LENGTH) {
-		strcat(buf, "/* on-chip L1 ROM */");
+	/* Problem somewhere before the kernel start address */
+	if (address < CONFIG_BOOT_LOAD) {
+		sprintf(buf, "<0x%p> /* Maybe null pointer? */", (void *)address);
 		return;
 	}
 
@@ -163,16 +172,18 @@ static void decode_address(char *buf, unsigned long address)
 						offset = (address - vma->vm_start) +
 							 (vma->vm_pgoff << PAGE_SHIFT);
 
-					sprintf(buf, "[ %s + 0x%lx ]", name, offset);
+					sprintf(buf, "<0x%p> [ %s + 0x%lx ]",
+						(void *)address, name, offset);
 				} else
-					sprintf(buf, "[ %s vma:0x%lx-0x%lx]",
-						name, vma->vm_start, vma->vm_end);
+					sprintf(buf, "<0x%p> [ %s vma:0x%lx-0x%lx]",
+						(void *)address, name,
+						vma->vm_start, vma->vm_end);
 
 				if (!in_atomic)
 					mmput(mm);
 
-				if (buf[0] == '\0')
-					sprintf(buf, "[ %s ] dynamic memory", name);
+				if (!strlen(buf))
+					sprintf(buf, "<0x%p> [ %s ] dynamic memory", (void *)address, name);
 
 				goto done;
 			}
@@ -182,7 +193,7 @@ static void decode_address(char *buf, unsigned long address)
 	}
 
 	/* we were unable to find this address anywhere */
-	sprintf(buf, "/* kernel dynamic memory */");
+	sprintf(buf, "<0x%p> /* kernel dynamic memory */", (void *)address);
 
 done:
 	write_unlock_irqrestore(&tasklist_lock, flags);
@@ -204,14 +215,14 @@ asmlinkage void double_fault_c(struct pt_regs *fp)
 	printk(KERN_EMERG "Double Fault\n");
 #ifdef CONFIG_DEBUG_DOUBLEFAULT_PRINT
 	if (((long)fp->seqstat &  SEQSTAT_EXCAUSE) == VEC_UNCOV) {
-		unsigned int cpu = raw_smp_processor_id();
+		unsigned int cpu = smp_processor_id();
 		char buf[150];
-		decode_address(buf, cpu_pda[cpu].retx_doublefault);
+		decode_address(buf, cpu_pda[cpu].retx);
 		printk(KERN_EMERG "While handling exception (EXCAUSE = 0x%x) at %s:\n",
-			(unsigned int)cpu_pda[cpu].seqstat_doublefault & SEQSTAT_EXCAUSE, buf);
-		decode_address(buf, cpu_pda[cpu].dcplb_doublefault_addr);
+			(unsigned int)cpu_pda[cpu].seqstat & SEQSTAT_EXCAUSE, buf);
+		decode_address(buf, cpu_pda[cpu].dcplb_fault_addr);
 		printk(KERN_NOTICE "   DCPLB_FAULT_ADDR: %s\n", buf);
-		decode_address(buf, cpu_pda[cpu].icplb_doublefault_addr);
+		decode_address(buf, cpu_pda[cpu].icplb_fault_addr);
 		printk(KERN_NOTICE "   ICPLB_FAULT_ADDR: %s\n", buf);
 
 		decode_address(buf, fp->retx);
@@ -234,13 +245,13 @@ static int kernel_mode_regs(struct pt_regs *regs)
 	return regs->ipend & 0xffc0;
 }
 
-asmlinkage notrace void trap_c(struct pt_regs *fp)
+asmlinkage void trap_c(struct pt_regs *fp)
 {
 #ifdef CONFIG_DEBUG_BFIN_HWTRACE_ON
 	int j;
 #endif
 #ifdef CONFIG_DEBUG_HUNT_FOR_ZERO
-	unsigned int cpu = raw_smp_processor_id();
+	unsigned int cpu = smp_processor_id();
 #endif
 	const char *strerror = NULL;
 	int sig = 0;
@@ -255,6 +266,11 @@ asmlinkage notrace void trap_c(struct pt_regs *fp)
 	/* Important - be very careful dereferncing pointers - will lead to
 	 * double faults if the stack has become corrupt
 	 */
+
+#ifndef CONFIG_KGDB
+	/* IPEND is skipped if KGDB isn't enabled (see entry code) */
+	fp->ipend = bfin_read_IPEND();
+#endif
 
 	/* trap_c() will be called for exceptions. During exceptions
 	 * processing, the pc value should be set with retx value.
@@ -388,7 +404,7 @@ asmlinkage notrace void trap_c(struct pt_regs *fp)
 	/* 0x23 - Data CPLB protection violation, handled here */
 	case VEC_CPLB_VL:
 		info.si_code = ILL_CPLB_VI;
-		sig = SIGSEGV;
+		sig = SIGBUS;
 		strerror = KERN_NOTICE EXC_0x23(KERN_NOTICE);
 		CHK_DEBUGGER_TRAP_MAYBE();
 		break;
@@ -888,7 +904,7 @@ void show_stack(struct task_struct *task, unsigned long *stack)
 		frame_no = 0;
 
 		for (addr = (unsigned int *)((unsigned int)stack & ~0xF), i = 0;
-		     addr < endstack; addr++, i++) {
+		     addr <= endstack; addr++, i++) {
 
 			ret_addr = 0;
 			if (!j && i % 8 == 0)
@@ -933,7 +949,6 @@ void show_stack(struct task_struct *task, unsigned long *stack)
 	}
 #endif
 }
-EXPORT_SYMBOL(show_stack);
 
 void dump_stack(void)
 {
@@ -1075,7 +1090,7 @@ void show_regs(struct pt_regs *fp)
 	struct irqaction *action;
 	unsigned int i;
 	unsigned long flags = 0;
-	unsigned int cpu = raw_smp_processor_id();
+	unsigned int cpu = smp_processor_id();
 	unsigned char in_atomic = (bfin_read_IPEND() & 0x10) || in_atomic();
 
 	verbose_printk(KERN_NOTICE "\n");
@@ -1101,16 +1116,10 @@ void show_regs(struct pt_regs *fp)
 
 	verbose_printk(KERN_NOTICE "%s", linux_banner);
 
-	verbose_printk(KERN_NOTICE "\nSEQUENCER STATUS:\t\t%s\n", print_tainted());
-	verbose_printk(KERN_NOTICE " SEQSTAT: %08lx  IPEND: %04lx  IMASK: %04lx  SYSCFG: %04lx\n",
-		(long)fp->seqstat, fp->ipend, cpu_pda[raw_smp_processor_id()].ex_imask, fp->syscfg);
-	if (fp->ipend & EVT_IRPTEN)
-		verbose_printk(KERN_NOTICE "  Global Interrupts Disabled (IPEND[4])\n");
-	if (!(cpu_pda[raw_smp_processor_id()].ex_imask & (EVT_IVG13 | EVT_IVG12 | EVT_IVG11 |
-			EVT_IVG10 | EVT_IVG9 | EVT_IVG8 | EVT_IVG7 | EVT_IVTMR)))
-		verbose_printk(KERN_NOTICE "  Peripheral interrupts masked off\n");
-	if (!(cpu_pda[raw_smp_processor_id()].ex_imask & (EVT_IVG15 | EVT_IVG14)))
-		verbose_printk(KERN_NOTICE "  Kernel interrupts masked off\n");
+	verbose_printk(KERN_NOTICE "\nSEQUENCER STATUS:\t\t%s\n",
+		       print_tainted());
+	verbose_printk(KERN_NOTICE " SEQSTAT: %08lx  IPEND: %04lx  SYSCFG: %04lx\n",
+		       (long)fp->seqstat, fp->ipend, fp->syscfg);
 	if ((fp->seqstat & SEQSTAT_EXCAUSE) == VEC_HWERR) {
 		verbose_printk(KERN_NOTICE "  HWERRCAUSE: 0x%lx\n",
 			(fp->seqstat & SEQSTAT_HWERRCAUSE) >> 14);

@@ -873,7 +873,7 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 		if (retval < 0)
 			return retval;
 
-		if (!cpumask_subset(trialcs->cpus_allowed, cpu_active_mask))
+		if (!cpumask_subset(trialcs->cpus_allowed, cpu_online_mask))
 			return -EINVAL;
 	}
 	retval = validate_change(cs, trialcs);
@@ -920,6 +920,9 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
  *    calls.  Therefore we don't need to take task_lock around the
  *    call to guarantee_online_mems(), as we know no one is changing
  *    our task's cpuset.
+ *
+ *    Hold callback_mutex around the two modifications of our tasks
+ *    mems_allowed to synchronize with cpuset_mems_allowed().
  *
  *    While the mm_struct we are migrating is typically from some
  *    other task, the task_struct mems_allowed that we are hacking
@@ -1321,10 +1324,9 @@ static int fmeter_getrate(struct fmeter *fmp)
 static cpumask_var_t cpus_attach;
 
 /* Called by cgroups to determine if a cpuset is usable; cgroup_mutex held */
-static int cpuset_can_attach(struct cgroup_subsys *ss, struct cgroup *cont,
-			     struct task_struct *tsk, bool threadgroup)
+static int cpuset_can_attach(struct cgroup_subsys *ss,
+			     struct cgroup *cont, struct task_struct *tsk)
 {
-	int ret;
 	struct cpuset *cs = cgroup_cs(cont);
 
 	if (cpumask_empty(cs->cpus_allowed) || nodes_empty(cs->mems_allowed))
@@ -1341,71 +1343,35 @@ static int cpuset_can_attach(struct cgroup_subsys *ss, struct cgroup *cont,
 	if (tsk->flags & PF_THREAD_BOUND)
 		return -EINVAL;
 
-	ret = security_task_setscheduler(tsk, 0, NULL);
-	if (ret)
-		return ret;
-	if (threadgroup) {
-		struct task_struct *c;
-
-		rcu_read_lock();
-		list_for_each_entry_rcu(c, &tsk->thread_group, thread_group) {
-			ret = security_task_setscheduler(c, 0, NULL);
-			if (ret) {
-				rcu_read_unlock();
-				return ret;
-			}
-		}
-		rcu_read_unlock();
-	}
-	return 0;
+	return security_task_setscheduler(tsk, 0, NULL);
 }
 
-static void cpuset_attach_task(struct task_struct *tsk, nodemask_t *to,
-			       struct cpuset *cs)
-{
-	int err;
-	/*
-	 * can_attach beforehand should guarantee that this doesn't fail.
-	 * TODO: have a better way to handle failure here
-	 */
-	err = set_cpus_allowed_ptr(tsk, cpus_attach);
-	WARN_ON_ONCE(err);
-
-	task_lock(tsk);
-	cpuset_change_task_nodemask(tsk, to);
-	task_unlock(tsk);
-	cpuset_update_task_spread_flag(cs, tsk);
-
-}
-
-static void cpuset_attach(struct cgroup_subsys *ss, struct cgroup *cont,
-			  struct cgroup *oldcont, struct task_struct *tsk,
-			  bool threadgroup)
+static void cpuset_attach(struct cgroup_subsys *ss,
+			  struct cgroup *cont, struct cgroup *oldcont,
+			  struct task_struct *tsk)
 {
 	nodemask_t from, to;
 	struct mm_struct *mm;
 	struct cpuset *cs = cgroup_cs(cont);
 	struct cpuset *oldcs = cgroup_cs(oldcont);
+	int err;
 
 	if (cs == &top_cpuset) {
 		cpumask_copy(cpus_attach, cpu_possible_mask);
+		to = node_possible_map;
 	} else {
 		guarantee_online_cpus(cs, cpus_attach);
+		guarantee_online_mems(cs, &to);
 	}
-	guarantee_online_mems(cs, &to);
+	err = set_cpus_allowed_ptr(tsk, cpus_attach);
+	if (err)
+		return;
 
-	/* do per-task migration stuff possibly for each in the threadgroup */
-	cpuset_attach_task(tsk, &to, cs);
-	if (threadgroup) {
-		struct task_struct *c;
-		rcu_read_lock();
-		list_for_each_entry_rcu(c, &tsk->thread_group, thread_group) {
-			cpuset_attach_task(c, &to, cs);
-		}
-		rcu_read_unlock();
-	}
+	task_lock(tsk);
+	cpuset_change_task_nodemask(tsk, &to);
+	task_unlock(tsk);
+	cpuset_update_task_spread_flag(cs, tsk);
 
-	/* change mm; only needs to be done once even if threadgroup */
 	from = oldcs->mems_allowed;
 	to = cs->mems_allowed;
 	mm = get_task_mm(tsk);
@@ -1514,10 +1480,8 @@ static int cpuset_write_resmask(struct cgroup *cgrp, struct cftype *cft,
 		return -ENODEV;
 
 	trialcs = alloc_trial_cpuset(cs);
-	if (!trialcs) {
-		retval = -ENOMEM;
-		goto out;
-	}
+	if (!trialcs)
+		return -ENOMEM;
 
 	switch (cft->private) {
 	case FILE_CPULIST:
@@ -1532,7 +1496,6 @@ static int cpuset_write_resmask(struct cgroup *cgrp, struct cftype *cft,
 	}
 
 	free_trial_cpuset(trialcs);
-out:
 	cgroup_unlock();
 	return retval;
 }
@@ -2010,7 +1973,7 @@ static void scan_for_empty_cpusets(struct cpuset *root)
 		}
 
 		/* Continue past cpusets with all cpus, mems online */
-		if (cpumask_subset(cp->cpus_allowed, cpu_active_mask) &&
+		if (cpumask_subset(cp->cpus_allowed, cpu_online_mask) &&
 		    nodes_subset(cp->mems_allowed, node_states[N_HIGH_MEMORY]))
 			continue;
 
@@ -2019,7 +1982,7 @@ static void scan_for_empty_cpusets(struct cpuset *root)
 		/* Remove offline cpus and mems from this cpuset. */
 		mutex_lock(&callback_mutex);
 		cpumask_and(cp->cpus_allowed, cp->cpus_allowed,
-			    cpu_active_mask);
+			    cpu_online_mask);
 		nodes_and(cp->mems_allowed, cp->mems_allowed,
 						node_states[N_HIGH_MEMORY]);
 		mutex_unlock(&callback_mutex);
@@ -2057,10 +2020,8 @@ static int cpuset_track_online_cpus(struct notifier_block *unused_nb,
 	switch (phase) {
 	case CPU_ONLINE:
 	case CPU_ONLINE_FROZEN:
-	case CPU_DOWN_PREPARE:
-	case CPU_DOWN_PREPARE_FROZEN:
-	case CPU_DOWN_FAILED:
-	case CPU_DOWN_FAILED_FROZEN:
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
 		break;
 
 	default:
@@ -2069,7 +2030,7 @@ static int cpuset_track_online_cpus(struct notifier_block *unused_nb,
 
 	cgroup_lock();
 	mutex_lock(&callback_mutex);
-	cpumask_copy(top_cpuset.cpus_allowed, cpu_active_mask);
+	cpumask_copy(top_cpuset.cpus_allowed, cpu_online_mask);
 	mutex_unlock(&callback_mutex);
 	scan_for_empty_cpusets(&top_cpuset);
 	ndoms = generate_sched_domains(&doms, &attr);
@@ -2090,23 +2051,15 @@ static int cpuset_track_online_cpus(struct notifier_block *unused_nb,
 static int cpuset_track_online_nodes(struct notifier_block *self,
 				unsigned long action, void *arg)
 {
-	nodemask_t oldmems;
-
 	cgroup_lock();
 	switch (action) {
 	case MEM_ONLINE:
-		oldmems = top_cpuset.mems_allowed;
+	case MEM_OFFLINE:
 		mutex_lock(&callback_mutex);
 		top_cpuset.mems_allowed = node_states[N_HIGH_MEMORY];
 		mutex_unlock(&callback_mutex);
-		update_tasks_nodemask(&top_cpuset, &oldmems, NULL);
-		break;
-	case MEM_OFFLINE:
-		/*
-		 * needn't update top_cpuset.mems_allowed explicitly because
-		 * scan_for_empty_cpusets() will update it.
-		 */
-		scan_for_empty_cpusets(&top_cpuset);
+		if (action == MEM_OFFLINE)
+			scan_for_empty_cpusets(&top_cpuset);
 		break;
 	default:
 		break;
@@ -2124,7 +2077,7 @@ static int cpuset_track_online_nodes(struct notifier_block *self,
 
 void __init cpuset_init_smp(void)
 {
-	cpumask_copy(top_cpuset.cpus_allowed, cpu_active_mask);
+	cpumask_copy(top_cpuset.cpus_allowed, cpu_online_mask);
 	top_cpuset.mems_allowed = node_states[N_HIGH_MEMORY];
 
 	hotcpu_notifier(cpuset_track_online_cpus, 0);
@@ -2148,52 +2101,19 @@ void __init cpuset_init_smp(void)
 void cpuset_cpus_allowed(struct task_struct *tsk, struct cpumask *pmask)
 {
 	mutex_lock(&callback_mutex);
-	task_lock(tsk);
-	guarantee_online_cpus(task_cs(tsk), pmask);
-	task_unlock(tsk);
+	cpuset_cpus_allowed_locked(tsk, pmask);
 	mutex_unlock(&callback_mutex);
 }
 
-int cpuset_cpus_allowed_fallback(struct task_struct *tsk)
+/**
+ * cpuset_cpus_allowed_locked - return cpus_allowed mask from a tasks cpuset.
+ * Must be called with callback_mutex held.
+ **/
+void cpuset_cpus_allowed_locked(struct task_struct *tsk, struct cpumask *pmask)
 {
-	const struct cpuset *cs;
-	int cpu;
-
-	rcu_read_lock();
-	cs = task_cs(tsk);
-	if (cs)
-		cpumask_copy(&tsk->cpus_allowed, cs->cpus_allowed);
-	rcu_read_unlock();
-
-	/*
-	 * We own tsk->cpus_allowed, nobody can change it under us.
-	 *
-	 * But we used cs && cs->cpus_allowed lockless and thus can
-	 * race with cgroup_attach_task() or update_cpumask() and get
-	 * the wrong tsk->cpus_allowed. However, both cases imply the
-	 * subsequent cpuset_change_cpumask()->set_cpus_allowed_ptr()
-	 * which takes task_rq_lock().
-	 *
-	 * If we are called after it dropped the lock we must see all
-	 * changes in tsk_cs()->cpus_allowed. Otherwise we can temporary
-	 * set any mask even if it is not right from task_cs() pov,
-	 * the pending set_cpus_allowed_ptr() will fix things.
-	 */
-
-	cpu = cpumask_any_and(&tsk->cpus_allowed, cpu_active_mask);
-	if (cpu >= nr_cpu_ids) {
-		/*
-		 * Either tsk->cpus_allowed is wrong (see above) or it
-		 * is actually empty. The latter case is only possible
-		 * if we are racing with remove_tasks_in_empty_cpuset().
-		 * Like above we can temporary set any mask and rely on
-		 * set_cpus_allowed_ptr() as synchronization point.
-		 */
-		cpumask_copy(&tsk->cpus_allowed, cpu_possible_mask);
-		cpu = cpumask_any(cpu_active_mask);
-	}
-
-	return cpu;
+	task_lock(tsk);
+	guarantee_online_cpus(task_cs(tsk), pmask);
+	task_unlock(tsk);
 }
 
 void cpuset_init_current_mems_allowed(void)
@@ -2379,6 +2299,22 @@ int __cpuset_node_allowed_hardwall(int node, gfp_t gfp_mask)
 	if (unlikely(test_thread_flag(TIF_MEMDIE)))
 		return 1;
 	return 0;
+}
+
+/**
+ * cpuset_lock - lock out any changes to cpuset structures
+ *
+ * The out of memory (oom) code needs to mutex_lock cpusets
+ * from being changed while it scans the tasklist looking for a
+ * task in an overlapping cpuset.  Expose callback_mutex via this
+ * cpuset_lock() routine, so the oom code can lock it, before
+ * locking the task list.  The tasklist_lock is a spinlock, so
+ * must be taken inside callback_mutex.
+ */
+
+void cpuset_lock(void)
+{
+	mutex_lock(&callback_mutex);
 }
 
 /**

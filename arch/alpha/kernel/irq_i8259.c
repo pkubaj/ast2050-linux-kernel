@@ -84,7 +84,7 @@ i8259a_end_irq(unsigned int irq)
 }
 
 struct irq_chip i8259a_irq_type = {
-	.name		= "XT-PIC",
+	.typename	= "XT-PIC",
 	.startup	= i8259a_startup_irq,
 	.shutdown	= i8259a_disable_irq,
 	.enable		= i8259a_enable_irq,

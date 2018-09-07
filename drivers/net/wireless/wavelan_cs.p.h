@@ -707,7 +707,7 @@ static void
 	wv_packet_write(struct net_device *,	/* Write a packet to the Tx buffer */
 			void *,
 			short);
-static netdev_tx_t
+static int
 	wavelan_packet_xmit(struct sk_buff *,	/* Send a packet */
 			    struct net_device *);
 /* -------------------- HARDWARE CONFIGURATION -------------------- */

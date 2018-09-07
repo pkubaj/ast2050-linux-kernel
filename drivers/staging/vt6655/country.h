@@ -30,7 +30,10 @@
 #ifndef __COUNTRY_H__
 #define __COUNTRY_H__
 
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+
 
 /*---------------------  Export Definitions -------------------------*/
 /************************************************************************
@@ -165,7 +168,7 @@ typedef struct tagSCountryTable
     CHAR    chCountryCode[2];
     BYTE    bChannelIdxList[CB_MAX_CHANNEL];  /* Available channels Index */
     BYTE    byPower[CB_MAX_CHANNEL];
-}   SCountryTable, *PSCountryTable;
+}   SCountryTable, DEF* PSCountryTable;
 
 /*---------------------  Export Classes  ----------------------------*/
 
@@ -173,5 +176,17 @@ typedef struct tagSCountryTable
 extern SCountryTable ChannelRuleTab[CCODE_MAX+1];
 
 /*---------------------  Export Functions  --------------------------*/
+#ifdef __cplusplus
+extern "C" {                            /* Assume C declarations for C++ */
+#endif /* __cplusplus */
 
+
+#ifdef __cplusplus
+}                                       /* End of extern "C" { */
+#endif /* __cplusplus */
+
+
+/************************************************************************
+ * Function prototype
+ ************************************************************************/
 #endif  /* __COUNTRY_H__ */

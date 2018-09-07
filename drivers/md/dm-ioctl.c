@@ -56,11 +56,6 @@ static void dm_hash_remove_all(int keep_open_devices);
  */
 static DECLARE_RWSEM(_hash_lock);
 
-/*
- * Protects use of mdptr to obtain hash cell name and uuid from mapped device.
- */
-static DEFINE_MUTEX(dm_hash_cells_mutex);
-
 static void init_buckets(struct list_head *buckets)
 {
 	unsigned int i;
@@ -211,9 +206,7 @@ static int dm_hash_insert(const char *name, const char *uuid, struct mapped_devi
 		list_add(&cell->uuid_list, _uuid_buckets + hash_str(uuid));
 	}
 	dm_get(md);
-	mutex_lock(&dm_hash_cells_mutex);
 	dm_set_mdptr(md, cell);
-	mutex_unlock(&dm_hash_cells_mutex);
 	up_write(&_hash_lock);
 
 	return 0;
@@ -231,9 +224,7 @@ static void __hash_remove(struct hash_cell *hc)
 	/* remove from the dev hash */
 	list_del(&hc->uuid_list);
 	list_del(&hc->name_list);
-	mutex_lock(&dm_hash_cells_mutex);
 	dm_set_mdptr(hc->md, NULL);
-	mutex_unlock(&dm_hash_cells_mutex);
 
 	table = dm_get_table(hc->md);
 	if (table) {
@@ -249,46 +240,40 @@ static void __hash_remove(struct hash_cell *hc)
 
 static void dm_hash_remove_all(int keep_open_devices)
 {
-	int i, dev_skipped;
+	int i, dev_skipped, dev_removed;
 	struct hash_cell *hc;
-	struct mapped_device *md;
-
-retry:
-	dev_skipped = 0;
+	struct list_head *tmp, *n;
 
 	down_write(&_hash_lock);
 
+retry:
+	dev_skipped = dev_removed = 0;
 	for (i = 0; i < NUM_BUCKETS; i++) {
-		list_for_each_entry(hc, _name_buckets + i, name_list) {
-			md = hc->md;
-			dm_get(md);
+		list_for_each_safe (tmp, n, _name_buckets + i) {
+			hc = list_entry(tmp, struct hash_cell, name_list);
 
-			if (keep_open_devices && dm_lock_for_deletion(md)) {
-				dm_put(md);
+			if (keep_open_devices &&
+			    dm_lock_for_deletion(hc->md)) {
 				dev_skipped++;
 				continue;
 			}
-
 			__hash_remove(hc);
-
-			up_write(&_hash_lock);
-
-			dm_put(md);
-
-			/*
-			 * Some mapped devices may be using other mapped
-			 * devices, so repeat until we make no further
-			 * progress.  If a new mapped device is created
-			 * here it will also get removed.
-			 */
-			goto retry;
+			dev_removed = 1;
 		}
 	}
 
-	up_write(&_hash_lock);
+	/*
+	 * Some mapped devices may be using other mapped devices, so if any
+	 * still exist, repeat until we make no further progress.
+	 */
+	if (dev_skipped) {
+		if (dev_removed)
+			goto retry;
 
-	if (dev_skipped)
 		DMWARN("remove_all left %d open device(s)", dev_skipped);
+	}
+
+	up_write(&_hash_lock);
 }
 
 static int dm_hash_rename(uint32_t cookie, const char *old, const char *new)
@@ -336,9 +321,7 @@ static int dm_hash_rename(uint32_t cookie, const char *old, const char *new)
 	 */
 	list_del(&hc->name_list);
 	old_name = hc->name;
-	mutex_lock(&dm_hash_cells_mutex);
 	hc->name = new_name;
-	mutex_unlock(&dm_hash_cells_mutex);
 	list_add(&hc->name_list, _name_buckets + hash_str(new_name));
 
 	/*
@@ -1549,7 +1532,7 @@ static const struct file_operations _ctl_fops = {
 static struct miscdevice _dm_misc = {
 	.minor 		= MISC_DYNAMIC_MINOR,
 	.name  		= DM_NAME,
-	.nodename	= "mapper/control",
+	.devnode	= "mapper/control",
 	.fops  		= &_ctl_fops
 };
 
@@ -1599,7 +1582,8 @@ int dm_copy_name_and_uuid(struct mapped_device *md, char *name, char *uuid)
 	if (!md)
 		return -ENXIO;
 
-	mutex_lock(&dm_hash_cells_mutex);
+	dm_get(md);
+	down_read(&_hash_lock);
 	hc = dm_get_mdptr(md);
 	if (!hc || hc->md != md) {
 		r = -ENXIO;
@@ -1612,7 +1596,8 @@ int dm_copy_name_and_uuid(struct mapped_device *md, char *name, char *uuid)
 		strcpy(uuid, hc->uuid ? : "");
 
 out:
-	mutex_unlock(&dm_hash_cells_mutex);
+	up_read(&_hash_lock);
+	dm_put(md);
 
 	return r;
 }

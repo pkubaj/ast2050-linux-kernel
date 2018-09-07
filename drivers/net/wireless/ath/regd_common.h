@@ -154,6 +154,12 @@ enum EnumRd {
 	DEBUG_REG_DMN = 0x01ff,
 };
 
+enum ctl_group {
+	CTL_FCC = 0x10,
+	CTL_MKK = 0x40,
+	CTL_ETSI = 0x30,
+};
+
 /* Regpair to CTL band mapping */
 static struct reg_dmn_pair_mapping regDomainPairs[] = {
 	/* regpair, 5 GHz CTL, 2 GHz CTL */
@@ -195,7 +201,6 @@ static struct reg_dmn_pair_mapping regDomainPairs[] = {
 	{APL9_WORLD, CTL_ETSI, CTL_ETSI},
 
 	{APL3_FCCA, CTL_FCC, CTL_FCC},
-	{APL7_FCCA, CTL_FCC, CTL_FCC},
 	{APL1_ETSIC, CTL_FCC, CTL_ETSI},
 	{APL2_ETSIC, CTL_FCC, CTL_ETSI},
 	{APL2_APLD, CTL_FCC, NO_CTL},
@@ -445,7 +450,7 @@ static struct country_code_to_enum_rd allCountries[] = {
 	{CTRY_SWITZERLAND, ETSI1_WORLD, "CH"},
 	{CTRY_SYRIA, NULL1_WORLD, "SY"},
 	{CTRY_TAIWAN, APL3_FCCA, "TW"},
-	{CTRY_THAILAND, FCC3_WORLD, "TH"},
+	{CTRY_THAILAND, NULL1_WORLD, "TH"},
 	{CTRY_TRINIDAD_Y_TOBAGO, ETSI4_WORLD, "TT"},
 	{CTRY_TUNISIA, ETSI3_WORLD, "TN"},
 	{CTRY_TURKEY, ETSI3_WORLD, "TR"},

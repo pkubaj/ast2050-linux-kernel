@@ -1057,14 +1057,14 @@ static const struct file_operations usblp_fops = {
 	.release =	usblp_release,
 };
 
-static char *usblp_devnode(struct device *dev, mode_t *mode)
+static char *usblp_nodename(struct device *dev)
 {
 	return kasprintf(GFP_KERNEL, "usb/%s", dev_name(dev));
 }
 
 static struct usb_class_driver usblp_class = {
 	.name =		"lp%d",
-	.devnode =	usblp_devnode,
+	.nodename =	usblp_nodename,
 	.fops =		&usblp_fops,
 	.minor_base =	USBLP_MINOR_BASE,
 };

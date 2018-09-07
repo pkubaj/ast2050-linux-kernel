@@ -780,11 +780,11 @@ int c2_register_device(struct c2_dev *dev)
 	/* Register pseudo network device */
 	dev->pseudo_netdev = c2_pseudo_netdev_init(dev);
 	if (!dev->pseudo_netdev)
-		goto out;
+		goto out3;
 
 	ret = register_netdev(dev->pseudo_netdev);
 	if (ret)
-		goto out_free_netdev;
+		goto out2;
 
 	pr_debug("%s:%u\n", __func__, __LINE__);
 	strlcpy(dev->ibdev.name, "amso%d", IB_DEVICE_NAME_MAX);
@@ -851,10 +851,6 @@ int c2_register_device(struct c2_dev *dev)
 	dev->ibdev.post_recv = c2_post_receive;
 
 	dev->ibdev.iwcm = kmalloc(sizeof(*dev->ibdev.iwcm), GFP_KERNEL);
-	if (dev->ibdev.iwcm == NULL) {
-		ret = -ENOMEM;
-		goto out_unregister_netdev;
-	}
 	dev->ibdev.iwcm->add_ref = c2_add_ref;
 	dev->ibdev.iwcm->rem_ref = c2_rem_ref;
 	dev->ibdev.iwcm->get_qp = c2_get_qp;
@@ -866,25 +862,23 @@ int c2_register_device(struct c2_dev *dev)
 
 	ret = ib_register_device(&dev->ibdev);
 	if (ret)
-		goto out_free_iwcm;
+		goto out1;
 
 	for (i = 0; i < ARRAY_SIZE(c2_dev_attributes); ++i) {
 		ret = device_create_file(&dev->ibdev.dev,
 					       c2_dev_attributes[i]);
 		if (ret)
-			goto out_unregister_ibdev;
+			goto out0;
 	}
-	goto out;
+	goto out3;
 
-out_unregister_ibdev:
+out0:
 	ib_unregister_device(&dev->ibdev);
-out_free_iwcm:
-	kfree(dev->ibdev.iwcm);
-out_unregister_netdev:
+out1:
 	unregister_netdev(dev->pseudo_netdev);
-out_free_netdev:
+out2:
 	free_netdev(dev->pseudo_netdev);
-out:
+out3:
 	pr_debug("%s:%u ret=%d\n", __func__, __LINE__, ret);
 	return ret;
 }

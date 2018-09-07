@@ -73,6 +73,9 @@ static int __cpuinit m4kc_tlbp_war(void)
 enum label_id {
 	label_second_part = 1,
 	label_leave,
+#ifdef MODULE_START
+	label_module_alloc,
+#endif
 	label_vmalloc,
 	label_vmalloc_done,
 	label_tlbw_hazard,
@@ -89,6 +92,9 @@ enum label_id {
 
 UASM_L_LA(_second_part)
 UASM_L_LA(_leave)
+#ifdef MODULE_START
+UASM_L_LA(_module_alloc)
+#endif
 UASM_L_LA(_vmalloc)
 UASM_L_LA(_vmalloc_done)
 UASM_L_LA(_tlbw_hazard)
@@ -315,10 +321,6 @@ static void __cpuinit build_tlb_write_entry(u32 **p, struct uasm_label **l,
 	case CPU_BCM3302:
 	case CPU_BCM4710:
 	case CPU_LOONGSON2:
-	case CPU_BCM6338:
-	case CPU_BCM6345:
-	case CPU_BCM6348:
-	case CPU_BCM6358:
 	case CPU_R5500:
 		if (m4kc_tlbp_war())
 			uasm_i_nop(p);
@@ -497,7 +499,11 @@ build_get_pmde64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 	 * The vmalloc handling is not in the hotpath.
 	 */
 	uasm_i_dmfc0(p, tmp, C0_BADVADDR);
+#ifdef MODULE_START
+	uasm_il_bltz(p, r, tmp, label_module_alloc);
+#else
 	uasm_il_bltz(p, r, tmp, label_vmalloc);
+#endif
 	/* No uasm_i_nop needed here, since the next insn doesn't touch TMP. */
 
 #ifdef CONFIG_SMP
@@ -550,7 +556,52 @@ build_get_pgd_vmalloc64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 {
 	long swpd = (long)swapper_pg_dir;
 
+#ifdef MODULE_START
+	long modd = (long)module_pg_dir;
+
+	uasm_l_module_alloc(l, *p);
+	/*
+	 * Assumption:
+	 * VMALLOC_START >= 0xc000000000000000UL
+	 * MODULE_START >= 0xe000000000000000UL
+	 */
+	UASM_i_SLL(p, ptr, bvaddr, 2);
+	uasm_il_bgez(p, r, ptr, label_vmalloc);
+
+	if (uasm_in_compat_space_p(MODULE_START) &&
+	    !uasm_rel_lo(MODULE_START)) {
+		uasm_i_lui(p, ptr, uasm_rel_hi(MODULE_START)); /* delay slot */
+	} else {
+		/* unlikely configuration */
+		uasm_i_nop(p); /* delay slot */
+		UASM_i_LA(p, ptr, MODULE_START);
+	}
+	uasm_i_dsubu(p, bvaddr, bvaddr, ptr);
+
+	if (uasm_in_compat_space_p(modd) && !uasm_rel_lo(modd)) {
+		uasm_il_b(p, r, label_vmalloc_done);
+		uasm_i_lui(p, ptr, uasm_rel_hi(modd));
+	} else {
+		UASM_i_LA_mostly(p, ptr, modd);
+		uasm_il_b(p, r, label_vmalloc_done);
+		if (uasm_in_compat_space_p(modd))
+			uasm_i_addiu(p, ptr, ptr, uasm_rel_lo(modd));
+		else
+			uasm_i_daddiu(p, ptr, ptr, uasm_rel_lo(modd));
+	}
+
 	uasm_l_vmalloc(l, *p);
+	if (uasm_in_compat_space_p(MODULE_START) &&
+	    !uasm_rel_lo(MODULE_START) &&
+	    MODULE_START << 32 == VMALLOC_START)
+		uasm_i_dsll32(p, ptr, ptr, 0);	/* typical case */
+	else
+		UASM_i_LA(p, ptr, VMALLOC_START);
+#else
+	uasm_l_vmalloc(l, *p);
+	UASM_i_LA(p, ptr, VMALLOC_START);
+#endif
+	uasm_i_dsubu(p, bvaddr, bvaddr, ptr);
 
 	if (uasm_in_compat_space_p(swpd) && !uasm_rel_lo(swpd)) {
 		uasm_il_b(p, r, label_vmalloc_done);
@@ -725,15 +776,10 @@ static void __cpuinit build_r4000_tlb_refill_handler(void)
 	 * create the plain linear handler
 	 */
 	if (bcm1250_m3_war()) {
-		unsigned int segbits = 44;
-
-		uasm_i_dmfc0(&p, K0, C0_BADVADDR);
-		uasm_i_dmfc0(&p, K1, C0_ENTRYHI);
+		UASM_i_MFC0(&p, K0, C0_BADVADDR);
+		UASM_i_MFC0(&p, K1, C0_ENTRYHI);
 		uasm_i_xor(&p, K0, K0, K1);
-		uasm_i_dsrl32(&p, K1, K0, 62 - 32);
-		uasm_i_dsrl(&p, K0, K0, 12 + 1);
-		uasm_i_dsll32(&p, K0, K0, 64 + 12 + 1 - segbits - 32);
-		uasm_i_or(&p, K0, K0, K1);
+		UASM_i_SRL(&p, K0, K0, PAGE_SHIFT + 1);
 		uasm_il_bnez(&p, &r, K0, label_leave);
 		/* No need for uasm_i_nop */
 	}
@@ -801,6 +847,8 @@ static void __cpuinit build_r4000_tlb_refill_handler(void)
 	} else {
 #if defined(CONFIG_HUGETLB_PAGE)
 		const enum label_id ls = label_tlb_huge_update;
+#elif defined(MODULE_START)
+		const enum label_id ls = label_module_alloc;
 #else
 		const enum label_id ls = label_vmalloc;
 #endif
@@ -1247,15 +1295,10 @@ static void __cpuinit build_r4000_tlb_load_handler(void)
 	memset(relocs, 0, sizeof(relocs));
 
 	if (bcm1250_m3_war()) {
-		unsigned int segbits = 44;
-
-		uasm_i_dmfc0(&p, K0, C0_BADVADDR);
-		uasm_i_dmfc0(&p, K1, C0_ENTRYHI);
+		UASM_i_MFC0(&p, K0, C0_BADVADDR);
+		UASM_i_MFC0(&p, K1, C0_ENTRYHI);
 		uasm_i_xor(&p, K0, K0, K1);
-		uasm_i_dsrl32(&p, K1, K0, 62 - 32);
-		uasm_i_dsrl(&p, K0, K0, 12 + 1);
-		uasm_i_dsll32(&p, K0, K0, 64 + 12 + 1 - segbits - 32);
-		uasm_i_or(&p, K0, K0, K1);
+		UASM_i_SRL(&p, K0, K0, PAGE_SHIFT + 1);
 		uasm_il_bnez(&p, &r, K0, label_leave);
 		/* No need for uasm_i_nop */
 	}

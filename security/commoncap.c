@@ -27,7 +27,6 @@
 #include <linux/sched.h>
 #include <linux/prctl.h>
 #include <linux/securebits.h>
-#include <linux/personality.h>
 
 /*
  * If a non-root user executes a setuid-root binary in
@@ -102,7 +101,7 @@ int cap_settime(struct timespec *ts, struct timezone *tz)
 }
 
 /**
- * cap_ptrace_access_check - Determine whether the current process may access
+ * cap_ptrace_may_access - Determine whether the current process may access
  *			   another
  * @child: The process to be accessed
  * @mode: The mode of attachment.
@@ -110,7 +109,7 @@ int cap_settime(struct timespec *ts, struct timezone *tz)
  * Determine whether a process may access another, returning 0 if permission
  * granted, -ve if denied.
  */
-int cap_ptrace_access_check(struct task_struct *child, unsigned int mode)
+int cap_ptrace_may_access(struct task_struct *child, unsigned int mode)
 {
 	int ret = 0;
 
@@ -511,11 +510,6 @@ int cap_bprm_set_creds(struct linux_binprm *bprm)
 			effective = true;
 	}
 skip:
-
-	/* if we have fs caps, clear dangerous personality flags */
-	if (!cap_issubset(new->cap_permitted, old->cap_permitted))
-		bprm->per_clear |= PER_CLEAR_ON_SETID;
-
 
 	/* Don't let someone trace a set[ug]id/setpcap binary with the revised
 	 * credentials unless they have the appropriate permit

@@ -123,8 +123,6 @@ static inline struct icmp6hdr *icmp6_hdr(const struct sk_buff *skb)
 #define ICMPV6_NOT_NEIGHBOUR		2
 #define ICMPV6_ADDR_UNREACH		3
 #define ICMPV6_PORT_UNREACH		4
-#define ICMPV6_POLICY_FAIL		5
-#define ICMPV6_REJECT_ROUTE		6
 
 /*
  *	Codes for Time Exceeded
@@ -173,6 +171,8 @@ struct icmp6_filter {
 #ifdef __KERNEL__
 
 #include <linux/netdevice.h>
+#include <linux/skbuff.h>
+
 
 extern void				icmpv6_send(struct sk_buff *skb,
 						    u8 type, u8 code,

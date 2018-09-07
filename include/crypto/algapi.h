@@ -22,9 +22,11 @@ struct seq_file;
 
 struct crypto_type {
 	unsigned int (*ctxsize)(struct crypto_alg *alg, u32 type, u32 mask);
-	unsigned int (*extsize)(struct crypto_alg *alg);
+	unsigned int (*extsize)(struct crypto_alg *alg,
+				const struct crypto_type *frontend);
 	int (*init)(struct crypto_tfm *tfm, u32 type, u32 mask);
-	int (*init_tfm)(struct crypto_tfm *tfm);
+	int (*init_tfm)(struct crypto_tfm *tfm,
+		        const struct crypto_type *frontend);
 	void (*show)(struct seq_file *m, struct crypto_alg *alg);
 	struct crypto_alg *(*lookup)(const char *name, u32 type, u32 mask);
 
@@ -50,7 +52,6 @@ struct crypto_template {
 
 	struct crypto_instance *(*alloc)(struct rtattr **tb);
 	void (*free)(struct crypto_instance *inst);
-	int (*create)(struct crypto_template *tmpl, struct rtattr **tb);
 
 	char name[CRYPTO_MAX_ALG_NAME];
 };
@@ -59,7 +60,6 @@ struct crypto_spawn {
 	struct list_head list;
 	struct crypto_alg *alg;
 	struct crypto_instance *inst;
-	const struct crypto_type *frontend;
 	u32 mask;
 };
 
@@ -114,19 +114,11 @@ int crypto_register_template(struct crypto_template *tmpl);
 void crypto_unregister_template(struct crypto_template *tmpl);
 struct crypto_template *crypto_lookup_template(const char *name);
 
-int crypto_register_instance(struct crypto_template *tmpl,
-			     struct crypto_instance *inst);
-
 int crypto_init_spawn(struct crypto_spawn *spawn, struct crypto_alg *alg,
 		      struct crypto_instance *inst, u32 mask);
-int crypto_init_spawn2(struct crypto_spawn *spawn, struct crypto_alg *alg,
-		       struct crypto_instance *inst,
-		       const struct crypto_type *frontend);
-
 void crypto_drop_spawn(struct crypto_spawn *spawn);
 struct crypto_tfm *crypto_spawn_tfm(struct crypto_spawn *spawn, u32 type,
 				    u32 mask);
-void *crypto_spawn_tfm2(struct crypto_spawn *spawn);
 
 static inline void crypto_set_spawn(struct crypto_spawn *spawn,
 				    struct crypto_instance *inst)
@@ -137,19 +129,8 @@ static inline void crypto_set_spawn(struct crypto_spawn *spawn,
 struct crypto_attr_type *crypto_get_attr_type(struct rtattr **tb);
 int crypto_check_attr_type(struct rtattr **tb, u32 type);
 const char *crypto_attr_alg_name(struct rtattr *rta);
-struct crypto_alg *crypto_attr_alg2(struct rtattr *rta,
-				    const struct crypto_type *frontend,
-				    u32 type, u32 mask);
-
-static inline struct crypto_alg *crypto_attr_alg(struct rtattr *rta,
-						 u32 type, u32 mask)
-{
-	return crypto_attr_alg2(rta, NULL, type, mask);
-}
-
+struct crypto_alg *crypto_attr_alg(struct rtattr *rta, u32 type, u32 mask);
 int crypto_attr_u32(struct rtattr *rta, u32 *num);
-void *crypto_alloc_instance2(const char *name, struct crypto_alg *alg,
-			     unsigned int head);
 struct crypto_instance *crypto_alloc_instance(const char *name,
 					      struct crypto_alg *alg);
 
@@ -176,8 +157,12 @@ int blkcipher_walk_virt_block(struct blkcipher_desc *desc,
 
 static inline void *crypto_tfm_ctx_aligned(struct crypto_tfm *tfm)
 {
-	return PTR_ALIGN(crypto_tfm_ctx(tfm),
-			 crypto_tfm_alg_alignmask(tfm) + 1);
+	unsigned long addr = (unsigned long)crypto_tfm_ctx(tfm);
+	unsigned long align = crypto_tfm_alg_alignmask(tfm);
+
+	if (align <= crypto_tfm_ctx_alignment())
+		align = 1;
+	return (void *)ALIGN(addr, align);
 }
 
 static inline struct crypto_instance *crypto_tfm_alg_instance(

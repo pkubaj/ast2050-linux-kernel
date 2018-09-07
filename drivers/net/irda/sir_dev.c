@@ -582,8 +582,7 @@ EXPORT_SYMBOL(sirdev_receive);
 
 /* callbacks from network layer */
 
-static netdev_tx_t sirdev_hard_xmit(struct sk_buff *skb,
-					  struct net_device *ndev)
+static int sirdev_hard_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct sir_dev *dev = netdev_priv(ndev);
 	unsigned long flags;
@@ -591,7 +590,7 @@ static netdev_tx_t sirdev_hard_xmit(struct sk_buff *skb,
 	int err;
 	s32 speed;
 
-	IRDA_ASSERT(dev != NULL, return NETDEV_TX_OK;);
+	IRDA_ASSERT(dev != NULL, return 0;);
 
 	netif_stop_queue(ndev);
 
@@ -622,7 +621,7 @@ static netdev_tx_t sirdev_hard_xmit(struct sk_buff *skb,
 			 */
 
 			dev_kfree_skb_any(skb);
-			return NETDEV_TX_OK;
+			return 0;
 		} else
 			dev->new_speed = speed;
 	}
@@ -669,7 +668,7 @@ static netdev_tx_t sirdev_hard_xmit(struct sk_buff *skb,
 	}
 	spin_unlock_irqrestore(&dev->tx_lock, flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* called from network layer with rtnl hold */

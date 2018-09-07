@@ -4,7 +4,6 @@
 /* Grossly misnamed. */
 enum die_val {
 	DIE_TRAP,
-	DIE_NMI,
 	DIE_OOPS,
 };
 

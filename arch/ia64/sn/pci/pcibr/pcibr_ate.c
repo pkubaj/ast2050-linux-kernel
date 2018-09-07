@@ -54,8 +54,6 @@ static int find_free_ate(struct ate_resource *ate_resource, int start,
 					break;
 				}
 			}
-			if (i >= ate_resource->num_ate)
-				return -1;
 		} else
 			index++;	/* Try next ate */
 	}

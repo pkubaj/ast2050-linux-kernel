@@ -748,7 +748,7 @@ ether1_sendpacket (struct sk_buff *skb, struct net_device *dev)
 		netif_stop_queue(dev);
 
  out:
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void

@@ -731,7 +731,7 @@ static void efx_ethtool_get_pauseparam(struct net_device *net_dev,
 }
 
 
-const struct ethtool_ops efx_ethtool_ops = {
+struct ethtool_ops efx_ethtool_ops = {
 	.get_settings		= efx_ethtool_get_settings,
 	.set_settings		= efx_ethtool_set_settings,
 	.get_drvinfo		= efx_ethtool_get_drvinfo,

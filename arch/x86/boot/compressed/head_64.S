@@ -24,7 +24,6 @@
 	.code32
 	.text
 
-#include <linux/init.h>
 #include <linux/linkage.h>
 #include <asm/segment.h>
 #include <asm/pgtable_types.h>
@@ -34,7 +33,7 @@
 #include <asm/processor-flags.h>
 #include <asm/asm-offsets.h>
 
-	__HEAD
+	.section ".text.head"
 	.code32
 ENTRY(startup_32)
 	cld

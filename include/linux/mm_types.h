@@ -138,7 +138,7 @@ struct vm_area_struct {
 					   within vm_mm. */
 
 	/* linked list of VM areas per task, sorted by address */
-	struct vm_area_struct *vm_next, *vm_prev;
+	struct vm_area_struct *vm_next;
 
 	pgprot_t vm_page_prot;		/* Access permissions of this VMA. */
 	unsigned long vm_flags;		/* Flags, see mm.h. */
@@ -171,7 +171,7 @@ struct vm_area_struct {
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
 
 	/* Function pointers to deal with this struct. */
-	const struct vm_operations_struct *vm_ops;
+	struct vm_operations_struct * vm_ops;
 
 	/* Information about our backing store: */
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
@@ -240,8 +240,6 @@ struct mm_struct {
 
 	unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
 
-	struct linux_binfmt *binfmt;
-
 	cpumask_t cpu_vm_mask;
 
 	/* Architecture-specific MM context */
@@ -261,10 +259,11 @@ struct mm_struct {
 	unsigned long flags; /* Must use atomic bitops to access the bits */
 
 	struct core_state *core_state; /* coredumping support */
-#ifdef CONFIG_AIO
+
+	/* aio bits */
 	spinlock_t		ioctx_lock;
 	struct hlist_head	ioctx_list;
-#endif
+
 #ifdef CONFIG_MM_OWNER
 	/*
 	 * "owner" points to a task that is regarded as the canonical

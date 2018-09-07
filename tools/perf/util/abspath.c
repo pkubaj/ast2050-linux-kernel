@@ -50,8 +50,7 @@ const char *make_absolute_path(const char *path)
 			die ("Could not get current working directory");
 
 		if (last_elem) {
-			len = strlen(buf);
-
+			int len = strlen(buf);
 			if (len + strlen(last_elem) + 2 > PATH_MAX)
 				die ("Too long path name: '%s/%s'",
 						buf, last_elem);

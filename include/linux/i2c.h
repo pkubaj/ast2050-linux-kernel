@@ -63,6 +63,9 @@ extern int i2c_master_recv(struct i2c_client *client, char *buf, int count);
 extern int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 			int num);
 
+extern int i2c_slave_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
+      int num);
+
 /* This is the very generalized SMBus access routine. You probably do not
    want to use this, though; one of the functions below may be much easier,
    and probably just as fast.
@@ -98,6 +101,7 @@ extern s32 i2c_smbus_write_i2c_block_data(struct i2c_client *client,
 
 /**
  * struct i2c_driver - represent an I2C device driver
+ * @id: Unique driver ID (optional)
  * @class: What kind of i2c device we instantiate (for detect)
  * @attach_adapter: Callback for bus addition (for legacy drivers)
  * @detach_adapter: Callback for bus removal (for legacy drivers)
@@ -134,6 +138,7 @@ extern s32 i2c_smbus_write_i2c_block_data(struct i2c_client *client,
  * not allowed.
  */
 struct i2c_driver {
+	int id;
 	unsigned int class;
 
 	/* Notifies the driver that a new bus has appeared or is about to be
@@ -318,6 +323,7 @@ struct i2c_algorithm {
 	   processed, or a negative value on error */
 	int (*master_xfer)(struct i2c_adapter *adap, struct i2c_msg *msgs,
 			   int num);
+	int (*slave_xfer)(struct i2c_adapter *adap, struct i2c_msg *msgs);
 	int (*smbus_xfer) (struct i2c_adapter *adap, u16 addr,
 			   unsigned short flags, char read_write,
 			   u8 command, int size, union i2c_smbus_data *data);
@@ -359,24 +365,6 @@ static inline void *i2c_get_adapdata(const struct i2c_adapter *dev)
 static inline void i2c_set_adapdata(struct i2c_adapter *dev, void *data)
 {
 	dev_set_drvdata(&dev->dev, data);
-}
-
-/**
- * i2c_lock_adapter - Prevent access to an I2C bus segment
- * @adapter: Target I2C bus segment
- */
-static inline void i2c_lock_adapter(struct i2c_adapter *adapter)
-{
-	mutex_lock(&adapter->bus_lock);
-}
-
-/**
- * i2c_unlock_adapter - Reauthorize access to an I2C bus segment
- * @adapter: Target I2C bus segment
- */
-static inline void i2c_unlock_adapter(struct i2c_adapter *adapter)
-{
-	mutex_unlock(&adapter->bus_lock);
 }
 
 /*flags for the client struct: */
@@ -504,6 +492,8 @@ struct i2c_msg {
 	__u16 flags;
 #define I2C_M_TEN		0x0010	/* this is a ten bit chip address */
 #define I2C_M_RD		0x0001	/* read data, from slave to master */
+#define I2C_S_EN    0x0002  /* Slave Enable */
+#define I2C_S_ALT    0x0004  /* Slave Alert */
 #define I2C_M_NOSTART		0x4000	/* if I2C_FUNC_PROTOCOL_MANGLING */
 #define I2C_M_REV_DIR_ADDR	0x2000	/* if I2C_FUNC_PROTOCOL_MANGLING */
 #define I2C_M_IGNORE_NAK	0x1000	/* if I2C_FUNC_PROTOCOL_MANGLING */
@@ -564,6 +554,17 @@ union i2c_smbus_data {
 			       /* and one more for user-space compatibility */
 };
 
+/*
+ * Large SMBus block data io, which is not defined in the SMBus standard,
+ * but used by some NIC (i.e. Intel I354) sideband SMBus interface.
+ */
+#define I2C_SMBUS_BLOCK_LARGE_MAX	240	/* extra large block size */
+union i2c_smbus_large_data {
+  union i2c_smbus_data data;
+  __u8 block[I2C_SMBUS_BLOCK_LARGE_MAX + 2]; /* block[0] is used for length */
+                                             /* and one more for PEC */
+};
+
 /* i2c_smbus_xfer read or write markers */
 #define I2C_SMBUS_READ	1
 #define I2C_SMBUS_WRITE	0
@@ -579,6 +580,7 @@ union i2c_smbus_data {
 #define I2C_SMBUS_I2C_BLOCK_BROKEN  6
 #define I2C_SMBUS_BLOCK_PROC_CALL   7		/* SMBus 2.0 */
 #define I2C_SMBUS_I2C_BLOCK_DATA    8
+#define I2C_SMBUS_BLOCK_LARGE_DATA    9
 
 
 #ifdef __KERNEL__

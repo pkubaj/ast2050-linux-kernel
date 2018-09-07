@@ -32,7 +32,7 @@
  * SIZE: Size of the region.
  */
 
-static void sh3__flush_wback_region(void *start, int size)
+void __flush_wback_region(void *start, int size)
 {
 	unsigned long v, j;
 	unsigned long begin, end;
@@ -71,7 +71,7 @@ static void sh3__flush_wback_region(void *start, int size)
  * START: Virtual Address (U0, P1, or P3)
  * SIZE: Size of the region.
  */
-static void sh3__flush_purge_region(void *start, int size)
+void __flush_purge_region(void *start, int size)
 {
 	unsigned long v;
 	unsigned long begin, end;
@@ -90,16 +90,11 @@ static void sh3__flush_purge_region(void *start, int size)
 	}
 }
 
-void __init sh3_cache_init(void)
-{
-	__flush_wback_region = sh3__flush_wback_region;
-	__flush_purge_region = sh3__flush_purge_region;
-
-	/*
-	 * No write back please
-	 *
-	 * Except I don't think there's any way to avoid the writeback.
-	 * So we just alias it to sh3__flush_purge_region(). dwmw2.
-	 */
-	__flush_invalidate_region = sh3__flush_purge_region;
-}
+/*
+ * No write back please
+ *
+ * Except I don't think there's any way to avoid the writeback. So we
+ * just alias it to __flush_purge_region(). dwmw2.
+ */
+void __flush_invalidate_region(void *start, int size)
+	__attribute__((alias("__flush_purge_region")));

@@ -461,16 +461,14 @@ static void st_scsi_execute_end(struct request *req, int uptodate)
 {
 	struct st_request *SRpnt = req->end_io_data;
 	struct scsi_tape *STp = SRpnt->stp;
-	struct bio *tmp;
 
 	STp->buffer->cmdstat.midlevel_result = SRpnt->result = req->errors;
 	STp->buffer->cmdstat.residual = req->resid_len;
 
-	tmp = SRpnt->bio;
 	if (SRpnt->waiting)
 		complete(SRpnt->waiting);
 
-	blk_rq_unmap_user(tmp);
+	blk_rq_unmap_user(SRpnt->bio);
 	__blk_put_request(req->q, req);
 }
 
@@ -554,15 +552,13 @@ st_do_scsi(struct st_request * SRpnt, struct scsi_tape * STp, unsigned char *cmd
 	SRpnt->waiting = waiting;
 
 	if (STp->buffer->do_dio) {
-		mdata->page_order = 0;
 		mdata->nr_entries = STp->buffer->sg_segs;
 		mdata->pages = STp->buffer->mapped_pages;
 	} else {
-		mdata->page_order = STp->buffer->reserved_page_order;
 		mdata->nr_entries =
 			DIV_ROUND_UP(bytes, PAGE_SIZE << mdata->page_order);
-		mdata->pages = STp->buffer->reserved_pages;
-		mdata->offset = 0;
+		STp->buffer->map_data.pages = STp->buffer->reserved_pages;
+		STp->buffer->map_data.offset = 0;
 	}
 
 	memcpy(SRpnt->cmd, cmd, sizeof(SRpnt->cmd));
@@ -2863,8 +2859,11 @@ static int st_int_ioctl(struct scsi_tape *STp, unsigned int cmd_in, unsigned lon
 			ioctl_result = st_int_ioctl(STp, MTBSF, 1);
 
 		if (cmd_in == MTSETBLK || cmd_in == SET_DENS_AND_BLK) {
+			int old_block_size = STp->block_size;
 			STp->block_size = arg & MT_ST_BLKSIZE_MASK;
 			if (STp->block_size != 0) {
+				if (old_block_size == 0)
+					normalize_buffer(STp->buffer);
 				(STp->buffer)->buffer_blocks =
 				    (STp->buffer)->buffer_size / STp->block_size;
 			}
@@ -3722,7 +3721,7 @@ static int enlarge_buffer(struct st_buffer * STbuffer, int new_size, int need_dm
 		priority |= __GFP_ZERO;
 
 	if (STbuffer->frp_segs) {
-		order = STbuffer->reserved_page_order;
+		order = STbuffer->map_data.page_order;
 		b_size = PAGE_SIZE << order;
 	} else {
 		for (b_size = PAGE_SIZE, order = 0;
@@ -3755,7 +3754,7 @@ static int enlarge_buffer(struct st_buffer * STbuffer, int new_size, int need_dm
 		segs++;
 	}
 	STbuffer->b_data = page_address(STbuffer->reserved_pages[0]);
-	STbuffer->reserved_page_order = order;
+	STbuffer->map_data.page_order = order;
 
 	return 1;
 }
@@ -3768,7 +3767,7 @@ static void clear_buffer(struct st_buffer * st_bp)
 
 	for (i=0; i < st_bp->frp_segs; i++)
 		memset(page_address(st_bp->reserved_pages[i]), 0,
-		       PAGE_SIZE << st_bp->reserved_page_order);
+		       PAGE_SIZE << st_bp->map_data.page_order);
 	st_bp->cleared = 1;
 }
 
@@ -3776,7 +3775,7 @@ static void clear_buffer(struct st_buffer * st_bp)
 /* Release the extra buffer */
 static void normalize_buffer(struct st_buffer * STbuffer)
 {
-	int i, order = STbuffer->reserved_page_order;
+	int i, order = STbuffer->map_data.page_order;
 
 	for (i = 0; i < STbuffer->frp_segs; i++) {
 		__free_pages(STbuffer->reserved_pages[i], order);
@@ -3784,7 +3783,7 @@ static void normalize_buffer(struct st_buffer * STbuffer)
 	}
 	STbuffer->frp_segs = 0;
 	STbuffer->sg_segs = 0;
-	STbuffer->reserved_page_order = 0;
+	STbuffer->map_data.page_order = 0;
 	STbuffer->map_data.offset = 0;
 }
 
@@ -3794,7 +3793,7 @@ static void normalize_buffer(struct st_buffer * STbuffer)
 static int append_to_buffer(const char __user *ubp, struct st_buffer * st_bp, int do_count)
 {
 	int i, cnt, res, offset;
-	int length = PAGE_SIZE << st_bp->reserved_page_order;
+	int length = PAGE_SIZE << st_bp->map_data.page_order;
 
 	for (i = 0, offset = st_bp->buffer_bytes;
 	     i < st_bp->frp_segs && offset >= length; i++)
@@ -3826,7 +3825,7 @@ static int append_to_buffer(const char __user *ubp, struct st_buffer * st_bp, in
 static int from_buffer(struct st_buffer * st_bp, char __user *ubp, int do_count)
 {
 	int i, cnt, res, offset;
-	int length = PAGE_SIZE << st_bp->reserved_page_order;
+	int length = PAGE_SIZE << st_bp->map_data.page_order;
 
 	for (i = 0, offset = st_bp->read_pointer;
 	     i < st_bp->frp_segs && offset >= length; i++)
@@ -3859,7 +3858,7 @@ static void move_buffer_data(struct st_buffer * st_bp, int offset)
 {
 	int src_seg, dst_seg, src_offset = 0, dst_offset;
 	int count, total;
-	int length = PAGE_SIZE << st_bp->reserved_page_order;
+	int length = PAGE_SIZE << st_bp->map_data.page_order;
 
 	if (offset == 0)
 		return;
@@ -4581,6 +4580,7 @@ static int sgl_map_user_pages(struct st_buffer *STbp,
         }
 
 	mdata->offset = uaddr & ~PAGE_MASK;
+	mdata->page_order = 0;
 	STbp->mapped_pages = pages;
 
 	return nr_pages;

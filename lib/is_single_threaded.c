@@ -12,47 +12,34 @@
 
 #include <linux/sched.h>
 
-/*
- * Returns true if the task does not share ->mm with another thread/process.
+/**
+ * is_single_threaded - Determine if a thread group is single-threaded or not
+ * @p: A task in the thread group in question
+ *
+ * This returns true if the thread group to which a task belongs is single
+ * threaded, false if it is not.
  */
-bool current_is_single_threaded(void)
+bool is_single_threaded(struct task_struct *p)
 {
-	struct task_struct *task = current;
-	struct mm_struct *mm = task->mm;
-	struct task_struct *p, *t;
-	bool ret;
+	struct task_struct *g, *t;
+	struct mm_struct *mm = p->mm;
 
-	if (atomic_read(&task->signal->live) != 1)
-		return false;
+	if (atomic_read(&p->signal->count) != 1)
+		goto no;
 
-	if (atomic_read(&mm->mm_users) == 1)
-		return true;
-
-	ret = false;
-	rcu_read_lock();
-	for_each_process(p) {
-		if (unlikely(p->flags & PF_KTHREAD))
-			continue;
-		if (unlikely(p == task->group_leader))
-			continue;
-
-		t = p;
-		do {
-			if (unlikely(t->mm == mm))
-				goto found;
-			if (likely(t->mm))
-				break;
-			/*
-			 * t->mm == NULL. Make sure next_thread/next_task
-			 * will see other CLONE_VM tasks which might be
-			 * forked before exiting.
-			 */
-			smp_rmb();
-		} while_each_thread(p, t);
+	if (atomic_read(&p->mm->mm_users) != 1) {
+		read_lock(&tasklist_lock);
+		do_each_thread(g, t) {
+			if (t->mm == mm && t != p)
+				goto no_unlock;
+		} while_each_thread(g, t);
+		read_unlock(&tasklist_lock);
 	}
-	ret = true;
-found:
-	rcu_read_unlock();
 
-	return ret;
+	return true;
+
+no_unlock:
+	read_unlock(&tasklist_lock);
+no:
+	return false;
 }

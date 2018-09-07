@@ -19,7 +19,6 @@
 /*****************************************************************************/
 
 #include <linux/module.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #include <linux/interrupt.h>

@@ -171,6 +171,7 @@ static int startup(struct cyclades_port *);
 static void cy_throttle(struct tty_struct *);
 static void cy_unthrottle(struct tty_struct *);
 static void config_setup(struct cyclades_port *);
+extern void console_print(const char *);
 #ifdef CYCLOM_SHOW_STATUS
 static void show_status(int);
 #endif
@@ -220,7 +221,8 @@ static inline int serial_paranoia_check(struct cyclades_port *info, char *name,
 		return 1;
 	}
 
-	if (info < &cy_port[0] || info >= &cy_port[NR_PORTS]) {
+	if ((long)info < (long)(&cy_port[0])
+	    || (long)(&cy_port[NR_PORTS]) < (long)info) {
 		printk("Warning: cyclades_port out of range for (%s) in %s\n",
 				name, routine);
 		return 1;
@@ -243,7 +245,7 @@ void SP(char *data)
 {
 	unsigned long flags;
 	local_irq_save(flags);
-	printk(KERN_EMERG "%s", data);
+	console_print(data);
 	local_irq_restore(flags);
 }
 
@@ -253,7 +255,7 @@ void CP(char data)
 	unsigned long flags;
 	local_irq_save(flags);
 	scrn[0] = data;
-	printk(KERN_EMERG "%c", scrn);
+	console_print(scrn);
 	local_irq_restore(flags);
 }				/* CP */
 
@@ -519,13 +521,15 @@ static irqreturn_t cd2401_tx_interrupt(int irq, void *dev_id)
 		panic("TxInt on debug port!!!");
 	}
 #endif
+
+	info = &cy_port[channel];
+
 	/* validate the port number (as configured and open) */
 	if ((channel < 0) || (NR_PORTS <= channel)) {
 		base_addr[CyIER] &= ~(CyTxMpty | CyTxRdy);
 		base_addr[CyTEOIR] = CyNOTRANS;
 		return IRQ_HANDLED;
 	}
-	info = &cy_port[channel];
 	info->last_active = jiffies;
 	if (info->tty == 0) {
 		base_addr[CyIER] &= ~(CyTxMpty | CyTxRdy);

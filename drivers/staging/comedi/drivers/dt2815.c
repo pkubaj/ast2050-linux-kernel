@@ -62,15 +62,12 @@ Configuration options:
 #include <linux/delay.h>
 
 static const struct comedi_lrange range_dt2815_ao_32_current = { 1, {
-								     RANGE_mA(0,
-									      32)
-								     }
+			RANGE_mA(0, 32)
+	}
 };
-
 static const struct comedi_lrange range_dt2815_ao_20_current = { 1, {
-								     RANGE_mA(4,
-									      20)
-								     }
+			RANGE_mA(4, 20)
+	}
 };
 
 #define DT2815_SIZE 2
@@ -78,8 +75,7 @@ static const struct comedi_lrange range_dt2815_ao_20_current = { 1, {
 #define DT2815_DATA 0
 #define DT2815_STATUS 1
 
-static int dt2815_attach(struct comedi_device *dev,
-			 struct comedi_devconfig *it);
+static int dt2815_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int dt2815_detach(struct comedi_device *dev);
 static struct comedi_driver driver_dt2815 = {
 	.driver_name = "dt2815",
@@ -98,6 +94,7 @@ struct dt2815_private {
 	unsigned int ao_readback[8];
 };
 
+
 #define devpriv ((struct dt2815_private *)dev->private)
 
 static int dt2815_wait_for_status(struct comedi_device *dev, int status)
@@ -111,9 +108,8 @@ static int dt2815_wait_for_status(struct comedi_device *dev, int status)
 	return status;
 }
 
-static int dt2815_ao_insn_read(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data)
+static int dt2815_ao_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -126,7 +122,7 @@ static int dt2815_ao_insn_read(struct comedi_device *dev,
 }
 
 static int dt2815_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
-			  struct comedi_insn *insn, unsigned int *data)
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -140,8 +136,8 @@ static int dt2815_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 		status = dt2815_wait_for_status(dev, 0x00);
 		if (status != 0) {
 			printk
-			    ("dt2815: failed to write low byte on %d reason %x\n",
-			     chan, status);
+				("dt2815: failed to write low byte on %d reason %x\n",
+				chan, status);
 			return -EBUSY;
 		}
 
@@ -150,8 +146,8 @@ static int dt2815_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 		status = dt2815_wait_for_status(dev, 0x10);
 		if (status != 0x10) {
 			printk
-			    ("dt2815: failed to write high byte on %d reason %x\n",
-			     chan, status);
+				("dt2815: failed to write high byte on %d reason %x\n",
+				chan, status);
 			return -EBUSY;
 		}
 		devpriv->ao_readback[chan] = data[i];
@@ -216,12 +212,12 @@ static int dt2815_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 	s->range_table_list = devpriv->range_type_list;
 
 	current_range_type = (it->options[3])
-	    ? &range_dt2815_ao_20_current : &range_dt2815_ao_32_current;
+		? &range_dt2815_ao_20_current : &range_dt2815_ao_32_current;
 	voltage_range_type = (it->options[2])
-	    ? &range_bipolar5 : &range_unipolar5;
+		? &range_bipolar5 : &range_unipolar5;
 	for (i = 0; i < 8; i++) {
 		devpriv->range_type_list[i] = (it->options[5 + i])
-		    ? current_range_type : voltage_range_type;
+			? current_range_type : voltage_range_type;
 	}
 
 	/* Init the 2815 */
@@ -240,7 +236,7 @@ static int dt2815_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 			break;
 		} else if (status != 0x00) {
 			printk("dt2815: unexpected status 0x%x (@t=%d)\n",
-			       status, i);
+				status, i);
 			if (status & 0x60) {
 				outb(0x00, dev->iobase + DT2815_STATUS);
 			}

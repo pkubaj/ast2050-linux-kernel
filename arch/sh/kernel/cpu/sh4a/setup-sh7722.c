@@ -13,12 +13,9 @@
 #include <linux/serial_sci.h>
 #include <linux/mm.h>
 #include <linux/uio_driver.h>
-#include <linux/usb/m66592.h>
 #include <linux/sh_timer.h>
 #include <asm/clock.h>
 #include <asm/mmzone.h>
-#include <asm/dma-sh.h>
-#include <cpu/sh7722.h>
 
 static struct resource rtc_resources[] = {
 	[0] = {
@@ -48,18 +45,11 @@ static struct platform_device rtc_device = {
 	.id		= -1,
 	.num_resources	= ARRAY_SIZE(rtc_resources),
 	.resource	= rtc_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_RTC,
-	},
-};
-
-static struct m66592_platdata usbf_platdata = {
-	.on_chip = 1,
 };
 
 static struct resource usbf_resources[] = {
 	[0] = {
-		.name	= "USBF",
+		.name	= "m66592_udc",
 		.start	= 0x04480000,
 		.end	= 0x044800FF,
 		.flags	= IORESOURCE_MEM,
@@ -77,13 +67,9 @@ static struct platform_device usbf_device = {
 	.dev = {
 		.dma_mask		= NULL,
 		.coherent_dma_mask	= 0xffffffff,
-		.platform_data		= &usbf_platdata,
 	},
 	.num_resources	= ARRAY_SIZE(usbf_resources),
 	.resource	= usbf_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_USBF,
-	},
 };
 
 static struct resource iic_resources[] = {
@@ -105,9 +91,6 @@ static struct platform_device iic_device = {
 	.id             = 0, /* "i2c0" clock */
 	.num_resources  = ARRAY_SIZE(iic_resources),
 	.resource       = iic_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_IIC,
-	},
 };
 
 static struct uio_info vpu_platform_data = {
@@ -136,9 +119,6 @@ static struct platform_device vpu_device = {
 	},
 	.resource	= vpu_resources,
 	.num_resources	= ARRAY_SIZE(vpu_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_VPU,
-	},
 };
 
 static struct uio_info veu_platform_data = {
@@ -167,9 +147,6 @@ static struct platform_device veu_device = {
 	},
 	.resource	= veu_resources,
 	.num_resources	= ARRAY_SIZE(veu_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_VEU,
-	},
 };
 
 static struct uio_info jpu_platform_data = {
@@ -198,9 +175,6 @@ static struct platform_device jpu_device = {
 	},
 	.resource	= jpu_resources,
 	.num_resources	= ARRAY_SIZE(jpu_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_JPU,
-	},
 };
 
 static struct sh_timer_config cmt_platform_data = {
@@ -233,9 +207,6 @@ static struct platform_device cmt_device = {
 	},
 	.resource	= cmt_resources,
 	.num_resources	= ARRAY_SIZE(cmt_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_CMT,
-	},
 };
 
 static struct sh_timer_config tmu0_platform_data = {
@@ -267,9 +238,6 @@ static struct platform_device tmu0_device = {
 	},
 	.resource	= tmu0_resources,
 	.num_resources	= ARRAY_SIZE(tmu0_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_TMU,
-	},
 };
 
 static struct sh_timer_config tmu1_platform_data = {
@@ -301,9 +269,6 @@ static struct platform_device tmu1_device = {
 	},
 	.resource	= tmu1_resources,
 	.num_resources	= ARRAY_SIZE(tmu1_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_TMU,
-	},
 };
 
 static struct sh_timer_config tmu2_platform_data = {
@@ -334,9 +299,6 @@ static struct platform_device tmu2_device = {
 	},
 	.resource	= tmu2_resources,
 	.num_resources	= ARRAY_SIZE(tmu2_resources),
-	.archdata = {
-		.hwblk_id = HWBLK_TMU,
-	},
 };
 
 static struct plat_sci_port sci_platform_data[] = {
@@ -374,18 +336,6 @@ static struct platform_device sci_device = {
 	},
 };
 
-static struct sh_dmae_pdata dma_platform_data = {
-	.mode = 0,
-};
-
-static struct platform_device dma_device = {
-	.name		= "sh-dma-engine",
-	.id		= -1,
-	.dev		= {
-		.platform_data	= &dma_platform_data,
-	},
-};
-
 static struct platform_device *sh7722_devices[] __initdata = {
 	&cmt_device,
 	&tmu0_device,
@@ -398,7 +348,6 @@ static struct platform_device *sh7722_devices[] __initdata = {
 	&vpu_device,
 	&veu_device,
 	&jpu_device,
-	&dma_device,
 };
 
 static int __init sh7722_devices_setup(void)

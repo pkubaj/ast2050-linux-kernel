@@ -30,10 +30,15 @@
 #ifndef __VNTWIFI_H__
 #define __VNTWIFI_H__
 
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+#if !defined(__80211MGR_H__)
 #include "80211mgr.h"
+#endif
+#if !defined(__CARD_H__)
 #include "card.h"
-#include "wpa2.h"
+#endif
 
 /*---------------------  Export Definitions -------------------------*/
 #define RATE_1M         0
@@ -61,6 +66,8 @@
 #define CHANNEL_MAX_24G         14
 
 #define MAX_BSS_NUM             42
+
+#define MAX_PMKID_CACHE         16
 
 // Pre-configured Authenticaiton Mode (from XP)
 typedef enum tagWMAC_AUTHENTICATION_MODE {
@@ -139,6 +146,11 @@ typedef enum tagWMAC_POWER_MODE {
 
 
 /*---------------------  Export Functions  --------------------------*/
+
+#ifdef __cplusplus
+extern "C" {                            /* Assume C declarations for C++ */
+#endif /* __cplusplus */
+
 
 VOID
 VNTWIFIvSetIBSSParameter (
@@ -309,5 +321,10 @@ VNTWIFIbRadarPresent(
     IN BYTE  byChannel
     );
 */
+
+#ifdef __cplusplus
+}                                       /* End of extern "C" { */
+#endif /* __cplusplus */
+
 
 #endif //__VNTWIFI_H__

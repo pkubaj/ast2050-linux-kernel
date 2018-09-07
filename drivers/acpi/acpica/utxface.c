@@ -251,16 +251,6 @@ acpi_status acpi_initialize_objects(u32 flags)
 	}
 
 	/*
-	 * Execute any module-level code that was detected during the table load
-	 * phase. Although illegal since ACPI 2.0, there are many machines that
-	 * contain this type of code. Each block of detected executable AML code
-	 * outside of any control method is wrapped with a temporary control
-	 * method object and placed on a global list. The methods on this list
-	 * are executed below.
-	 */
-	acpi_ns_exec_module_code_list();
-
-	/*
 	 * Initialize the objects that remain uninitialized. This runs the
 	 * executable AML that may be part of the declaration of these objects:
 	 * operation_regions, buffer_fields, Buffers, and Packages.
@@ -328,7 +318,7 @@ ACPI_EXPORT_SYMBOL(acpi_initialize_objects)
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Shutdown the ACPICA subsystem and release all resources.
+ * DESCRIPTION: Shutdown the ACPI subsystem.  Release all resources.
  *
  ******************************************************************************/
 acpi_status acpi_terminate(void)
@@ -336,19 +326,6 @@ acpi_status acpi_terminate(void)
 	acpi_status status;
 
 	ACPI_FUNCTION_TRACE(acpi_terminate);
-
-	/* Just exit if subsystem is already shutdown */
-
-	if (acpi_gbl_shutdown) {
-		ACPI_ERROR((AE_INFO, "ACPI Subsystem is already terminated"));
-		return_ACPI_STATUS(AE_OK);
-	}
-
-	/* Subsystem appears active, go ahead and shut it down */
-
-	acpi_gbl_shutdown = TRUE;
-	acpi_gbl_startup_flags = 0;
-	ACPI_DEBUG_PRINT((ACPI_DB_INFO, "Shutting down ACPI Subsystem\n"));
 
 	/* Terminate the AML Debugger if present */
 
@@ -376,7 +353,6 @@ acpi_status acpi_terminate(void)
 }
 
 ACPI_EXPORT_SYMBOL(acpi_terminate)
-
 #ifndef ACPI_ASL_COMPILER
 #ifdef ACPI_FUTURE_USAGE
 /*******************************************************************************

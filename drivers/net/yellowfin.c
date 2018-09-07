@@ -347,8 +347,7 @@ static int yellowfin_open(struct net_device *dev);
 static void yellowfin_timer(unsigned long data);
 static void yellowfin_tx_timeout(struct net_device *dev);
 static int yellowfin_init_ring(struct net_device *dev);
-static netdev_tx_t yellowfin_start_xmit(struct sk_buff *skb,
-					struct net_device *dev);
+static int yellowfin_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t yellowfin_interrupt(int irq, void *dev_instance);
 static int yellowfin_rx(struct net_device *dev);
 static void yellowfin_error(struct net_device *dev, int intr_status);
@@ -817,8 +816,7 @@ static int yellowfin_init_ring(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t yellowfin_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static int yellowfin_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct yellowfin_private *yp = netdev_priv(dev);
 	unsigned entry;
@@ -840,7 +838,7 @@ static netdev_tx_t yellowfin_start_xmit(struct sk_buff *skb,
 			if (skb_padto(skb, len)) {
 				yp->tx_skbuff[entry] = NULL;
 				netif_wake_queue(dev);
-				return NETDEV_TX_OK;
+				return 0;
 			}
 		}
 	}
@@ -894,7 +892,7 @@ static netdev_tx_t yellowfin_start_xmit(struct sk_buff *skb,
 		printk(KERN_DEBUG "%s: Yellowfin transmit frame #%d queued in slot %d.\n",
 			   dev->name, yp->cur_tx, entry);
 	}
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* The interrupt handler does all of the Rx thread work and cleans up
@@ -1365,6 +1363,8 @@ static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		return 0;
 
 	case SIOCSMIIREG:		/* Write MII PHY register. */
+		if (!capable(CAP_NET_ADMIN))
+			return -EPERM;
 		if (data->phy_id == np->phys[0]) {
 			u16 value = data->val_in;
 			switch (data->reg_num) {

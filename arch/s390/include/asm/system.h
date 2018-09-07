@@ -97,6 +97,7 @@ static inline void restore_access_regs(unsigned int *acrs)
 
 extern void account_vtime(struct task_struct *, struct task_struct *);
 extern void account_tick_vtime(struct task_struct *);
+extern void account_system_vtime(struct task_struct *);
 
 #ifdef CONFIG_PFAULT
 extern void pfault_irq_init(void);
@@ -108,7 +109,11 @@ extern void pfault_fini(void);
 #define pfault_fini()		do { } while (0)
 #endif /* CONFIG_PFAULT */
 
+#ifdef CONFIG_PAGE_STATES
 extern void cmma_init(void);
+#else
+static inline void cmma_init(void) { }
+#endif
 
 #define finish_arch_switch(prev) do {					     \
 	set_fs(current->thread.mm_segment);				     \

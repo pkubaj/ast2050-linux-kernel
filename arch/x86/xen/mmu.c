@@ -185,7 +185,7 @@ static inline unsigned p2m_index(unsigned long pfn)
 }
 
 /* Build the parallel p2m_top_mfn structures */
-void xen_build_mfn_list_list(void)
+static void __init xen_build_mfn_list_list(void)
 {
 	unsigned pfn, idx;
 
@@ -987,9 +987,10 @@ static void xen_pgd_pin(struct mm_struct *mm)
  */
 void xen_mm_pin_all(void)
 {
+	unsigned long flags;
 	struct page *page;
 
-	spin_lock(&pgd_lock);
+	spin_lock_irqsave(&pgd_lock, flags);
 
 	list_for_each_entry(page, &pgd_list, lru) {
 		if (!PagePinned(page)) {
@@ -998,7 +999,7 @@ void xen_mm_pin_all(void)
 		}
 	}
 
-	spin_unlock(&pgd_lock);
+	spin_unlock_irqrestore(&pgd_lock, flags);
 }
 
 /*
@@ -1099,9 +1100,10 @@ static void xen_pgd_unpin(struct mm_struct *mm)
  */
 void xen_mm_unpin_all(void)
 {
+	unsigned long flags;
 	struct page *page;
 
-	spin_lock(&pgd_lock);
+	spin_lock_irqsave(&pgd_lock, flags);
 
 	list_for_each_entry(page, &pgd_list, lru) {
 		if (PageSavePinned(page)) {
@@ -1111,7 +1113,7 @@ void xen_mm_unpin_all(void)
 		}
 	}
 
-	spin_unlock(&pgd_lock);
+	spin_unlock_irqrestore(&pgd_lock, flags);
 }
 
 void xen_activate_mm(struct mm_struct *prev, struct mm_struct *next)
@@ -1139,7 +1141,7 @@ static void drop_other_mm_ref(void *info)
 
 	active_mm = percpu_read(cpu_tlbstate.active_mm);
 
-	if (active_mm == mm && percpu_read(cpu_tlbstate.state) != TLBSTATE_OK)
+	if (active_mm == mm)
 		leave_mm(smp_processor_id());
 
 	/* If this cpu still has a stale cr3 reference, then make sure
@@ -1163,14 +1165,14 @@ static void xen_drop_mm_ref(struct mm_struct *mm)
 	/* Get the "official" set of cpus referring to our pagetable. */
 	if (!alloc_cpumask_var(&mask, GFP_ATOMIC)) {
 		for_each_online_cpu(cpu) {
-			if (!cpumask_test_cpu(cpu, mm_cpumask(mm))
+			if (!cpumask_test_cpu(cpu, &mm->cpu_vm_mask)
 			    && per_cpu(xen_current_cr3, cpu) != __pa(mm->pgd))
 				continue;
 			smp_call_function_single(cpu, drop_other_mm_ref, mm, 1);
 		}
 		return;
 	}
-	cpumask_copy(mask, mm_cpumask(mm));
+	cpumask_copy(mask, &mm->cpu_vm_mask);
 
 	/* It's possible that a vcpu may have a stale reference to our
 	   cr3, because its in lazy mode, and it hasn't yet flushed
@@ -1227,12 +1229,9 @@ static __init void xen_pagetable_setup_start(pgd_t *base)
 {
 }
 
-static void xen_post_allocator_init(void);
-
 static __init void xen_pagetable_setup_done(pgd_t *base)
 {
 	xen_setup_shared_info();
-	xen_post_allocator_init();
 }
 
 static void xen_write_cr2(unsigned long cr2)
@@ -1430,14 +1429,13 @@ static void *xen_kmap_atomic_pte(struct page *page, enum km_type type)
 {
 	pgprot_t prot = PAGE_KERNEL;
 
-	/*
-	 * We disable highmem allocations for page tables so we should never
-	 * see any calls to kmap_atomic_pte on a highmem page.
-	 */
-	BUG_ON(PageHighMem(page));
-
 	if (PagePinned(page))
 		prot = PAGE_KERNEL_RO;
+
+	if (0 && PageHighMem(page))
+		printk("mapping highpte %lx type %d prot %s\n",
+		       page_to_pfn(page), type,
+		       (unsigned long)pgprot_val(prot) & _PAGE_RW ? "WRITE" : "READ");
 
 	return kmap_atomic_prot(page, type, prot);
 }
@@ -1656,10 +1654,8 @@ static __init void xen_map_identity_early(pmd_t *pmd, unsigned long max_pfn)
 		for (pteidx = 0; pteidx < PTRS_PER_PTE; pteidx++, pfn++) {
 			pte_t pte;
 
-#ifdef CONFIG_X86_32
 			if (pfn > max_pfn_mapped)
 				max_pfn_mapped = pfn;
-#endif
 
 			if (!pte_none(pte_page[pteidx]))
 				continue;
@@ -1703,12 +1699,6 @@ __init pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd,
 {
 	pud_t *l3;
 	pmd_t *l2;
-
-	/* max_pfn_mapped is the last pfn mapped in the initial memory
-	 * mappings. Considering that on Xen after the kernel mappings we
-	 * have the mappings of some pages that don't exist in pfn space, we
-	 * set max_pfn_mapped to the last real pfn mapped. */
-	max_pfn_mapped = PFN_DOWN(__pa(xen_start_info->mfn_list));
 
 	/* Zap identity mapping */
 	init_level4_pgt[0] = __pgd(0);
@@ -1851,7 +1841,7 @@ static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 #endif
 }
 
-static __init void xen_post_allocator_init(void)
+__init void xen_post_allocator_init(void)
 {
 	pv_mmu_ops.set_pte = xen_set_pte;
 	pv_mmu_ops.set_pmd = xen_set_pmd;
@@ -1885,7 +1875,10 @@ static void xen_leave_lazy_mmu(void)
 	preempt_enable();
 }
 
-static const struct pv_mmu_ops xen_mmu_ops __initdata = {
+const struct pv_mmu_ops xen_mmu_ops __initdata = {
+	.pagetable_setup_start = xen_pagetable_setup_start,
+	.pagetable_setup_done = xen_pagetable_setup_done,
+
 	.read_cr2 = xen_read_cr2,
 	.write_cr2 = xen_write_cr2,
 
@@ -1961,12 +1954,6 @@ static const struct pv_mmu_ops xen_mmu_ops __initdata = {
 	.set_fixmap = xen_set_fixmap,
 };
 
-void __init xen_init_mmu_ops(void)
-{
-	x86_init.paging.pagetable_setup_start = xen_pagetable_setup_start;
-	x86_init.paging.pagetable_setup_done = xen_pagetable_setup_done;
-	pv_mmu_ops = xen_mmu_ops;
-}
 
 #ifdef CONFIG_XEN_DEBUG_FS
 

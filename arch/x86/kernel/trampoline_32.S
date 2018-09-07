@@ -28,12 +28,16 @@
  */
 
 #include <linux/linkage.h>
-#include <linux/init.h>
 #include <asm/segment.h>
 #include <asm/page_types.h>
 
 /* We can free up trampoline after bootup if cpu hotplug is not supported. */
-__CPUINITRODATA
+#ifndef CONFIG_HOTPLUG_CPU
+.section ".cpuinit.data","aw",@progbits
+#else
+.section .rodata,"a",@progbits
+#endif
+
 .code16
 
 ENTRY(trampoline_data)

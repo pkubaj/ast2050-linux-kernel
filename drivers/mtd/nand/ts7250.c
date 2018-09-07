@@ -24,11 +24,8 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
-#include <linux/io.h>
-
+#include <asm/io.h>
 #include <mach/hardware.h>
-#include <mach/ts72xx.h>
-
 #include <asm/sizes.h>
 #include <asm/mach-types.h>
 

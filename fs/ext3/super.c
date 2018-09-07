@@ -466,8 +466,6 @@ static struct inode *ext3_alloc_inode(struct super_block *sb)
 		return NULL;
 	ei->i_block_alloc_info = NULL;
 	ei->vfs_inode.i_version = 1;
-	atomic_set(&ei->i_datasync_tid, 0);
-	atomic_set(&ei->i_sync_tid, 0);
 	return &ei->vfs_inode;
 }
 
@@ -722,7 +720,7 @@ static ssize_t ext3_quota_read(struct super_block *sb, int type, char *data,
 static ssize_t ext3_quota_write(struct super_block *sb, int type,
 				const char *data, size_t len, loff_t off);
 
-static const struct dquot_operations ext3_quota_operations = {
+static struct dquot_operations ext3_quota_operations = {
 	.initialize	= dquot_initialize,
 	.drop		= dquot_drop,
 	.alloc_space	= dquot_alloc_space,
@@ -739,7 +737,7 @@ static const struct dquot_operations ext3_quota_operations = {
 	.destroy_dquot	= dquot_destroy,
 };
 
-static const struct quotactl_ops ext3_qctl_operations = {
+static struct quotactl_ops ext3_qctl_operations = {
 	.quota_on	= ext3_quota_on,
 	.quota_off	= vfs_quota_off,
 	.quota_sync	= vfs_quota_sync,
@@ -1401,13 +1399,6 @@ static void ext3_orphan_cleanup (struct super_block * sb,
 	if (bdev_read_only(sb->s_bdev)) {
 		printk(KERN_ERR "EXT3-fs: write access "
 			"unavailable, skipping orphan cleanup.\n");
-		return;
-	}
-
-	/* Check if feature set allows readwrite operations */
-	if (EXT3_HAS_RO_COMPAT_FEATURE(sb, ~EXT3_FEATURE_RO_COMPAT_SUPP)) {
-		printk(KERN_INFO "EXT3-fs: %s: Skipping orphan cleanup due to "
-			 "unknown ROCOMPAT features\n", sb->s_id);
 		return;
 	}
 
@@ -2330,18 +2321,7 @@ static int ext3_commit_super(struct super_block *sb,
 
 	if (!sbh)
 		return error;
-	/*
-	 * If the file system is mounted read-only, don't update the
-	 * superblock write time.  This avoids updating the superblock
-	 * write time when we are mounting the root file system
-	 * read/only but we need to replay the journal; at that point,
-	 * for people who are east of GMT and who make their clock
-	 * tick in localtime for Windows bug-for-bug compatibility,
-	 * the clock is set in the future, and this will cause e2fsck
-	 * to complain and force a full file system check.
-	 */
-	if (!(sb->s_flags & MS_RDONLY))
-		es->s_wtime = cpu_to_le32(get_seconds());
+	es->s_wtime = cpu_to_le32(get_seconds());
 	es->s_free_blocks_count = cpu_to_le32(ext3_count_free_blocks(sb));
 	es->s_free_inodes_count = cpu_to_le32(ext3_count_free_inodes(sb));
 	BUFFER_TRACE(sbh, "marking dirty");
@@ -2693,11 +2673,13 @@ static int ext3_statfs (struct dentry * dentry, struct kstatfs * buf)
 	buf->f_bsize = sb->s_blocksize;
 	buf->f_blocks = le32_to_cpu(es->s_blocks_count) - sbi->s_overhead_last;
 	buf->f_bfree = percpu_counter_sum_positive(&sbi->s_freeblocks_counter);
+	es->s_free_blocks_count = cpu_to_le32(buf->f_bfree);
 	buf->f_bavail = buf->f_bfree - le32_to_cpu(es->s_r_blocks_count);
 	if (buf->f_bfree < le32_to_cpu(es->s_r_blocks_count))
 		buf->f_bavail = 0;
 	buf->f_files = le32_to_cpu(es->s_inodes_count);
 	buf->f_ffree = percpu_counter_sum_positive(&sbi->s_freeinodes_counter);
+	es->s_free_inodes_count = cpu_to_le32(buf->f_ffree);
 	buf->f_namelen = EXT3_NAME_LEN;
 	fsid = le64_to_cpup((void *)es->s_uuid) ^
 	       le64_to_cpup((void *)es->s_uuid + sizeof(u64));

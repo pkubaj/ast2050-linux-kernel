@@ -37,6 +37,7 @@ extern void fixup_irqs(void);
 #endif
 
 extern void (*generic_interrupt_extension)(void);
+extern void init_IRQ(void);
 extern void native_init_IRQ(void);
 extern bool handle_irq(unsigned irq, struct pt_regs *regs);
 
@@ -45,7 +46,5 @@ extern unsigned int do_IRQ(struct pt_regs *regs);
 /* Interrupt vector management */
 extern DECLARE_BITMAP(used_vectors, NR_VECTORS);
 extern int vector_used_by_percpu_irq(unsigned int vector);
-
-extern void init_ISA_irqs(void);
 
 #endif /* _ASM_X86_IRQ_H */

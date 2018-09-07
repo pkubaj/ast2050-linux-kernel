@@ -5,7 +5,7 @@
  * (C) 2000 Red Hat. GPL'd
  *
  *
- * 10/10/2000	Nicolas Pitre <nico@fluxnic.net>
+ * 10/10/2000	Nicolas Pitre <nico@cam.org>
  * 	- completely revamped method functions so they are aware and
  * 	  independent of the flash geometry (buswidth, interleave, etc.)
  * 	- scalability vs code size is completely set at compile-time

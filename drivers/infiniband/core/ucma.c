@@ -34,7 +34,6 @@
 #include <linux/file.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
-#include <linux/sched.h>
 #include <linux/idr.h>
 #include <linux/in.h>
 #include <linux/in6.h>

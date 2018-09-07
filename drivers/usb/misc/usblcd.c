@@ -313,8 +313,7 @@ static int lcd_probe(struct usb_interface *interface, const struct usb_device_id
 
 	if (le16_to_cpu(dev->udev->descriptor.idProduct) != 0x0001) {
 		dev_warn(&interface->dev, "USBLCD model not supported.\n");
-		retval = -ENODEV;
-		goto error;
+		return -ENODEV;
 	}
 	
 	/* set up the endpoint information */

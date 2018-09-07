@@ -2,7 +2,6 @@
 #include <linux/sched.h>
 #include <linux/mutex.h>
 #include <linux/list.h>
-#include <linux/stringify.h>
 #include <linux/kprobes.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
@@ -33,7 +32,7 @@ __setup("smp-alt-boot", bootonly);
 #define smp_alt_once 1
 #endif
 
-static int __initdata_or_module debug_alternative;
+static int debug_alternative;
 
 static int __init debug_alt(char *str)
 {
@@ -52,7 +51,7 @@ static int __init setup_noreplace_smp(char *str)
 __setup("noreplace-smp", setup_noreplace_smp);
 
 #ifdef CONFIG_PARAVIRT
-static int __initdata_or_module noreplace_paravirt = 0;
+static int noreplace_paravirt = 0;
 
 static int __init setup_noreplace_paravirt(char *str)
 {
@@ -65,17 +64,16 @@ __setup("noreplace-paravirt", setup_noreplace_paravirt);
 #define DPRINTK(fmt, args...) if (debug_alternative) \
 	printk(KERN_DEBUG fmt, args)
 
-#if defined(GENERIC_NOP1) && !defined(CONFIG_X86_64)
+#ifdef GENERIC_NOP1
 /* Use inline assembly to define this because the nops are defined
    as inline assembly strings in the include files and we cannot
    get them easily into strings. */
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\nintelnops: "
+asm("\t.section .rodata, \"a\"\nintelnops: "
 	GENERIC_NOP1 GENERIC_NOP2 GENERIC_NOP3 GENERIC_NOP4 GENERIC_NOP5 GENERIC_NOP6
 	GENERIC_NOP7 GENERIC_NOP8
     "\t.previous");
 extern const unsigned char intelnops[];
-static const unsigned char *const __initconst_or_module
-intel_nops[ASM_NOP_MAX+1] = {
+static const unsigned char *const intel_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	intelnops,
 	intelnops + 1,
@@ -89,13 +87,12 @@ intel_nops[ASM_NOP_MAX+1] = {
 #endif
 
 #ifdef K8_NOP1
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\nk8nops: "
+asm("\t.section .rodata, \"a\"\nk8nops: "
 	K8_NOP1 K8_NOP2 K8_NOP3 K8_NOP4 K8_NOP5 K8_NOP6
 	K8_NOP7 K8_NOP8
     "\t.previous");
 extern const unsigned char k8nops[];
-static const unsigned char *const __initconst_or_module
-k8_nops[ASM_NOP_MAX+1] = {
+static const unsigned char *const k8_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	k8nops,
 	k8nops + 1,
@@ -108,14 +105,13 @@ k8_nops[ASM_NOP_MAX+1] = {
 };
 #endif
 
-#if defined(K7_NOP1) && !defined(CONFIG_X86_64)
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\nk7nops: "
+#ifdef K7_NOP1
+asm("\t.section .rodata, \"a\"\nk7nops: "
 	K7_NOP1 K7_NOP2 K7_NOP3 K7_NOP4 K7_NOP5 K7_NOP6
 	K7_NOP7 K7_NOP8
     "\t.previous");
 extern const unsigned char k7nops[];
-static const unsigned char *const __initconst_or_module
-k7_nops[ASM_NOP_MAX+1] = {
+static const unsigned char *const k7_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	k7nops,
 	k7nops + 1,
@@ -129,13 +125,12 @@ k7_nops[ASM_NOP_MAX+1] = {
 #endif
 
 #ifdef P6_NOP1
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\np6nops: "
+asm("\t.section .rodata, \"a\"\np6nops: "
 	P6_NOP1 P6_NOP2 P6_NOP3 P6_NOP4 P6_NOP5 P6_NOP6
 	P6_NOP7 P6_NOP8
     "\t.previous");
 extern const unsigned char p6nops[];
-static const unsigned char *const __initconst_or_module
-p6_nops[ASM_NOP_MAX+1] = {
+static const unsigned char *const p6_nops[ASM_NOP_MAX+1] = {
 	NULL,
 	p6nops,
 	p6nops + 1,
@@ -151,7 +146,7 @@ p6_nops[ASM_NOP_MAX+1] = {
 #ifdef CONFIG_X86_64
 
 extern char __vsyscall_0;
-static const unsigned char *const *__init_or_module find_nop_table(void)
+const unsigned char *const *find_nop_table(void)
 {
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL &&
 	    boot_cpu_has(X86_FEATURE_NOPL))
@@ -162,7 +157,7 @@ static const unsigned char *const *__init_or_module find_nop_table(void)
 
 #else /* CONFIG_X86_64 */
 
-static const unsigned char *const *__init_or_module find_nop_table(void)
+const unsigned char *const *find_nop_table(void)
 {
 	if (boot_cpu_has(X86_FEATURE_K8))
 		return k8_nops;
@@ -177,7 +172,7 @@ static const unsigned char *const *__init_or_module find_nop_table(void)
 #endif /* CONFIG_X86_64 */
 
 /* Use this to add nops to a buffer, then text_poke the whole buffer. */
-static void __init_or_module add_nops(void *insns, unsigned int len)
+void add_nops(void *insns, unsigned int len)
 {
 	const unsigned char *const *noptable = find_nop_table();
 
@@ -190,10 +185,10 @@ static void __init_or_module add_nops(void *insns, unsigned int len)
 		len -= noplen;
 	}
 }
+EXPORT_SYMBOL_GPL(add_nops);
 
 extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
 extern u8 *__smp_locks[], *__smp_locks_end[];
-static void *text_poke_early(void *addr, const void *opcode, size_t len);
 
 /* Replace instructions with better alternatives for this CPU type.
    This runs before SMP is initialized to avoid SMP problems with
@@ -201,8 +196,7 @@ static void *text_poke_early(void *addr, const void *opcode, size_t len);
    APs have less capabilities than the boot processor are not handled.
    Tough. Make sure you disable such features by hand. */
 
-void __init_or_module apply_alternatives(struct alt_instr *start,
-					 struct alt_instr *end)
+void apply_alternatives(struct alt_instr *start, struct alt_instr *end)
 {
 	struct alt_instr *a;
 	char insnbuf[MAX_PATCH_LEN];
@@ -285,10 +279,9 @@ static LIST_HEAD(smp_alt_modules);
 static DEFINE_MUTEX(smp_alt);
 static int smp_mode = 1;	/* protected by smp_alt */
 
-void __init_or_module alternatives_smp_module_add(struct module *mod,
-						  char *name,
-						  void *locks, void *locks_end,
-						  void *text,  void *text_end)
+void alternatives_smp_module_add(struct module *mod, char *name,
+				 void *locks, void *locks_end,
+				 void *text,  void *text_end)
 {
 	struct smp_alt_module *smp;
 
@@ -324,7 +317,7 @@ void __init_or_module alternatives_smp_module_add(struct module *mod,
 	mutex_unlock(&smp_alt);
 }
 
-void __init_or_module alternatives_smp_module_del(struct module *mod)
+void alternatives_smp_module_del(struct module *mod)
 {
 	struct smp_alt_module *item;
 
@@ -393,8 +386,8 @@ void alternatives_smp_switch(int smp)
 #endif
 
 #ifdef CONFIG_PARAVIRT
-void __init_or_module apply_paravirt(struct paravirt_patch_site *start,
-				     struct paravirt_patch_site *end)
+void apply_paravirt(struct paravirt_patch_site *start,
+		    struct paravirt_patch_site *end)
 {
 	struct paravirt_patch_site *p;
 	char insnbuf[MAX_PATCH_LEN];
@@ -492,14 +485,13 @@ void __init alternative_instructions(void)
  * instructions. And on the local CPU you need to be protected again NMI or MCE
  * handlers seeing an inconsistent instruction while you patch.
  */
-static void *__init_or_module text_poke_early(void *addr, const void *opcode,
-					      size_t len)
+void *text_poke_early(void *addr, const void *opcode, size_t len)
 {
 	unsigned long flags;
 	local_irq_save(flags);
 	memcpy(addr, opcode, len);
-	sync_core();
 	local_irq_restore(flags);
+	sync_core();
 	/* Could also do a CLFLUSH here to speed up CPU recovery; but
 	   that causes hangs on some VIA CPUs. */
 	return addr;

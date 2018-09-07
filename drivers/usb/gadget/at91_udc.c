@@ -1687,7 +1687,7 @@ static int __init at91udc_probe(struct platform_device *pdev)
 	}
 
 	/* newer chips have more FIFO memory than rm9200 */
-	if (cpu_is_at91sam9260() || cpu_is_at91sam9g20()) {
+	if (cpu_is_at91sam9260()) {
 		udc->ep[0].maxpacket = 64;
 		udc->ep[3].maxpacket = 64;
 		udc->ep[4].maxpacket = 512;
@@ -1754,6 +1754,7 @@ static int __init at91udc_probe(struct platform_device *pdev)
 				IRQF_DISABLED, driver_name, udc)) {
 			DBG("request vbus irq %d failed\n",
 					udc->board.vbus_pin);
+			free_irq(udc->udp_irq, udc);
 			retval = -EBUSY;
 			goto fail3;
 		}

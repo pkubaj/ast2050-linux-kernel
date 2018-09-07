@@ -97,4 +97,6 @@ int ToLegalChannel(
 	struct ieee80211_device * dev,
 	u8 channel
 );
+
+void dump_chnl_map(u8 * channel_map);
 #endif // #ifndef __INC_DOT11D_H

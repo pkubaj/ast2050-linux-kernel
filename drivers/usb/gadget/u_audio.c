@@ -10,6 +10,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/utsname.h>
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/ctype.h>
@@ -252,13 +253,11 @@ static int gaudio_open_snd_dev(struct gaudio *card)
 	snd->filp = filp_open(fn_cap, O_RDONLY, 0);
 	if (IS_ERR(snd->filp)) {
 		ERROR(card, "No such PCM capture device: %s\n", fn_cap);
-		snd->substream = NULL;
-		snd->card = NULL;
-	} else {
-		pcm_file = snd->filp->private_data;
-		snd->substream = pcm_file->substream;
-		snd->card = card;
+		snd->filp = NULL;
 	}
+	pcm_file = snd->filp->private_data;
+	snd->substream = pcm_file->substream;
+	snd->card = card;
 
 	return 0;
 }

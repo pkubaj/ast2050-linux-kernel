@@ -855,24 +855,18 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		break;
 	}
 	case AUDIT_SIGNAL_INFO:
-		len = 0;
-		if (audit_sig_sid) {
-			err = security_secid_to_secctx(audit_sig_sid, &ctx, &len);
-			if (err)
-				return err;
-		}
+		err = security_secid_to_secctx(audit_sig_sid, &ctx, &len);
+		if (err)
+			return err;
 		sig_data = kmalloc(sizeof(*sig_data) + len, GFP_KERNEL);
 		if (!sig_data) {
-			if (audit_sig_sid)
-				security_release_secctx(ctx, len);
+			security_release_secctx(ctx, len);
 			return -ENOMEM;
 		}
 		sig_data->uid = audit_sig_uid;
 		sig_data->pid = audit_sig_pid;
-		if (audit_sig_sid) {
-			memcpy(sig_data->ctx, ctx, len);
-			security_release_secctx(ctx, len);
-		}
+		memcpy(sig_data->ctx, ctx, len);
+		security_release_secctx(ctx, len);
 		audit_send_reply(NETLINK_CB(skb).pid, seq, AUDIT_SIGNAL_INFO,
 				0, 0, sig_data, sizeof(*sig_data) + len);
 		kfree(sig_data);

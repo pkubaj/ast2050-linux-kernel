@@ -4,7 +4,6 @@
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/addrspace.h>
 #include <asm/page.h>
-#include <asm/thread_info.h>
 
 OUTPUT_ARCH(m32r)
 #if defined(__LITTLE_ENDIAN__)
@@ -41,26 +40,92 @@ SECTIONS
 #endif
   _etext = .;			/* End of text section */
 
-  EXCEPTION_TABLE(16)
-  NOTES
+  . = ALIGN(16);		/* Exception table */
+  __start___ex_table = .;
+  __ex_table : { *(__ex_table) }
+  __stop___ex_table = .;
 
   RODATA
-  RW_DATA_SECTION(32, PAGE_SIZE, THREAD_SIZE)
+
+  /* writeable */
+  .data : {			/* Data */
+	*(.spu)
+	*(.spi)
+	DATA_DATA
+	CONSTRUCTORS
+	}
+
+  . = ALIGN(4096);
+  __nosave_begin = .;
+  .data_nosave : { *(.data.nosave) }
+  . = ALIGN(4096);
+  __nosave_end = .;
+
+  . = ALIGN(32);
+  .data.cacheline_aligned : { *(.data.cacheline_aligned) }
+
   _edata = .;			/* End of data section */
 
+  . = ALIGN(8192);		/* init_task */
+  .data.init_task : { *(.data.init_task) }
+
   /* will be freed after init */
-  . = ALIGN(PAGE_SIZE);		/* Init code and data */
+  . = ALIGN(4096);		/* Init code and data */
   __init_begin = .;
-  INIT_TEXT_SECTION(PAGE_SIZE)
-  INIT_DATA_SECTION(16)
-  PERCPU(PAGE_SIZE)
-  . = ALIGN(PAGE_SIZE);
+  .init.text : {
+	_sinittext = .;
+	INIT_TEXT
+	_einittext = .;
+  }
+  .init.data : { INIT_DATA }
+  . = ALIGN(16);
+  __setup_start = .;
+  .init.setup : { *(.init.setup) }
+  __setup_end = .;
+  __initcall_start = .;
+  .initcall.init : {
+	INITCALLS
+  }
+  __initcall_end = .;
+  __con_initcall_start = .;
+  .con_initcall.init : { *(.con_initcall.init) }
+  __con_initcall_end = .;
+  SECURITY_INIT
+  . = ALIGN(4);
+  __alt_instructions = .;
+  .altinstructions : { *(.altinstructions) }
+  __alt_instructions_end = .;
+  .altinstr_replacement : { *(.altinstr_replacement) }
+  /* .exit.text is discard at runtime, not link time, to deal with references
+     from .altinstructions and .eh_frame */
+  .exit.text : { EXIT_TEXT }
+  .exit.data : { EXIT_DATA }
+
+#ifdef CONFIG_BLK_DEV_INITRD
+  . = ALIGN(4096);
+  __initramfs_start = .;
+  .init.ramfs : { *(.init.ramfs) }
+  __initramfs_end = .;
+#endif
+
+  PERCPU(4096)
+  . = ALIGN(4096);
   __init_end = .;
   /* freed after init ends here */
 
-  BSS_SECTION(0, 0, 4)
+  __bss_start = .;		/* BSS */
+  .bss : { *(.bss) }
+  . = ALIGN(4);
+  __bss_stop = .;
 
   _end = . ;
+
+  /* Sections to be discarded */
+  /DISCARD/ : {
+	EXIT_TEXT
+	EXIT_DATA
+	*(.exitcall.exit)
+	}
 
   /* Stabs debugging sections.  */
   .stab 0 : { *(.stab) }
@@ -70,7 +135,4 @@ SECTIONS
   .stab.index 0 : { *(.stab.index) }
   .stab.indexstr 0 : { *(.stab.indexstr) }
   .comment 0 : { *(.comment) }
-
-  /* Sections to be discarded */
-  DISCARDS
 }

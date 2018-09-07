@@ -229,7 +229,8 @@ static void hfsplus_put_super(struct super_block *sb)
 	iput(HFSPLUS_SB(sb).alloc_file);
 	iput(HFSPLUS_SB(sb).hidden_dir);
 	brelse(HFSPLUS_SB(sb).s_vhbh);
-	unload_nls(HFSPLUS_SB(sb).nls);
+	if (HFSPLUS_SB(sb).nls)
+		unload_nls(HFSPLUS_SB(sb).nls);
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
 
@@ -463,7 +464,8 @@ out:
 
 cleanup:
 	hfsplus_put_super(sb);
-	unload_nls(nls);
+	if (nls)
+		unload_nls(nls);
 	return err;
 }
 

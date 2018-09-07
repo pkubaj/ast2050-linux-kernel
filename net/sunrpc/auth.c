@@ -385,7 +385,7 @@ rpcauth_init_cred(struct rpc_cred *cred, const struct auth_cred *acred,
 EXPORT_SYMBOL_GPL(rpcauth_init_cred);
 
 void
-rpcauth_generic_bind_cred(struct rpc_task *task, struct rpc_cred *cred, int lookupflags)
+rpcauth_generic_bind_cred(struct rpc_task *task, struct rpc_cred *cred)
 {
 	task->tk_msg.rpc_cred = get_rpccred(cred);
 	dprintk("RPC: %5u holding %s cred %p\n", task->tk_pid,
@@ -394,7 +394,7 @@ rpcauth_generic_bind_cred(struct rpc_task *task, struct rpc_cred *cred, int look
 EXPORT_SYMBOL_GPL(rpcauth_generic_bind_cred);
 
 static void
-rpcauth_bind_root_cred(struct rpc_task *task, int lookupflags)
+rpcauth_bind_root_cred(struct rpc_task *task)
 {
 	struct rpc_auth *auth = task->tk_client->cl_auth;
 	struct auth_cred acred = {
@@ -405,7 +405,7 @@ rpcauth_bind_root_cred(struct rpc_task *task, int lookupflags)
 
 	dprintk("RPC: %5u looking up %s cred\n",
 		task->tk_pid, task->tk_client->cl_auth->au_ops->au_name);
-	ret = auth->au_ops->lookup_cred(auth, &acred, lookupflags);
+	ret = auth->au_ops->lookup_cred(auth, &acred, 0);
 	if (!IS_ERR(ret))
 		task->tk_msg.rpc_cred = ret;
 	else
@@ -413,14 +413,14 @@ rpcauth_bind_root_cred(struct rpc_task *task, int lookupflags)
 }
 
 static void
-rpcauth_bind_new_cred(struct rpc_task *task, int lookupflags)
+rpcauth_bind_new_cred(struct rpc_task *task)
 {
 	struct rpc_auth *auth = task->tk_client->cl_auth;
 	struct rpc_cred *ret;
 
 	dprintk("RPC: %5u looking up %s cred\n",
 		task->tk_pid, auth->au_ops->au_name);
-	ret = rpcauth_lookupcred(auth, lookupflags);
+	ret = rpcauth_lookupcred(auth, 0);
 	if (!IS_ERR(ret))
 		task->tk_msg.rpc_cred = ret;
 	else
@@ -430,16 +430,12 @@ rpcauth_bind_new_cred(struct rpc_task *task, int lookupflags)
 void
 rpcauth_bindcred(struct rpc_task *task, struct rpc_cred *cred, int flags)
 {
-	int lookupflags = 0;
-
-	if (flags & RPC_TASK_ASYNC)
-		lookupflags |= RPCAUTH_LOOKUP_NEW;
 	if (cred != NULL)
-		cred->cr_ops->crbind(task, cred, lookupflags);
+		cred->cr_ops->crbind(task, cred);
 	else if (flags & RPC_TASK_ROOTCREDS)
-		rpcauth_bind_root_cred(task, lookupflags);
+		rpcauth_bind_root_cred(task);
 	else
-		rpcauth_bind_new_cred(task, lookupflags);
+		rpcauth_bind_new_cred(task);
 }
 
 void

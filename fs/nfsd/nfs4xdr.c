@@ -168,10 +168,10 @@ static __be32 *read_buf(struct nfsd4_compoundargs *argp, u32 nbytes)
 	argp->p = page_address(argp->pagelist[0]);
 	argp->pagelist++;
 	if (argp->pagelen < PAGE_SIZE) {
-		argp->end = argp->p + (argp->pagelen>>2);
+		argp->end = p + (argp->pagelen>>2);
 		argp->pagelen = 0;
 	} else {
-		argp->end = argp->p + (PAGE_SIZE>>2);
+		argp->end = p + (PAGE_SIZE>>2);
 		argp->pagelen -= PAGE_SIZE;
 	}
 	memcpy(((char*)p)+avail, argp->p, (nbytes - avail));
@@ -1187,6 +1187,8 @@ nfsd4_decode_create_session(struct nfsd4_compoundargs *argp,
 			READ_BUF(4);
 			READ32(dummy);
 			READ_BUF(dummy * 4);
+			for (i = 0; i < dummy; ++i)
+				READ32(dummy);
 			break;
 		case RPC_AUTH_GSS:
 			dprintk("RPC_AUTH_GSS callback secflavor "
@@ -1202,6 +1204,7 @@ nfsd4_decode_create_session(struct nfsd4_compoundargs *argp,
 			READ_BUF(4);
 			READ32(dummy);
 			READ_BUF(dummy);
+			p += XDR_QUADLEN(dummy);
 			break;
 		default:
 			dprintk("Illegal callback secflavor\n");
@@ -1430,10 +1433,10 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 			argp->p = page_address(argp->pagelist[0]);
 			argp->pagelist++;
 			if (argp->pagelen < PAGE_SIZE) {
-				argp->end = argp->p + (argp->pagelen>>2);
+				argp->end = p + (argp->pagelen>>2);
 				argp->pagelen = 0;
 			} else {
-				argp->end = argp->p + (PAGE_SIZE>>2);
+				argp->end = p + (PAGE_SIZE>>2);
 				argp->pagelen -= PAGE_SIZE;
 			}
 		}
@@ -1596,8 +1599,7 @@ static __be32 nfsd4_encode_fs_location4(struct nfsd4_fs_location *location,
 static char *nfsd4_path(struct svc_rqst *rqstp, struct svc_export *exp, __be32 *stat)
 {
 	struct svc_fh tmp_fh;
-	char *path = NULL, *rootpath;
-	size_t rootlen;
+	char *path, *rootpath;
 
 	fh_init(&tmp_fh, NFS4_FHSIZE);
 	*stat = exp_pseudoroot(rqstp, &tmp_fh);
@@ -1607,18 +1609,14 @@ static char *nfsd4_path(struct svc_rqst *rqstp, struct svc_export *exp, __be32 *
 
 	path = exp->ex_pathname;
 
-	rootlen = strlen(rootpath);
-	if (strncmp(path, rootpath, rootlen)) {
+	if (strncmp(path, rootpath, strlen(rootpath))) {
 		dprintk("nfsd: fs_locations failed;"
 			"%s is not contained in %s\n", path, rootpath);
 		*stat = nfserr_notsupp;
-		path = NULL;
-		goto out;
+		return NULL;
 	}
-	path += rootlen;
-out:
-	fh_put(&tmp_fh);
-	return path;
+
+	return path + strlen(rootpath);
 }
 
 /*
@@ -1795,6 +1793,11 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 				goto out_nfserr;
 		}
 	}
+	if (bmval0 & FATTR4_WORD0_FS_LOCATIONS) {
+		if (exp->ex_fslocs.locations == NULL) {
+			bmval0 &= ~FATTR4_WORD0_FS_LOCATIONS;
+		}
+	}
 	if ((buflen -= 16) < 0)
 		goto out_resource;
 
@@ -1822,6 +1825,8 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 			goto out_resource;
 		if (!aclsupport)
 			word0 &= ~FATTR4_WORD0_ACL;
+		if (!exp->ex_fslocs.locations)
+			word0 &= ~FATTR4_WORD0_FS_LOCATIONS;
 		if (!word2) {
 			WRITE32(2);
 			WRITE32(word0);
@@ -1955,7 +1960,7 @@ out_acl:
 	if (bmval0 & FATTR4_WORD0_CASE_INSENSITIVE) {
 		if ((buflen -= 4) < 0)
 			goto out_resource;
-		WRITE32(0);
+		WRITE32(1);
 	}
 	if (bmval0 & FATTR4_WORD0_CASE_PRESERVING) {
 		if ((buflen -= 4) < 0)
@@ -2126,15 +2131,9 @@ out_acl:
 		 * and this is the root of a cross-mounted filesystem.
 		 */
 		if (ignore_crossmnt == 0 &&
-		    dentry == exp->ex_path.mnt->mnt_root) {
-			struct path path = exp->ex_path;
-			path_get(&path);
-			while (follow_up(&path)) {
-				if (path.dentry != path.mnt->mnt_root)
-					break;
-			}
-			err = vfs_getattr(path.mnt, path.dentry, &stat);
-			path_put(&path);
+		    exp->ex_path.mnt->mnt_root->d_inode == dentry->d_inode) {
+			err = vfs_getattr(exp->ex_path.mnt->mnt_parent,
+				exp->ex_path.mnt->mnt_mountpoint, &stat);
 			if (err)
 				goto out_nfserr;
 		}
@@ -2610,16 +2609,11 @@ nfsd4_encode_read(struct nfsd4_compoundres *resp, __be32 nfserr,
 	len = maxcount;
 	v = 0;
 	while (len > 0) {
-		pn = resp->rqstp->rq_resused;
-		if (!resp->rqstp->rq_respages[pn]) { /* ran out of pages */
-			maxcount -= len;
-			break;
-		}
+		pn = resp->rqstp->rq_resused++;
 		resp->rqstp->rq_vec[v].iov_base =
 			page_address(resp->rqstp->rq_respages[pn]);
 		resp->rqstp->rq_vec[v].iov_len =
 			len < PAGE_SIZE ? len : PAGE_SIZE;
-		resp->rqstp->rq_resused++;
 		v++;
 		len -= PAGE_SIZE;
 	}
@@ -2666,8 +2660,6 @@ nfsd4_encode_readlink(struct nfsd4_compoundres *resp, __be32 nfserr, struct nfsd
 	if (nfserr)
 		return nfserr;
 	if (resp->xbuf->page_len)
-		return nfserr_resource;
-	if (!resp->rqstp->rq_respages[resp->rqstp->rq_resused])
 		return nfserr_resource;
 
 	page = page_address(resp->rqstp->rq_respages[resp->rqstp->rq_resused++]);
@@ -2717,8 +2709,6 @@ nfsd4_encode_readdir(struct nfsd4_compoundres *resp, __be32 nfserr, struct nfsd4
 	if (nfserr)
 		return nfserr;
 	if (resp->xbuf->page_len)
-		return nfserr_resource;
-	if (!resp->rqstp->rq_respages[resp->rqstp->rq_resused])
 		return nfserr_resource;
 
 	RESERVE_SPACE(8);  /* verifier */
@@ -3074,7 +3064,6 @@ nfsd4_encode_sequence(struct nfsd4_compoundres *resp, int nfserr,
 	WRITE32(0);
 
 	ADJUST_ARGS();
-	resp->cstate.datap = p; /* DRC cache data pointer */
 	return 0;
 }
 
@@ -3177,7 +3166,7 @@ static int nfsd4_check_drc_limit(struct nfsd4_compoundres *resp)
 		return status;
 
 	session = resp->cstate.session;
-	if (session == NULL || slot->sl_cachethis == 0)
+	if (session == NULL || slot->sl_cache_entry.ce_cachethis == 0)
 		return status;
 
 	if (resp->opcnt >= args->opcnt)
@@ -3302,7 +3291,6 @@ nfs4svc_encode_compoundres(struct svc_rqst *rqstp, __be32 *p, struct nfsd4_compo
 	/*
 	 * All that remains is to write the tag and operation count...
 	 */
-	struct nfsd4_compound_state *cs = &resp->cstate;
 	struct kvec *iov;
 	p = resp->tagp;
 	*p++ = htonl(resp->taglen);
@@ -3316,11 +3304,17 @@ nfs4svc_encode_compoundres(struct svc_rqst *rqstp, __be32 *p, struct nfsd4_compo
 		iov = &rqstp->rq_res.head[0];
 	iov->iov_len = ((char*)resp->p) - (char*)iov->iov_base;
 	BUG_ON(iov->iov_len > PAGE_SIZE);
-	if (nfsd4_has_session(cs) && cs->status != nfserr_replay_cache) {
-		nfsd4_store_cache_entry(resp);
-		dprintk("%s: SET SLOT STATE TO AVAILABLE\n", __func__);
-		resp->cstate.slot->sl_inuse = false;
-		nfsd4_put_session(resp->cstate.session);
+	if (nfsd4_has_session(&resp->cstate)) {
+		if (resp->cstate.status == nfserr_replay_cache &&
+				!nfsd4_not_cached(resp)) {
+			iov->iov_len = resp->cstate.iovlen;
+		} else {
+			nfsd4_store_cache_entry(resp);
+			dprintk("%s: SET SLOT STATE TO AVAILABLE\n", __func__);
+			resp->cstate.slot->sl_inuse = 0;
+		}
+		if (resp->cstate.session)
+			nfsd4_put_session(resp->cstate.session);
 	}
 	return 1;
 }

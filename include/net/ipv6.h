@@ -358,7 +358,6 @@ enum ip6_defrag_users {
 	IP6_DEFRAG_LOCAL_DELIVER,
 	IP6_DEFRAG_CONNTRACK_IN,
 	IP6_DEFRAG_CONNTRACK_OUT,
-	IP6_DEFRAG_CONNTRACK_BRIDGE_IN,
 };
 
 struct ip6_create_arg {
@@ -448,8 +447,6 @@ static inline int ipv6_addr_diff(const struct in6_addr *a1, const struct in6_add
 {
 	return __ipv6_addr_diff(a1, a2, sizeof(struct in6_addr));
 }
-
-extern void ipv6_select_ident(struct frag_hdr *fhdr, struct rt6_info *rt);
 
 /*
  *	Prototypes exported by ipv6
@@ -548,7 +545,7 @@ extern int ipv6_find_tlv(struct sk_buff *skb, int offset, int type);
 extern int			ipv6_setsockopt(struct sock *sk, int level, 
 						int optname,
 						char __user *optval, 
-						unsigned int optlen);
+						int optlen);
 extern int			ipv6_getsockopt(struct sock *sk, int level, 
 						int optname,
 						char __user *optval, 
@@ -557,7 +554,7 @@ extern int			compat_ipv6_setsockopt(struct sock *sk,
 						int level,
 						int optname,
 						char __user *optval,
-						unsigned int optlen);
+						int optlen);
 extern int			compat_ipv6_getsockopt(struct sock *sk,
 						int level,
 						int optname,
@@ -567,8 +564,7 @@ extern int			compat_ipv6_getsockopt(struct sock *sk,
 extern int			ip6_datagram_connect(struct sock *sk, 
 						     struct sockaddr *addr, int addr_len);
 
-extern int 			ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len,
-						int *addr_len);
+extern int 			ipv6_recv_error(struct sock *sk, struct msghdr *msg, int len);
 extern void			ipv6_icmp_error(struct sock *sk, struct sk_buff *skb, int err, __be16 port,
 						u32 info, u8 *payload);
 extern void			ipv6_local_error(struct sock *sk, int err, struct flowi *fl, u32 info);

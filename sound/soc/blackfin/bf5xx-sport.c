@@ -326,7 +326,7 @@ static inline int sport_hook_tx_dummy(struct sport_device *sport)
 
 int sport_tx_start(struct sport_device *sport)
 {
-	unsigned long flags;
+	unsigned flags;
 	pr_debug("%s: tx_run:%d, rx_run:%d\n", __func__,
 			sport->tx_run, sport->rx_run);
 	if (sport->tx_run)

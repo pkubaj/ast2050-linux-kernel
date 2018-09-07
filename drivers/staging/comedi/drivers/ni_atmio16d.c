@@ -112,31 +112,27 @@ struct atmio16_board_t {
 
 static const struct atmio16_board_t atmio16_boards[] = {
 	{
-	 .name = "atmio16",
-	 .has_8255 = 0,
-	 },
+	.name = "atmio16",
+	.has_8255 = 0,
+		},
 	{
-	 .name = "atmio16d",
-	 .has_8255 = 1,
-	 },
+	.name = "atmio16d",
+	.has_8255 = 1,
+		},
 };
 
-#define n_atmio16_boards ARRAY_SIZE(atmio16_boards)
+#define n_atmio16_boards sizeof(atmio16_boards)/sizeof(atmio16_boards[0])
 
 #define boardtype ((const struct atmio16_board_t *)dev->board_ptr)
 
 /* function prototypes */
-static int atmio16d_attach(struct comedi_device *dev,
-			   struct comedi_devconfig *it);
+static int atmio16d_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int atmio16d_detach(struct comedi_device *dev);
 static irqreturn_t atmio16d_interrupt(int irq, void *d);
-static int atmio16d_ai_cmdtest(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_cmd *cmd);
-static int atmio16d_ai_cmd(struct comedi_device *dev,
-			   struct comedi_subdevice *s);
-static int atmio16d_ai_cancel(struct comedi_device *dev,
-			      struct comedi_subdevice *s);
+static int atmio16d_ai_cmdtest(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_cmd *cmd);
+static int atmio16d_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s);
+static int atmio16d_ai_cancel(struct comedi_device *dev, struct comedi_subdevice *s);
 static void reset_counters(struct comedi_device *dev);
 static void reset_atmio16d(struct comedi_device *dev);
 
@@ -155,39 +151,27 @@ COMEDI_INITCLEANUP(driver_atmio16d);
 
 /* range structs */
 static const struct comedi_lrange range_atmio16d_ai_10_bipolar = { 4, {
-								       BIP_RANGE
-								       (10),
-								       BIP_RANGE
-								       (1),
-								       BIP_RANGE
-								       (0.1),
-								       BIP_RANGE
-								       (0.02)
-								       }
+			BIP_RANGE(10),
+			BIP_RANGE(1),
+			BIP_RANGE(0.1),
+			BIP_RANGE(0.02)
+	}
 };
 
 static const struct comedi_lrange range_atmio16d_ai_5_bipolar = { 4, {
-								      BIP_RANGE
-								      (5),
-								      BIP_RANGE
-								      (0.5),
-								      BIP_RANGE
-								      (0.05),
-								      BIP_RANGE
-								      (0.01)
-								      }
+			BIP_RANGE(5),
+			BIP_RANGE(0.5),
+			BIP_RANGE(0.05),
+			BIP_RANGE(0.01)
+	}
 };
 
 static const struct comedi_lrange range_atmio16d_ai_unipolar = { 4, {
-								     UNI_RANGE
-								     (10),
-								     UNI_RANGE
-								     (1),
-								     UNI_RANGE
-								     (0.1),
-								     UNI_RANGE
-								     (0.02)
-								     }
+			UNI_RANGE(10),
+			UNI_RANGE(1),
+			UNI_RANGE(0.1),
+			UNI_RANGE(0.02)
+	}
 };
 
 /* private data struct */
@@ -287,9 +271,8 @@ static irqreturn_t atmio16d_interrupt(int irq, void *d)
 	return IRQ_HANDLED;
 }
 
-static int atmio16d_ai_cmdtest(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_cmd *cmd)
+static int atmio16d_ai_cmdtest(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_cmd *cmd)
 {
 	int err = 0, tmp;
 #ifdef DEBUG1
@@ -327,8 +310,8 @@ static int atmio16d_ai_cmdtest(struct comedi_device *dev,
 	/* step 2: make sure trigger sources are unique and mutually compatible */
 	/* note that mutual compatiblity is not an issue here */
 	if (cmd->scan_begin_src != TRIG_FOLLOW &&
-	    cmd->scan_begin_src != TRIG_EXT &&
-	    cmd->scan_begin_src != TRIG_TIMER)
+		cmd->scan_begin_src != TRIG_EXT &&
+		cmd->scan_begin_src != TRIG_TIMER)
 		err++;
 	if (cmd->stop_src != TRIG_COUNT && cmd->stop_src != TRIG_NONE)
 		err++;
@@ -389,8 +372,7 @@ static int atmio16d_ai_cmdtest(struct comedi_device *dev,
 	return 0;
 }
 
-static int atmio16d_ai_cmd(struct comedi_device *dev,
-			   struct comedi_subdevice *s)
+static int atmio16d_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	struct comedi_cmd *cmd = &s->async->cmd;
 	unsigned int timer, base_clock;
@@ -436,10 +418,10 @@ static int atmio16d_ai_cmd(struct comedi_device *dev,
 	} else if (cmd->convert_arg < 655360000) {
 		base_clock = CLOCK_100_KHZ;
 		timer = cmd->convert_arg / 10000;
-	} else if (cmd->convert_arg <= 0xffffffff /* 6553600000 */ ) {
+	} else if (cmd->convert_arg <= 0xffffffff /* 6553600000 */) {
 		base_clock = CLOCK_10_KHZ;
 		timer = cmd->convert_arg / 100000;
-	} else if (cmd->convert_arg <= 0xffffffff /* 65536000000 */ ) {
+	} else if (cmd->convert_arg <= 0xffffffff /* 65536000000 */) {
 		base_clock = CLOCK_1_KHZ;
 		timer = cmd->convert_arg / 1000000;
 	}
@@ -484,10 +466,10 @@ static int atmio16d_ai_cmd(struct comedi_device *dev,
 		tmp = sample_count & 0xFFFF;
 		if ((tmp == 0) || (tmp == 1)) {
 			outw((sample_count >> 16) & 0xFFFF,
-			     dev->iobase + AM9513A_DATA_REG);
+				dev->iobase + AM9513A_DATA_REG);
 		} else {
 			outw(((sample_count >> 16) & 0xFFFF) + 1,
-			     dev->iobase + AM9513A_DATA_REG);
+				dev->iobase + AM9513A_DATA_REG);
 		}
 		outw(0xFF70, dev->iobase + AM9513A_COM_REG);
 		devpriv->com_reg_1_state |= COMREG1_1632CNT;
@@ -504,10 +486,10 @@ static int atmio16d_ai_cmd(struct comedi_device *dev,
 		} else if (cmd->scan_begin_arg < 655360000) {
 			base_clock = CLOCK_100_KHZ;
 			timer = cmd->scan_begin_arg / 10000;
-		} else if (cmd->scan_begin_arg < 0xffffffff /* 6553600000 */ ) {
+		} else if (cmd->scan_begin_arg < 0xffffffff /* 6553600000 */) {
 			base_clock = CLOCK_10_KHZ;
 			timer = cmd->scan_begin_arg / 100000;
-		} else if (cmd->scan_begin_arg < 0xffffffff /* 65536000000 */ ) {
+		} else if (cmd->scan_begin_arg < 0xffffffff /* 65536000000 */) {
 			base_clock = CLOCK_1_KHZ;
 			timer = cmd->scan_begin_arg / 1000000;
 		}
@@ -540,8 +522,7 @@ static int atmio16d_ai_cmd(struct comedi_device *dev,
 }
 
 /* This will cancel a running acquisition operation */
-static int atmio16d_ai_cancel(struct comedi_device *dev,
-			      struct comedi_subdevice *s)
+static int atmio16d_ai_cancel(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	reset_atmio16d(dev);
 
@@ -549,9 +530,8 @@ static int atmio16d_ai_cancel(struct comedi_device *dev,
 }
 
 /* Mode 0 is used to get a single conversion on demand */
-static int atmio16d_ai_insn_read(struct comedi_device *dev,
-				 struct comedi_subdevice *s,
-				 struct comedi_insn *insn, unsigned int *data)
+static int atmio16d_ai_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i, t;
 	int chan;
@@ -609,9 +589,8 @@ static int atmio16d_ai_insn_read(struct comedi_device *dev,
 	return i;
 }
 
-static int atmio16d_ao_insn_read(struct comedi_device *dev,
-				 struct comedi_subdevice *s,
-				 struct comedi_insn *insn, unsigned int *data)
+static int atmio16d_ao_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 #ifdef DEBUG1
@@ -625,9 +604,8 @@ static int atmio16d_ao_insn_read(struct comedi_device *dev,
 	return i;
 }
 
-static int atmio16d_ao_insn_write(struct comedi_device *dev,
-				  struct comedi_subdevice *s,
-				  struct comedi_insn *insn, unsigned int *data)
+static int atmio16d_ao_insn_write(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan;
@@ -661,9 +639,8 @@ static int atmio16d_ao_insn_write(struct comedi_device *dev,
 	return i;
 }
 
-static int atmio16d_dio_insn_bits(struct comedi_device *dev,
-				  struct comedi_subdevice *s,
-				  struct comedi_insn *insn, unsigned int *data)
+static int atmio16d_dio_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -678,10 +655,8 @@ static int atmio16d_dio_insn_bits(struct comedi_device *dev,
 	return 2;
 }
 
-static int atmio16d_dio_insn_config(struct comedi_device *dev,
-				    struct comedi_subdevice *s,
-				    struct comedi_insn *insn,
-				    unsigned int *data)
+static int atmio16d_dio_insn_config(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int mask;
@@ -734,8 +709,7 @@ static int atmio16d_dio_insn_config(struct comedi_device *dev,
    options[12] - dac1 coding
  */
 
-static int atmio16d_attach(struct comedi_device *dev,
-			   struct comedi_devconfig *it)
+static int atmio16d_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	unsigned int irq;
 	unsigned long iobase;
@@ -869,7 +843,7 @@ static int atmio16d_attach(struct comedi_device *dev,
 	s->n_chan = 0;
 	s->maxdata = 0
 #endif
-	    printk("\n");
+		printk("\n");
 
 	return 0;
 }

@@ -52,7 +52,7 @@ static void write_prefix(FILE *f, int level)
 		fputc('\t', f);
 }
 
-static int isstring(char c)
+int isstring(char c)
 {
 	return (isprint(c)
 		|| (c == '\0')

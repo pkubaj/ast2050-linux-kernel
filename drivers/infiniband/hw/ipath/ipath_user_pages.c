@@ -33,7 +33,6 @@
 
 #include <linux/mm.h>
 #include <linux/device.h>
-#include <linux/sched.h>
 
 #include "ipath_kernel.h"
 

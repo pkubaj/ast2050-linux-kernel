@@ -53,6 +53,11 @@
 #include <linux/highmem.h>
 #include <linux/buffer_head.h>
 #include <linux/rbtree.h>
+#ifndef CONFIG_OCFS2_COMPAT_JBD
+# include <linux/jbd2.h>
+#else
+# include <linux/jbd.h>
+#endif
 
 #define MLOG_MASK_PREFIX ML_UPTODATE
 
@@ -70,76 +75,14 @@ struct ocfs2_meta_cache_item {
 
 static struct kmem_cache *ocfs2_uptodate_cachep = NULL;
 
-u64 ocfs2_metadata_cache_owner(struct ocfs2_caching_info *ci)
+void ocfs2_metadata_cache_init(struct inode *inode)
 {
-	BUG_ON(!ci || !ci->ci_ops);
+	struct ocfs2_inode_info *oi = OCFS2_I(inode);
+	struct ocfs2_caching_info *ci = &oi->ip_metadata_cache;
 
-	return ci->ci_ops->co_owner(ci);
-}
-
-struct super_block *ocfs2_metadata_cache_get_super(struct ocfs2_caching_info *ci)
-{
-	BUG_ON(!ci || !ci->ci_ops);
-
-	return ci->ci_ops->co_get_super(ci);
-}
-
-static void ocfs2_metadata_cache_lock(struct ocfs2_caching_info *ci)
-{
-	BUG_ON(!ci || !ci->ci_ops);
-
-	ci->ci_ops->co_cache_lock(ci);
-}
-
-static void ocfs2_metadata_cache_unlock(struct ocfs2_caching_info *ci)
-{
-	BUG_ON(!ci || !ci->ci_ops);
-
-	ci->ci_ops->co_cache_unlock(ci);
-}
-
-void ocfs2_metadata_cache_io_lock(struct ocfs2_caching_info *ci)
-{
-	BUG_ON(!ci || !ci->ci_ops);
-
-	ci->ci_ops->co_io_lock(ci);
-}
-
-void ocfs2_metadata_cache_io_unlock(struct ocfs2_caching_info *ci)
-{
-	BUG_ON(!ci || !ci->ci_ops);
-
-	ci->ci_ops->co_io_unlock(ci);
-}
-
-
-static void ocfs2_metadata_cache_reset(struct ocfs2_caching_info *ci,
-				       int clear)
-{
-	ci->ci_flags |= OCFS2_CACHE_FL_INLINE;
+	oi->ip_flags |= OCFS2_INODE_CACHE_INLINE;
 	ci->ci_num_cached = 0;
-
-	if (clear) {
-		ci->ci_created_trans = 0;
-		ci->ci_last_trans = 0;
-	}
 }
-
-void ocfs2_metadata_cache_init(struct ocfs2_caching_info *ci,
-			       const struct ocfs2_caching_operations *ops)
-{
-	BUG_ON(!ops);
-
-	ci->ci_ops = ops;
-	ocfs2_metadata_cache_reset(ci, 1);
-}
-
-void ocfs2_metadata_cache_exit(struct ocfs2_caching_info *ci)
-{
-	ocfs2_metadata_cache_purge(ci);
-	ocfs2_metadata_cache_reset(ci, 1);
-}
-
 
 /* No lock taken here as 'root' is not expected to be visible to other
  * processes. */
@@ -169,20 +112,19 @@ static unsigned int ocfs2_purge_copied_metadata_tree(struct rb_root *root)
  * This function is a few more lines longer than necessary due to some
  * accounting done here, but I think it's worth tracking down those
  * bugs sooner -- Mark */
-void ocfs2_metadata_cache_purge(struct ocfs2_caching_info *ci)
+void ocfs2_metadata_cache_purge(struct inode *inode)
 {
+	struct ocfs2_inode_info *oi = OCFS2_I(inode);
 	unsigned int tree, to_purge, purged;
+	struct ocfs2_caching_info *ci = &oi->ip_metadata_cache;
 	struct rb_root root = RB_ROOT;
 
-	BUG_ON(!ci || !ci->ci_ops);
-
-	ocfs2_metadata_cache_lock(ci);
-	tree = !(ci->ci_flags & OCFS2_CACHE_FL_INLINE);
+	spin_lock(&oi->ip_lock);
+	tree = !(oi->ip_flags & OCFS2_INODE_CACHE_INLINE);
 	to_purge = ci->ci_num_cached;
 
-	mlog(0, "Purge %u %s items from Owner %llu\n", to_purge,
-	     tree ? "array" : "tree",
-	     (unsigned long long)ocfs2_metadata_cache_owner(ci));
+	mlog(0, "Purge %u %s items from Inode %llu\n", to_purge,
+	     tree ? "array" : "tree", (unsigned long long)oi->ip_blkno);
 
 	/* If we're a tree, save off the root so that we can safely
 	 * initialize the cache. We do the work to free tree members
@@ -190,17 +132,16 @@ void ocfs2_metadata_cache_purge(struct ocfs2_caching_info *ci)
 	if (tree)
 		root = ci->ci_cache.ci_tree;
 
-	ocfs2_metadata_cache_reset(ci, 0);
-	ocfs2_metadata_cache_unlock(ci);
+	ocfs2_metadata_cache_init(inode);
+	spin_unlock(&oi->ip_lock);
 
 	purged = ocfs2_purge_copied_metadata_tree(&root);
 	/* If possible, track the number wiped so that we can more
 	 * easily detect counting errors. Unfortunately, this is only
 	 * meaningful for trees. */
 	if (tree && purged != to_purge)
-		mlog(ML_ERROR, "Owner %llu, count = %u, purged = %u\n",
-		     (unsigned long long)ocfs2_metadata_cache_owner(ci),
-		     to_purge, purged);
+		mlog(ML_ERROR, "Inode %llu, count = %u, purged = %u\n",
+		     (unsigned long long)oi->ip_blkno, to_purge, purged);
 }
 
 /* Returns the index in the cache array, -1 if not found.
@@ -241,25 +182,27 @@ ocfs2_search_cache_tree(struct ocfs2_caching_info *ci,
 	return NULL;
 }
 
-static int ocfs2_buffer_cached(struct ocfs2_caching_info *ci,
+static int ocfs2_buffer_cached(struct ocfs2_inode_info *oi,
 			       struct buffer_head *bh)
 {
 	int index = -1;
 	struct ocfs2_meta_cache_item *item = NULL;
 
-	ocfs2_metadata_cache_lock(ci);
+	spin_lock(&oi->ip_lock);
 
-	mlog(0, "Owner %llu, query block %llu (inline = %u)\n",
-	     (unsigned long long)ocfs2_metadata_cache_owner(ci),
+	mlog(0, "Inode %llu, query block %llu (inline = %u)\n",
+	     (unsigned long long)oi->ip_blkno,
 	     (unsigned long long) bh->b_blocknr,
-	     !!(ci->ci_flags & OCFS2_CACHE_FL_INLINE));
+	     !!(oi->ip_flags & OCFS2_INODE_CACHE_INLINE));
 
-	if (ci->ci_flags & OCFS2_CACHE_FL_INLINE)
-		index = ocfs2_search_cache_array(ci, bh->b_blocknr);
+	if (oi->ip_flags & OCFS2_INODE_CACHE_INLINE)
+		index = ocfs2_search_cache_array(&oi->ip_metadata_cache,
+						 bh->b_blocknr);
 	else
-		item = ocfs2_search_cache_tree(ci, bh->b_blocknr);
+		item = ocfs2_search_cache_tree(&oi->ip_metadata_cache,
+					       bh->b_blocknr);
 
-	ocfs2_metadata_cache_unlock(ci);
+	spin_unlock(&oi->ip_lock);
 
 	mlog(0, "index = %d, item = %p\n", index, item);
 
@@ -271,7 +214,7 @@ static int ocfs2_buffer_cached(struct ocfs2_caching_info *ci,
  * 
  * This can be called under lock_buffer()
  */
-int ocfs2_buffer_uptodate(struct ocfs2_caching_info *ci,
+int ocfs2_buffer_uptodate(struct inode *inode,
 			  struct buffer_head *bh)
 {
 	/* Doesn't matter if the bh is in our cache or not -- if it's
@@ -287,24 +230,24 @@ int ocfs2_buffer_uptodate(struct ocfs2_caching_info *ci,
 
 	/* Ok, locally the buffer is marked as up to date, now search
 	 * our cache to see if we can trust that. */
-	return ocfs2_buffer_cached(ci, bh);
+	return ocfs2_buffer_cached(OCFS2_I(inode), bh);
 }
 
-/*
+/* 
  * Determine whether a buffer is currently out on a read-ahead request.
- * ci_io_sem should be held to serialize submitters with the logic here.
+ * ip_io_sem should be held to serialize submitters with the logic here.
  */
-int ocfs2_buffer_read_ahead(struct ocfs2_caching_info *ci,
+int ocfs2_buffer_read_ahead(struct inode *inode,
 			    struct buffer_head *bh)
 {
-	return buffer_locked(bh) && ocfs2_buffer_cached(ci, bh);
+	return buffer_locked(bh) && ocfs2_buffer_cached(OCFS2_I(inode), bh);
 }
 
 /* Requires ip_lock */
 static void ocfs2_append_cache_array(struct ocfs2_caching_info *ci,
 				     sector_t block)
 {
-	BUG_ON(ci->ci_num_cached >= OCFS2_CACHE_INFO_MAX_ARRAY);
+	BUG_ON(ci->ci_num_cached >= OCFS2_INODE_MAX_CACHE_ARRAY);
 
 	mlog(0, "block %llu takes position %u\n", (unsigned long long) block,
 	     ci->ci_num_cached);
@@ -349,64 +292,66 @@ static void __ocfs2_insert_cache_tree(struct ocfs2_caching_info *ci,
 	ci->ci_num_cached++;
 }
 
-/* co_cache_lock() must be held */
-static inline int ocfs2_insert_can_use_array(struct ocfs2_caching_info *ci)
+static inline int ocfs2_insert_can_use_array(struct ocfs2_inode_info *oi,
+					     struct ocfs2_caching_info *ci)
 {
-	return (ci->ci_flags & OCFS2_CACHE_FL_INLINE) &&
-		(ci->ci_num_cached < OCFS2_CACHE_INFO_MAX_ARRAY);
+	assert_spin_locked(&oi->ip_lock);
+
+	return (oi->ip_flags & OCFS2_INODE_CACHE_INLINE) &&
+		(ci->ci_num_cached < OCFS2_INODE_MAX_CACHE_ARRAY);
 }
 
-/* tree should be exactly OCFS2_CACHE_INFO_MAX_ARRAY wide. NULL the
+/* tree should be exactly OCFS2_INODE_MAX_CACHE_ARRAY wide. NULL the
  * pointers in tree after we use them - this allows caller to detect
- * when to free in case of error.
- *
- * The co_cache_lock() must be held. */
-static void ocfs2_expand_cache(struct ocfs2_caching_info *ci,
+ * when to free in case of error. */
+static void ocfs2_expand_cache(struct ocfs2_inode_info *oi,
 			       struct ocfs2_meta_cache_item **tree)
 {
 	int i;
+	struct ocfs2_caching_info *ci = &oi->ip_metadata_cache;
 
-	mlog_bug_on_msg(ci->ci_num_cached != OCFS2_CACHE_INFO_MAX_ARRAY,
-			"Owner %llu, num cached = %u, should be %u\n",
-			(unsigned long long)ocfs2_metadata_cache_owner(ci),
-			ci->ci_num_cached, OCFS2_CACHE_INFO_MAX_ARRAY);
-	mlog_bug_on_msg(!(ci->ci_flags & OCFS2_CACHE_FL_INLINE),
-			"Owner %llu not marked as inline anymore!\n",
-			(unsigned long long)ocfs2_metadata_cache_owner(ci));
+	mlog_bug_on_msg(ci->ci_num_cached != OCFS2_INODE_MAX_CACHE_ARRAY,
+			"Inode %llu, num cached = %u, should be %u\n",
+			(unsigned long long)oi->ip_blkno, ci->ci_num_cached,
+			OCFS2_INODE_MAX_CACHE_ARRAY);
+	mlog_bug_on_msg(!(oi->ip_flags & OCFS2_INODE_CACHE_INLINE),
+			"Inode %llu not marked as inline anymore!\n",
+			(unsigned long long)oi->ip_blkno);
+	assert_spin_locked(&oi->ip_lock);
 
 	/* Be careful to initialize the tree members *first* because
 	 * once the ci_tree is used, the array is junk... */
-	for (i = 0; i < OCFS2_CACHE_INFO_MAX_ARRAY; i++)
+	for(i = 0; i < OCFS2_INODE_MAX_CACHE_ARRAY; i++)
 		tree[i]->c_block = ci->ci_cache.ci_array[i];
 
-	ci->ci_flags &= ~OCFS2_CACHE_FL_INLINE;
+	oi->ip_flags &= ~OCFS2_INODE_CACHE_INLINE;
 	ci->ci_cache.ci_tree = RB_ROOT;
 	/* this will be set again by __ocfs2_insert_cache_tree */
 	ci->ci_num_cached = 0;
 
-	for (i = 0; i < OCFS2_CACHE_INFO_MAX_ARRAY; i++) {
+	for(i = 0; i < OCFS2_INODE_MAX_CACHE_ARRAY; i++) {
 		__ocfs2_insert_cache_tree(ci, tree[i]);
 		tree[i] = NULL;
 	}
 
 	mlog(0, "Expanded %llu to a tree cache: flags 0x%x, num = %u\n",
-	     (unsigned long long)ocfs2_metadata_cache_owner(ci),
-	     ci->ci_flags, ci->ci_num_cached);
+	     (unsigned long long)oi->ip_blkno, oi->ip_flags, ci->ci_num_cached);
 }
 
 /* Slow path function - memory allocation is necessary. See the
  * comment above ocfs2_set_buffer_uptodate for more information. */
-static void __ocfs2_set_buffer_uptodate(struct ocfs2_caching_info *ci,
+static void __ocfs2_set_buffer_uptodate(struct ocfs2_inode_info *oi,
 					sector_t block,
 					int expand_tree)
 {
 	int i;
+	struct ocfs2_caching_info *ci = &oi->ip_metadata_cache;
 	struct ocfs2_meta_cache_item *new = NULL;
-	struct ocfs2_meta_cache_item *tree[OCFS2_CACHE_INFO_MAX_ARRAY] =
+	struct ocfs2_meta_cache_item *tree[OCFS2_INODE_MAX_CACHE_ARRAY] =
 		{ NULL, };
 
-	mlog(0, "Owner %llu, block %llu, expand = %d\n",
-	     (unsigned long long)ocfs2_metadata_cache_owner(ci),
+	mlog(0, "Inode %llu, block %llu, expand = %d\n",
+	     (unsigned long long)oi->ip_blkno,
 	     (unsigned long long)block, expand_tree);
 
 	new = kmem_cache_alloc(ocfs2_uptodate_cachep, GFP_NOFS);
@@ -419,7 +364,7 @@ static void __ocfs2_set_buffer_uptodate(struct ocfs2_caching_info *ci,
 	if (expand_tree) {
 		/* Do *not* allocate an array here - the removal code
 		 * has no way of tracking that. */
-		for (i = 0; i < OCFS2_CACHE_INFO_MAX_ARRAY; i++) {
+		for(i = 0; i < OCFS2_INODE_MAX_CACHE_ARRAY; i++) {
 			tree[i] = kmem_cache_alloc(ocfs2_uptodate_cachep,
 						   GFP_NOFS);
 			if (!tree[i]) {
@@ -431,21 +376,21 @@ static void __ocfs2_set_buffer_uptodate(struct ocfs2_caching_info *ci,
 		}
 	}
 
-	ocfs2_metadata_cache_lock(ci);
-	if (ocfs2_insert_can_use_array(ci)) {
+	spin_lock(&oi->ip_lock);
+	if (ocfs2_insert_can_use_array(oi, ci)) {
 		mlog(0, "Someone cleared the tree underneath us\n");
 		/* Ok, items were removed from the cache in between
 		 * locks. Detect this and revert back to the fast path */
 		ocfs2_append_cache_array(ci, block);
-		ocfs2_metadata_cache_unlock(ci);
+		spin_unlock(&oi->ip_lock);
 		goto out_free;
 	}
 
 	if (expand_tree)
-		ocfs2_expand_cache(ci, tree);
+		ocfs2_expand_cache(oi, tree);
 
 	__ocfs2_insert_cache_tree(ci, new);
-	ocfs2_metadata_cache_unlock(ci);
+	spin_unlock(&oi->ip_lock);
 
 	new = NULL;
 out_free:
@@ -455,14 +400,14 @@ out_free:
 	/* If these were used, then ocfs2_expand_cache re-set them to
 	 * NULL for us. */
 	if (tree[0]) {
-		for (i = 0; i < OCFS2_CACHE_INFO_MAX_ARRAY; i++)
+		for(i = 0; i < OCFS2_INODE_MAX_CACHE_ARRAY; i++)
 			if (tree[i])
 				kmem_cache_free(ocfs2_uptodate_cachep,
 						tree[i]);
 	}
 }
 
-/* Item insertion is guarded by co_io_lock(), so the insertion path takes
+/* Item insertion is guarded by ip_io_mutex, so the insertion path takes
  * advantage of this by not rechecking for a duplicate insert during
  * the slow case. Additionally, if the cache needs to be bumped up to
  * a tree, the code will not recheck after acquiring the lock --
@@ -480,55 +425,59 @@ out_free:
  * Readahead buffers can be passed in here before the I/O request is
  * completed.
  */
-void ocfs2_set_buffer_uptodate(struct ocfs2_caching_info *ci,
+void ocfs2_set_buffer_uptodate(struct inode *inode,
 			       struct buffer_head *bh)
 {
 	int expand;
+	struct ocfs2_inode_info *oi = OCFS2_I(inode);
+	struct ocfs2_caching_info *ci = &oi->ip_metadata_cache;
 
 	/* The block may very well exist in our cache already, so avoid
 	 * doing any more work in that case. */
-	if (ocfs2_buffer_cached(ci, bh))
+	if (ocfs2_buffer_cached(oi, bh))
 		return;
 
-	mlog(0, "Owner %llu, inserting block %llu\n",
-	     (unsigned long long)ocfs2_metadata_cache_owner(ci),
+	mlog(0, "Inode %llu, inserting block %llu\n",
+	     (unsigned long long)oi->ip_blkno,
 	     (unsigned long long)bh->b_blocknr);
 
 	/* No need to recheck under spinlock - insertion is guarded by
-	 * co_io_lock() */
-	ocfs2_metadata_cache_lock(ci);
-	if (ocfs2_insert_can_use_array(ci)) {
+	 * ip_io_mutex */
+	spin_lock(&oi->ip_lock);
+	if (ocfs2_insert_can_use_array(oi, ci)) {
 		/* Fast case - it's an array and there's a free
 		 * spot. */
 		ocfs2_append_cache_array(ci, bh->b_blocknr);
-		ocfs2_metadata_cache_unlock(ci);
+		spin_unlock(&oi->ip_lock);
 		return;
 	}
 
 	expand = 0;
-	if (ci->ci_flags & OCFS2_CACHE_FL_INLINE) {
+	if (oi->ip_flags & OCFS2_INODE_CACHE_INLINE) {
 		/* We need to bump things up to a tree. */
 		expand = 1;
 	}
-	ocfs2_metadata_cache_unlock(ci);
+	spin_unlock(&oi->ip_lock);
 
-	__ocfs2_set_buffer_uptodate(ci, bh->b_blocknr, expand);
+	__ocfs2_set_buffer_uptodate(oi, bh->b_blocknr, expand);
 }
 
 /* Called against a newly allocated buffer. Most likely nobody should
  * be able to read this sort of metadata while it's still being
- * allocated, but this is careful to take co_io_lock() anyway. */
-void ocfs2_set_new_buffer_uptodate(struct ocfs2_caching_info *ci,
+ * allocated, but this is careful to take ip_io_mutex anyway. */
+void ocfs2_set_new_buffer_uptodate(struct inode *inode,
 				   struct buffer_head *bh)
 {
+	struct ocfs2_inode_info *oi = OCFS2_I(inode);
+
 	/* This should definitely *not* exist in our cache */
-	BUG_ON(ocfs2_buffer_cached(ci, bh));
+	BUG_ON(ocfs2_buffer_cached(oi, bh));
 
 	set_buffer_uptodate(bh);
 
-	ocfs2_metadata_cache_io_lock(ci);
-	ocfs2_set_buffer_uptodate(ci, bh);
-	ocfs2_metadata_cache_io_unlock(ci);
+	mutex_lock(&oi->ip_io_mutex);
+	ocfs2_set_buffer_uptodate(inode, bh);
+	mutex_unlock(&oi->ip_io_mutex);
 }
 
 /* Requires ip_lock. */
@@ -538,7 +487,7 @@ static void ocfs2_remove_metadata_array(struct ocfs2_caching_info *ci,
 	sector_t *array = ci->ci_cache.ci_array;
 	int bytes;
 
-	BUG_ON(index < 0 || index >= OCFS2_CACHE_INFO_MAX_ARRAY);
+	BUG_ON(index < 0 || index >= OCFS2_INODE_MAX_CACHE_ARRAY);
 	BUG_ON(index >= ci->ci_num_cached);
 	BUG_ON(!ci->ci_num_cached);
 
@@ -566,19 +515,21 @@ static void ocfs2_remove_metadata_tree(struct ocfs2_caching_info *ci,
 	ci->ci_num_cached--;
 }
 
-static void ocfs2_remove_block_from_cache(struct ocfs2_caching_info *ci,
+static void ocfs2_remove_block_from_cache(struct inode *inode,
 					  sector_t block)
 {
 	int index;
 	struct ocfs2_meta_cache_item *item = NULL;
+	struct ocfs2_inode_info *oi = OCFS2_I(inode);
+	struct ocfs2_caching_info *ci = &oi->ip_metadata_cache;
 
-	ocfs2_metadata_cache_lock(ci);
-	mlog(0, "Owner %llu, remove %llu, items = %u, array = %u\n",
-	     (unsigned long long)ocfs2_metadata_cache_owner(ci),
+	spin_lock(&oi->ip_lock);
+	mlog(0, "Inode %llu, remove %llu, items = %u, array = %u\n",
+	     (unsigned long long)oi->ip_blkno,
 	     (unsigned long long) block, ci->ci_num_cached,
-	     ci->ci_flags & OCFS2_CACHE_FL_INLINE);
+	     oi->ip_flags & OCFS2_INODE_CACHE_INLINE);
 
-	if (ci->ci_flags & OCFS2_CACHE_FL_INLINE) {
+	if (oi->ip_flags & OCFS2_INODE_CACHE_INLINE) {
 		index = ocfs2_search_cache_array(ci, block);
 		if (index != -1)
 			ocfs2_remove_metadata_array(ci, index);
@@ -587,7 +538,7 @@ static void ocfs2_remove_block_from_cache(struct ocfs2_caching_info *ci,
 		if (item)
 			ocfs2_remove_metadata_tree(ci, item);
 	}
-	ocfs2_metadata_cache_unlock(ci);
+	spin_unlock(&oi->ip_lock);
 
 	if (item)
 		kmem_cache_free(ocfs2_uptodate_cachep, item);
@@ -598,24 +549,23 @@ static void ocfs2_remove_block_from_cache(struct ocfs2_caching_info *ci,
  * bother reverting things to an inlined array in the case of a remove
  * which moves us back under the limit.
  */
-void ocfs2_remove_from_cache(struct ocfs2_caching_info *ci,
+void ocfs2_remove_from_cache(struct inode *inode,
 			     struct buffer_head *bh)
 {
 	sector_t block = bh->b_blocknr;
 
-	ocfs2_remove_block_from_cache(ci, block);
+	ocfs2_remove_block_from_cache(inode, block);
 }
 
 /* Called when we remove xattr clusters from an inode. */
-void ocfs2_remove_xattr_clusters_from_cache(struct ocfs2_caching_info *ci,
+void ocfs2_remove_xattr_clusters_from_cache(struct inode *inode,
 					    sector_t block,
 					    u32 c_len)
 {
-	struct super_block *sb = ocfs2_metadata_cache_get_super(ci);
-	unsigned int i, b_len = ocfs2_clusters_to_blocks(sb, 1) * c_len;
+	unsigned int i, b_len = ocfs2_clusters_to_blocks(inode->i_sb, 1) * c_len;
 
 	for (i = 0; i < b_len; i++, block++)
-		ocfs2_remove_block_from_cache(ci, block);
+		ocfs2_remove_block_from_cache(inode, block);
 }
 
 int __init init_ocfs2_uptodate_cache(void)
@@ -627,7 +577,7 @@ int __init init_ocfs2_uptodate_cache(void)
 		return -ENOMEM;
 
 	mlog(0, "%u inlined cache items per inode.\n",
-	     OCFS2_CACHE_INFO_MAX_ARRAY);
+	     OCFS2_INODE_MAX_CACHE_ARRAY);
 
 	return 0;
 }

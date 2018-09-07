@@ -546,12 +546,11 @@ out:
 
 static unsigned long randomize_stack_top(unsigned long stack_top)
 {
-	unsigned long random_variable = 0;
+	unsigned int random_variable = 0;
 
 	if ((current->flags & PF_RANDOMIZE) &&
 		!(current->personality & ADDR_NO_RANDOMIZE)) {
-		random_variable = (unsigned long) get_random_int();
-		random_variable &= STACK_RND_MASK;
+		random_variable = get_random_int() & STACK_RND_MASK;
 		random_variable <<= PAGE_SHIFT;
 	}
 #ifdef CONFIG_STACK_GROWSUP
@@ -676,16 +675,16 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 			if (file_permission(interpreter, MAY_READ) < 0)
 				bprm->interp_flags |= BINPRM_FLAGS_ENFORCE_NONDUMP;
 
-			/* Get the exec headers */
-			retval = kernel_read(interpreter, 0,
-					     (void *)&loc->interp_elf_ex,
-					     sizeof(loc->interp_elf_ex));
-			if (retval != sizeof(loc->interp_elf_ex)) {
+			retval = kernel_read(interpreter, 0, bprm->buf,
+					     BINPRM_BUF_SIZE);
+			if (retval != BINPRM_BUF_SIZE) {
 				if (retval >= 0)
 					retval = -EIO;
 				goto out_free_dentry;
 			}
 
+			/* Get the exec headers */
+			loc->interp_elf_ex = *((struct elfhdr *)bprm->buf);
 			break;
 		}
 		elf_ppnt++;
@@ -1258,6 +1257,9 @@ static int writenote(struct memelfnote *men, struct file *file,
 #define DUMP_WRITE(addr, nr)	\
 	if ((size += (nr)) > limit || !dump_write(file, (addr), (nr))) \
 		goto end_coredump;
+#define DUMP_SEEK(off)	\
+	if (!dump_seek(file, (off))) \
+		goto end_coredump;
 
 static void fill_elf_header(struct elfhdr *elf, int segs,
 			    u16 machine, u32 flags, u8 osabi)
@@ -1453,7 +1455,7 @@ static int fill_thread_core_info(struct elf_thread_core_info *t,
 	for (i = 1; i < view->n; ++i) {
 		const struct user_regset *regset = &view->regsets[i];
 		do_thread_regset_writeback(t->task, regset);
-		if (regset->core_note_type && regset->get &&
+		if (regset->core_note_type &&
 		    (!regset->active || regset->active(t->task, regset))) {
 			int ret;
 			size_t size = regset->n * regset->size;
@@ -1689,13 +1691,24 @@ struct elf_note_info {
 	int numnote;
 };
 
-static int elf_note_info_init(struct elf_note_info *info)
+static int fill_note_info(struct elfhdr *elf, int phdrs,
+			  struct elf_note_info *info,
+			  long signr, struct pt_regs *regs)
 {
-	memset(info, 0, sizeof(*info));
+#define	NUM_NOTES	6
+	struct list_head *t;
+
+	info->notes = NULL;
+	info->prstatus = NULL;
+	info->psinfo = NULL;
+	info->fpu = NULL;
+#ifdef ELF_CORE_COPY_XFPREGS
+	info->xfpu = NULL;
+#endif
 	INIT_LIST_HEAD(&info->thread_list);
 
-	/* Allocate space for six ELF notes */
-	info->notes = kmalloc(6 * sizeof(struct memelfnote), GFP_KERNEL);
+	info->notes = kmalloc(NUM_NOTES * sizeof(struct memelfnote),
+			      GFP_KERNEL);
 	if (!info->notes)
 		return 0;
 	info->psinfo = kmalloc(sizeof(*info->psinfo), GFP_KERNEL);
@@ -1712,18 +1725,8 @@ static int elf_note_info_init(struct elf_note_info *info)
 	if (!info->xfpu)
 		return 0;
 #endif
-	return 1;
-}
 
-static int fill_note_info(struct elfhdr *elf, int phdrs,
-			  struct elf_note_info *info,
-			  long signr, struct pt_regs *regs)
-{
-	struct list_head *t;
-
-	if (!elf_note_info_init(info))
-		return 0;
-
+	info->thread_status_size = 0;
 	if (signr) {
 		struct core_thread *ct;
 		struct elf_thread_status *ets;
@@ -1783,6 +1786,8 @@ static int fill_note_info(struct elfhdr *elf, int phdrs,
 #endif
 
 	return 1;
+
+#undef NUM_NOTES
 }
 
 static size_t get_note_info_size(struct elf_note_info *info)
@@ -1988,8 +1993,7 @@ static int elf_core_dump(long signr, struct pt_regs *regs, struct file *file, un
 		goto end_coredump;
 
 	/* Align to page */
-	if (!dump_seek(file, dataoff - foffset))
-		goto end_coredump;
+	DUMP_SEEK(dataoff - foffset);
 
 	for (vma = first_vma(current, gate_vma); vma != NULL;
 			vma = next_vma(vma, gate_vma)) {
@@ -2000,19 +2004,33 @@ static int elf_core_dump(long signr, struct pt_regs *regs, struct file *file, un
 
 		for (addr = vma->vm_start; addr < end; addr += PAGE_SIZE) {
 			struct page *page;
-			int stop;
+			struct vm_area_struct *tmp_vma;
 
-			page = get_dump_page(addr);
-			if (page) {
-				void *kaddr = kmap(page);
-				stop = ((size += PAGE_SIZE) > limit) ||
-					!dump_write(file, kaddr, PAGE_SIZE);
-				kunmap(page);
+			if (get_user_pages(current, current->mm, addr, 1, 0, 1,
+						&page, &tmp_vma) <= 0) {
+				DUMP_SEEK(PAGE_SIZE);
+			} else {
+				if (page == ZERO_PAGE(0)) {
+					if (!dump_seek(file, PAGE_SIZE)) {
+						page_cache_release(page);
+						goto end_coredump;
+					}
+				} else {
+					void *kaddr;
+					flush_cache_page(tmp_vma, addr,
+							 page_to_pfn(page));
+					kaddr = kmap(page);
+					if ((size += PAGE_SIZE) > limit ||
+					    !dump_write(file, kaddr,
+					    PAGE_SIZE)) {
+						kunmap(page);
+						page_cache_release(page);
+						goto end_coredump;
+					}
+					kunmap(page);
+				}
 				page_cache_release(page);
-			} else
-				stop = !dump_seek(file, PAGE_SIZE);
-			if (stop)
-				goto end_coredump;
+			}
 		}
 	}
 

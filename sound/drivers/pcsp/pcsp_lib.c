@@ -39,20 +39,25 @@ static DECLARE_TASKLET(pcsp_pcm_tasklet, pcsp_call_pcm_elapsed, 0);
 /* write the port and returns the next expire time in ns;
  * called at the trigger-start and in hrtimer callback
  */
-static u64 pcsp_timer_update(struct snd_pcsp *chip)
+static unsigned long pcsp_timer_update(struct hrtimer *handle)
 {
 	unsigned char timer_cnt, val;
 	u64 ns;
 	struct snd_pcm_substream *substream;
 	struct snd_pcm_runtime *runtime;
+	struct snd_pcsp *chip = container_of(handle, struct snd_pcsp, timer);
 	unsigned long flags;
 
 	if (chip->thalf) {
 		outb(chip->val61, 0x61);
 		chip->thalf = 0;
+		if (!atomic_read(&chip->timer_active))
+			return 0;
 		return chip->ns_rem;
 	}
 
+	if (!atomic_read(&chip->timer_active))
+		return 0;
 	substream = chip->playback_substream;
 	if (!substream)
 		return 0;
@@ -83,17 +88,24 @@ static u64 pcsp_timer_update(struct snd_pcsp *chip)
 	return ns;
 }
 
-static void pcsp_pointer_update(struct snd_pcsp *chip)
+enum hrtimer_restart pcsp_do_timer(struct hrtimer *handle)
 {
+	struct snd_pcsp *chip = container_of(handle, struct snd_pcsp, timer);
 	struct snd_pcm_substream *substream;
+	int periods_elapsed, pointer_update;
 	size_t period_bytes, buffer_bytes;
-	int periods_elapsed;
+	unsigned long ns;
 	unsigned long flags;
+
+	pointer_update = !chip->thalf;
+	ns = pcsp_timer_update(handle);
+	if (!ns)
+		return HRTIMER_NORESTART;
 
 	/* update the playback position */
 	substream = chip->playback_substream;
 	if (!substream)
-		return;
+		return HRTIMER_NORESTART;
 
 	period_bytes = snd_pcm_lib_period_bytes(substream);
 	buffer_bytes = snd_pcm_lib_buffer_bytes(substream);
@@ -122,26 +134,6 @@ static void pcsp_pointer_update(struct snd_pcsp *chip)
 
 	if (periods_elapsed)
 		tasklet_schedule(&pcsp_pcm_tasklet);
-}
-
-enum hrtimer_restart pcsp_do_timer(struct hrtimer *handle)
-{
-	struct snd_pcsp *chip = container_of(handle, struct snd_pcsp, timer);
-	int pointer_update;
-	u64 ns;
-
-	if (!atomic_read(&chip->timer_active) || !chip->playback_substream)
-		return HRTIMER_NORESTART;
-
-	pointer_update = !chip->thalf;
-	ns = pcsp_timer_update(chip);
-	if (!ns) {
-		printk(KERN_WARNING "PCSP: unexpected stop\n");
-		return HRTIMER_NORESTART;
-	}
-
-	if (pointer_update)
-		pcsp_pointer_update(chip);
 
 	hrtimer_forward(handle, hrtimer_get_expires(handle), ns_to_ktime(ns));
 
@@ -150,6 +142,8 @@ enum hrtimer_restart pcsp_do_timer(struct hrtimer *handle)
 
 static int pcsp_start_playing(struct snd_pcsp *chip)
 {
+	unsigned long ns;
+
 #if PCSP_DEBUG
 	printk(KERN_INFO "PCSP: start_playing called\n");
 #endif
@@ -165,7 +159,11 @@ static int pcsp_start_playing(struct snd_pcsp *chip)
 	atomic_set(&chip->timer_active, 1);
 	chip->thalf = 0;
 
-	hrtimer_start(&pcsp_chip.timer, ktime_set(0, 0), HRTIMER_MODE_REL);
+	ns = pcsp_timer_update(&pcsp_chip.timer);
+	if (!ns)
+		return -EIO;
+
+	hrtimer_start(&pcsp_chip.timer, ktime_set(0, ns), HRTIMER_MODE_REL);
 	return 0;
 }
 
@@ -234,22 +232,21 @@ static int snd_pcsp_playback_hw_free(struct snd_pcm_substream *substream)
 static int snd_pcsp_playback_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_pcsp *chip = snd_pcm_substream_chip(substream);
+#if PCSP_DEBUG
+	printk(KERN_INFO "PCSP: prepare called, "
+			"size=%zi psize=%zi f=%zi f1=%i\n",
+			snd_pcm_lib_buffer_bytes(substream),
+			snd_pcm_lib_period_bytes(substream),
+			snd_pcm_lib_buffer_bytes(substream) /
+			snd_pcm_lib_period_bytes(substream),
+			substream->runtime->periods);
+#endif
 	pcsp_sync_stop(chip);
 	chip->playback_ptr = 0;
 	chip->period_ptr = 0;
 	chip->fmt_size =
 		snd_pcm_format_physical_width(substream->runtime->format) >> 3;
 	chip->is_signed = snd_pcm_format_signed(substream->runtime->format);
-#if PCSP_DEBUG
-	printk(KERN_INFO "PCSP: prepare called, "
-			"size=%zi psize=%zi f=%zi f1=%i fsize=%i\n",
-			snd_pcm_lib_buffer_bytes(substream),
-			snd_pcm_lib_period_bytes(substream),
-			snd_pcm_lib_buffer_bytes(substream) /
-			snd_pcm_lib_period_bytes(substream),
-			substream->runtime->periods,
-			chip->fmt_size);
-#endif
 	return 0;
 }
 

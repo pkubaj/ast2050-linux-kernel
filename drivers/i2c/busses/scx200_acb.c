@@ -217,10 +217,8 @@ static void scx200_acb_machine(struct scx200_acb_iface *iface, u8 status)
 	return;
 
  error:
-	dev_err(&iface->adapter.dev,
-		"%s in state %s (addr=0x%02x, len=%d, status=0x%02x)\n", errmsg,
-		scx200_acb_state_name[iface->state], iface->address_byte,
-		iface->len, status);
+	dev_err(&iface->adapter.dev, "%s in state %s\n", errmsg,
+		scx200_acb_state_name[iface->state]);
 
 	iface->state = state_idle;
 	iface->result = -EIO;

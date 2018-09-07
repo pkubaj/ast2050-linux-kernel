@@ -8,7 +8,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/capability.h>
 #include <linux/in.h>
 #include <linux/skbuff.h>
@@ -222,11 +222,16 @@ get_entry(void *base, unsigned int offset)
 
 /* All zeroes == unconditional rule. */
 /* Mildly perf critical (only if packet tracing is on) */
-static inline bool unconditional(const struct ip6t_ip6 *ipv6)
+static inline int
+unconditional(const struct ip6t_ip6 *ipv6)
 {
-	static const struct ip6t_ip6 uncond;
+	unsigned int i;
 
-	return memcmp(ipv6, &uncond, sizeof(uncond)) == 0;
+	for (i = 0; i < sizeof(*ipv6); i++)
+		if (((char *)ipv6)[i])
+			break;
+
+	return (i == sizeof(*ipv6));
 }
 
 #if defined(CONFIG_NETFILTER_XT_TARGET_TRACE) || \
@@ -740,21 +745,6 @@ find_check_entry(struct ip6t_entry *e, const char *name, unsigned int size,
 	return ret;
 }
 
-static bool check_underflow(struct ip6t_entry *e)
-{
-	const struct ip6t_entry_target *t;
-	unsigned int verdict;
-
-	if (!unconditional(&e->ipv6))
-		return false;
-	t = ip6t_get_target(e);
-	if (strcmp(t->u.user.name, XT_STANDARD_TARGET) != 0)
-		return false;
-	verdict = ((struct ip6t_standard_target *)t)->verdict;
-	verdict = -verdict - 1;
-	return verdict == NF_DROP || verdict == NF_ACCEPT;
-}
-
 static int
 check_entry_size_and_hooks(struct ip6t_entry *e,
 			   struct xt_table_info *newinfo,
@@ -762,7 +752,6 @@ check_entry_size_and_hooks(struct ip6t_entry *e,
 			   unsigned char *limit,
 			   const unsigned int *hook_entries,
 			   const unsigned int *underflows,
-			   unsigned int valid_hooks,
 			   unsigned int *i)
 {
 	unsigned int h;
@@ -782,20 +771,14 @@ check_entry_size_and_hooks(struct ip6t_entry *e,
 
 	/* Check hooks & underflows */
 	for (h = 0; h < NF_INET_NUMHOOKS; h++) {
-		if (!(valid_hooks & (1 << h)))
-			continue;
 		if ((unsigned char *)e - base == hook_entries[h])
 			newinfo->hook_entry[h] = hook_entries[h];
-		if ((unsigned char *)e - base == underflows[h]) {
-			if (!check_underflow(e)) {
-				pr_err("Underflows must be unconditional and "
-				       "use the STANDARD target with "
-				       "ACCEPT/DROP\n");
-				return -EINVAL;
-			}
+		if ((unsigned char *)e - base == underflows[h])
 			newinfo->underflow[h] = underflows[h];
-		}
 	}
+
+	/* FIXME: underflows must be unconditional, standard verdicts
+	   < 0 (not IP6T_RETURN). --RR */
 
 	/* Clear counters and comefrom */
 	e->counters = ((struct xt_counters) { 0, 0 });
@@ -859,7 +842,7 @@ translate_table(const char *name,
 				newinfo,
 				entry0,
 				entry0 + size,
-				hook_entries, underflows, valid_hooks, &i);
+				hook_entries, underflows, &i);
 	if (ret != 0)
 		return ret;
 
@@ -1164,10 +1147,10 @@ static int get_info(struct net *net, void __user *user, int *len, int compat)
 	if (t && !IS_ERR(t)) {
 		struct ip6t_getinfo info;
 		const struct xt_table_info *private = t->private;
-#ifdef CONFIG_COMPAT
-		struct xt_table_info tmp;
 
+#ifdef CONFIG_COMPAT
 		if (compat) {
+			struct xt_table_info tmp;
 			ret = compat_table_info(private, &tmp);
 			xt_compat_flush_offsets(AF_INET6);
 			private = &tmp;
@@ -1323,7 +1306,6 @@ do_replace(struct net *net, void __user *user, unsigned int len)
 	/* overflow check */
 	if (tmp.num_counters >= INT_MAX / sizeof(struct xt_counters))
 		return -ENOMEM;
-	tmp.name[sizeof(tmp.name)-1] = 0;
 
 	newinfo = xt_alloc_table_info(tmp.size);
 	if (!newinfo)
@@ -1856,7 +1838,6 @@ compat_do_replace(struct net *net, void __user *user, unsigned int len)
 		return -ENOMEM;
 	if (tmp.num_counters >= INT_MAX / sizeof(struct xt_counters))
 		return -ENOMEM;
-	tmp.name[sizeof(tmp.name)-1] = 0;
 
 	newinfo = xt_alloc_table_info(tmp.size);
 	if (!newinfo)
@@ -2081,7 +2062,6 @@ do_ip6t_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 			ret = -EFAULT;
 			break;
 		}
-		rev.name[sizeof(rev.name)-1] = 0;
 
 		if (cmd == IP6T_SO_GET_REVISION_TARGET)
 			target = 1;
@@ -2103,8 +2083,7 @@ do_ip6t_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	return ret;
 }
 
-struct xt_table *ip6t_register_table(struct net *net,
-				     const struct xt_table *table,
+struct xt_table *ip6t_register_table(struct net *net, struct xt_table *table,
 				     const struct ip6t_replace *repl)
 {
 	int ret;

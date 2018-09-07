@@ -190,12 +190,6 @@ static int temac_dma_bd_init(struct net_device *ndev)
 		       lp->rx_bd_p + (sizeof(*lp->rx_bd_v) * (RX_BD_NUM - 1)));
 	temac_dma_out32(lp, TX_CURDESC_PTR, lp->tx_bd_p);
 
-	/* Init descriptor indexes */
-	lp->tx_bd_ci = 0;
-	lp->tx_bd_next = 0;
-	lp->tx_bd_tail = 0;
-	lp->rx_bd_ci = 0;
-
 	return 0;
 }
 
@@ -597,7 +591,7 @@ static int temac_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	/* Kick off the transfer */
 	temac_dma_out32(lp, TX_TAILDESC_PTR, tail_p); /* DMA start */
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 
@@ -871,7 +865,7 @@ temac_of_probe(struct of_device *op, const struct of_device_id *match)
 	dcrs = dcr_resource_start(np, 0);
 	if (dcrs == 0) {
 		dev_err(&op->dev, "could not get DMA register address\n");
-		goto nodev;
+		goto nodev;;
 	}
 	lp->sdma_dcrs = dcr_map(np, dcrs, dcr_resource_len(np, 0));
 	dev_dbg(&op->dev, "DCR base: %x\n", dcrs);

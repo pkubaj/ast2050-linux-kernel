@@ -731,7 +731,6 @@ vxge_hw_channel_dtr_try_complete(struct __vxge_hw_channel *channel, void **dtrh)
 	vxge_assert(channel->compl_index < channel->length);
 
 	*dtrh =	channel->work_arr[channel->compl_index];
-	prefetch(*dtrh);
 }
 
 /*
@@ -1071,11 +1070,11 @@ static void __vxge_hw_non_offload_db_post(struct __vxge_hw_fifo *fifo,
 		VXGE_HW_NODBW_GET_NO_SNOOP(no_snoop),
 		&fifo->nofl_db->control_0);
 
-	mmiowb();
+	wmb();
 
 	writeq(txdl_ptr, &fifo->nofl_db->txdl_ptr);
+	wmb();
 
-	mmiowb();
 }
 
 /**
@@ -2509,8 +2508,7 @@ enum vxge_hw_status vxge_hw_vpath_poll_rx(struct __vxge_hw_ring *ring)
  * See also: vxge_hw_vpath_poll_tx().
  */
 enum vxge_hw_status vxge_hw_vpath_poll_tx(struct __vxge_hw_fifo *fifo,
-					struct sk_buff ***skb_ptr, int nr_skb,
-					int *more)
+					void **skb_ptr)
 {
 	enum vxge_hw_fifo_tcode t_code;
 	void *first_txdlh;
@@ -2522,8 +2520,8 @@ enum vxge_hw_status vxge_hw_vpath_poll_tx(struct __vxge_hw_fifo *fifo,
 	status = vxge_hw_fifo_txdl_next_completed(fifo,
 				&first_txdlh, &t_code);
 	if (status == VXGE_HW_OK)
-		if (fifo->callback(fifo, first_txdlh, t_code,
-			channel->userdata, skb_ptr, nr_skb, more) != VXGE_HW_OK)
+		if (fifo->callback(fifo, first_txdlh,
+			t_code, channel->userdata, skb_ptr) != VXGE_HW_OK)
 			status = VXGE_HW_COMPLETIONS_REMAIN;
 
 	return status;

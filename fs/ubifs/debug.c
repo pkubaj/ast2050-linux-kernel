@@ -210,20 +210,6 @@ const char *dbg_cstate(int cmt_state)
 	}
 }
 
-const char *dbg_jhead(int jhead)
-{
-	switch (jhead) {
-	case GCHD:
-		return "0 (GC)";
-	case BASEHD:
-		return "1 (base)";
-	case DATAHD:
-		return "2 (data)";
-	default:
-		return "unknown journal head";
-	}
-}
-
 static void dump_ch(const struct ubifs_ch *ch)
 {
 	printk(KERN_DEBUG "\tmagic          %#x\n", le32_to_cpu(ch->magic));
@@ -637,9 +623,8 @@ void dbg_dump_budg(struct ubifs_info *c)
 	/* If we are in R/O mode, journal heads do not exist */
 	if (c->jheads)
 		for (i = 0; i < c->jhead_cnt; i++)
-			printk(KERN_DEBUG "\tjhead %s\t LEB %d\n",
-			       dbg_jhead(c->jheads[i].wbuf.jhead),
-			       c->jheads[i].wbuf.lnum);
+			printk(KERN_DEBUG "\tjhead %d\t LEB %d\n",
+			       c->jheads[i].wbuf.jhead, c->jheads[i].wbuf.lnum);
 	for (rb = rb_first(&c->buds); rb; rb = rb_next(rb)) {
 		bud = rb_entry(rb, struct ubifs_bud, rb);
 		printk(KERN_DEBUG "\tbud LEB %d\n", bud->lnum);
@@ -663,90 +648,9 @@ void dbg_dump_budg(struct ubifs_info *c)
 
 void dbg_dump_lprop(const struct ubifs_info *c, const struct ubifs_lprops *lp)
 {
-	int i, spc, dark = 0, dead = 0;
-	struct rb_node *rb;
-	struct ubifs_bud *bud;
-
-	spc = lp->free + lp->dirty;
-	if (spc < c->dead_wm)
-		dead = spc;
-	else
-		dark = ubifs_calc_dark(c, spc);
-
-	if (lp->flags & LPROPS_INDEX)
-		printk(KERN_DEBUG "LEB %-7d free %-8d dirty %-8d used %-8d "
-		       "free + dirty %-8d flags %#x (", lp->lnum, lp->free,
-		       lp->dirty, c->leb_size - spc, spc, lp->flags);
-	else
-		printk(KERN_DEBUG "LEB %-7d free %-8d dirty %-8d used %-8d "
-		       "free + dirty %-8d dark %-4d dead %-4d nodes fit %-3d "
-		       "flags %#-4x (", lp->lnum, lp->free, lp->dirty,
-		       c->leb_size - spc, spc, dark, dead,
-		       (int)(spc / UBIFS_MAX_NODE_SZ), lp->flags);
-
-	if (lp->flags & LPROPS_TAKEN) {
-		if (lp->flags & LPROPS_INDEX)
-			printk(KERN_CONT "index, taken");
-		else
-			printk(KERN_CONT "taken");
-	} else {
-		const char *s;
-
-		if (lp->flags & LPROPS_INDEX) {
-			switch (lp->flags & LPROPS_CAT_MASK) {
-			case LPROPS_DIRTY_IDX:
-				s = "dirty index";
-				break;
-			case LPROPS_FRDI_IDX:
-				s = "freeable index";
-				break;
-			default:
-				s = "index";
-			}
-		} else {
-			switch (lp->flags & LPROPS_CAT_MASK) {
-			case LPROPS_UNCAT:
-				s = "not categorized";
-				break;
-			case LPROPS_DIRTY:
-				s = "dirty";
-				break;
-			case LPROPS_FREE:
-				s = "free";
-				break;
-			case LPROPS_EMPTY:
-				s = "empty";
-				break;
-			case LPROPS_FREEABLE:
-				s = "freeable";
-				break;
-			default:
-				s = NULL;
-				break;
-			}
-		}
-		printk(KERN_CONT "%s", s);
-	}
-
-	for (rb = rb_first((struct rb_root *)&c->buds); rb; rb = rb_next(rb)) {
-		bud = rb_entry(rb, struct ubifs_bud, rb);
-		if (bud->lnum == lp->lnum) {
-			int head = 0;
-			for (i = 0; i < c->jhead_cnt; i++) {
-				if (lp->lnum == c->jheads[i].wbuf.lnum) {
-					printk(KERN_CONT ", jhead %s",
-					       dbg_jhead(i));
-					head = 1;
-				}
-			}
-			if (!head)
-				printk(KERN_CONT ", bud of jhead %s",
-				       dbg_jhead(bud->jhead));
-		}
-	}
-	if (lp->lnum == c->gc_lnum)
-		printk(KERN_CONT ", GC LEB");
-	printk(KERN_CONT ")\n");
+	printk(KERN_DEBUG "LEB %d lprops: free %d, dirty %d (used %d), "
+	       "flags %#x\n", lp->lnum, lp->free, lp->dirty,
+	       c->leb_size - lp->free - lp->dirty, lp->flags);
 }
 
 void dbg_dump_lprops(struct ubifs_info *c)
@@ -820,7 +724,7 @@ void dbg_dump_leb(const struct ubifs_info *c, int lnum)
 
 	printk(KERN_DEBUG "(pid %d) start dumping LEB %d\n",
 	       current->pid, lnum);
-	sleb = ubifs_scan(c, lnum, 0, c->dbg->buf, 0);
+	sleb = ubifs_scan(c, lnum, 0, c->dbg->buf);
 	if (IS_ERR(sleb)) {
 		ubifs_err("scan error %d", (int)PTR_ERR(sleb));
 		return;
@@ -965,39 +869,11 @@ void dbg_dump_index(struct ubifs_info *c)
 void dbg_save_space_info(struct ubifs_info *c)
 {
 	struct ubifs_debug_info *d = c->dbg;
-	int freeable_cnt;
+
+	ubifs_get_lp_stats(c, &d->saved_lst);
 
 	spin_lock(&c->space_lock);
-	memcpy(&d->saved_lst, &c->lst, sizeof(struct ubifs_lp_stats));
-
-	/*
-	 * We use a dirty hack here and zero out @c->freeable_cnt, because it
-	 * affects the free space calculations, and UBIFS might not know about
-	 * all freeable eraseblocks. Indeed, we know about freeable eraseblocks
-	 * only when we read their lprops, and we do this only lazily, upon the
-	 * need. So at any given point of time @c->freeable_cnt might be not
-	 * exactly accurate.
-	 *
-	 * Just one example about the issue we hit when we did not zero
-	 * @c->freeable_cnt.
-	 * 1. The file-system is mounted R/O, c->freeable_cnt is %0. We save the
-	 *    amount of free space in @d->saved_free
-	 * 2. We re-mount R/W, which makes UBIFS to read the "lsave"
-	 *    information from flash, where we cache LEBs from various
-	 *    categories ('ubifs_remount_fs()' -> 'ubifs_lpt_init()'
-	 *    -> 'lpt_init_wr()' -> 'read_lsave()' -> 'ubifs_lpt_lookup()'
-	 *    -> 'ubifs_get_pnode()' -> 'update_cats()'
-	 *    -> 'ubifs_add_to_cat()').
-	 * 3. Lsave contains a freeable eraseblock, and @c->freeable_cnt
-	 *    becomes %1.
-	 * 4. We calculate the amount of free space when the re-mount is
-	 *    finished in 'dbg_check_space_info()' and it does not match
-	 *    @d->saved_free.
-	 */
-	freeable_cnt = c->freeable_cnt;
-	c->freeable_cnt = 0;
 	d->saved_free = ubifs_get_free_space_nolock(c);
-	c->freeable_cnt = freeable_cnt;
 	spin_unlock(&c->space_lock);
 }
 
@@ -1014,15 +890,12 @@ int dbg_check_space_info(struct ubifs_info *c)
 {
 	struct ubifs_debug_info *d = c->dbg;
 	struct ubifs_lp_stats lst;
-	long long free;
-	int freeable_cnt;
+	long long avail, free;
 
 	spin_lock(&c->space_lock);
-	freeable_cnt = c->freeable_cnt;
-	c->freeable_cnt = 0;
-	free = ubifs_get_free_space_nolock(c);
-	c->freeable_cnt = freeable_cnt;
+	avail = ubifs_calc_available(c, c->min_idx_lebs);
 	spin_unlock(&c->space_lock);
+	free = ubifs_get_free_space(c);
 
 	if (free != d->saved_free) {
 		ubifs_err("free space changed from %lld to %lld",
@@ -1036,10 +909,8 @@ out:
 	ubifs_msg("saved lprops statistics dump");
 	dbg_dump_lstats(&d->saved_lst);
 	ubifs_get_lp_stats(c, &lst);
-
 	ubifs_msg("current lprops statistics dump");
-	dbg_dump_lstats(&lst);
-
+	dbg_dump_lstats(&d->saved_lst);
 	spin_lock(&c->space_lock);
 	dbg_dump_budg(c);
 	spin_unlock(&c->space_lock);
@@ -2691,19 +2562,19 @@ int dbg_debugfs_init_fs(struct ubifs_info *c)
 	}
 
 	fname = "dump_lprops";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, c, &dfs_fops);
+	dent = debugfs_create_file(fname, S_IWUGO, d->dfs_dir, c, &dfs_fops);
 	if (IS_ERR(dent))
 		goto out_remove;
 	d->dfs_dump_lprops = dent;
 
 	fname = "dump_budg";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, c, &dfs_fops);
+	dent = debugfs_create_file(fname, S_IWUGO, d->dfs_dir, c, &dfs_fops);
 	if (IS_ERR(dent))
 		goto out_remove;
 	d->dfs_dump_budg = dent;
 
 	fname = "dump_tnc";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, c, &dfs_fops);
+	dent = debugfs_create_file(fname, S_IWUGO, d->dfs_dir, c, &dfs_fops);
 	if (IS_ERR(dent))
 		goto out_remove;
 	d->dfs_dump_tnc = dent;

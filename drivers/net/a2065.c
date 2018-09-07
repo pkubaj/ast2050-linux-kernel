@@ -547,18 +547,17 @@ static void lance_tx_timeout(struct net_device *dev)
 	netif_wake_queue(dev);
 }
 
-static netdev_tx_t lance_start_xmit (struct sk_buff *skb,
-				     struct net_device *dev)
+static int lance_start_xmit (struct sk_buff *skb, struct net_device *dev)
 {
 	struct lance_private *lp = netdev_priv(dev);
 	volatile struct lance_regs *ll = lp->ll;
 	volatile struct lance_init_block *ib = lp->init_block;
 	int entry, skblen;
-	int status = NETDEV_TX_OK;
+	int status = 0;
 	unsigned long flags;
 
 	if (skb_padto(skb, ETH_ZLEN))
-		return NETDEV_TX_OK;
+		return 0;
 	skblen = max_t(unsigned, skb->len, ETH_ZLEN);
 
 	local_irq_save(flags);

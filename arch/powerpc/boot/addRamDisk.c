@@ -58,7 +58,7 @@ static int check_elf64(void *p, int size, struct addr_range *r)
 
 	return 64;
 }
-static void get4k(FILE *file, char *buf )
+void get4k(FILE *file, char *buf )
 {
 	unsigned j;
 	unsigned num = fread(buf, 1, 4096, file);
@@ -66,12 +66,12 @@ static void get4k(FILE *file, char *buf )
 		buf[j] = 0;
 }
 
-static void put4k(FILE *file, char *buf )
+void put4k(FILE *file, char *buf )
 {
 	fwrite(buf, 1, 4096, file);
 }
 
-static void death(const char *msg, FILE *fdesc, const char *fname)
+void death(const char *msg, FILE *fdesc, const char *fname) 
 {
 	fprintf(stderr, msg);
 	fclose(fdesc);

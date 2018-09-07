@@ -52,7 +52,6 @@ struct per_cpu_dm_data {
 
 struct dm_hw_stat_delta {
 	struct net_device *dev;
-	unsigned long last_rx;
 	struct list_head list;
 	struct rcu_head rcu;
 	unsigned long last_drop_val;
@@ -63,6 +62,7 @@ static struct genl_family net_drop_monitor_family = {
 	.hdrsize        = 0,
 	.name           = "NET_DM",
 	.version        = 2,
+	.maxattr        = NET_DM_CMD_MAX,
 };
 
 static DEFINE_PER_CPU(struct per_cpu_dm_data, dm_cpu_data);
@@ -180,25 +180,17 @@ static void trace_napi_poll_hit(struct napi_struct *napi)
 	struct dm_hw_stat_delta *new_stat;
 
 	/*
-	 * Don't check napi structures with no associated device
+	 * Ratelimit our check time to dm_hw_check_delta jiffies
 	 */
-	if (!napi->dev)
+	if (!time_after(jiffies, napi->dev->last_rx + dm_hw_check_delta))
 		return;
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(new_stat, &hw_stats_list, list) {
-		/*
-		 * only add a note to our monitor buffer if:
-		 * 1) this is the dev we received on
-		 * 2) its after the last_rx delta
-		 * 3) our rx_dropped count has gone up
-		 */
 		if ((new_stat->dev == napi->dev)  &&
-		    (time_after(jiffies, new_stat->last_rx + dm_hw_check_delta)) &&
 		    (napi->dev->stats.rx_dropped != new_stat->last_drop_val)) {
 			trace_drop_common(NULL, NULL);
 			new_stat->last_drop_val = napi->dev->stats.rx_dropped;
-			new_stat->last_rx = jiffies;
 			break;
 		}
 	}
@@ -294,7 +286,6 @@ static int dropmon_net_event(struct notifier_block *ev_block,
 			goto out;
 
 		new_stat->dev = dev;
-		new_stat->last_rx = jiffies;
 		INIT_RCU_HEAD(&new_stat->rcu);
 		spin_lock(&trace_state_lock);
 		list_add_rcu(&new_stat->list, &hw_stats_list);

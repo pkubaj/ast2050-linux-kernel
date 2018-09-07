@@ -60,7 +60,7 @@ static int relay_buf_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 /*
  * vm_ops for relay file mappings.
  */
-static const struct vm_operations_struct relay_file_mmap_ops = {
+static struct vm_operations_struct relay_file_mmap_ops = {
 	.fault = relay_buf_fault,
 	.close = relay_file_mmap_close,
 };
@@ -171,14 +171,10 @@ depopulate:
  */
 static struct rchan_buf *relay_create_buf(struct rchan *chan)
 {
-	struct rchan_buf *buf;
-
-	if (chan->n_subbufs > UINT_MAX / sizeof(size_t *))
-		return NULL;
-
-	buf = kzalloc(sizeof(struct rchan_buf), GFP_KERNEL);
+	struct rchan_buf *buf = kzalloc(sizeof(struct rchan_buf), GFP_KERNEL);
 	if (!buf)
 		return NULL;
+
 	buf->padding = kmalloc(chan->n_subbufs * sizeof(size_t *), GFP_KERNEL);
 	if (!buf->padding)
 		goto free_buf;
@@ -584,8 +580,6 @@ struct rchan *relay_open(const char *base_filename,
 	struct rchan *chan;
 
 	if (!(subbuf_size && n_subbufs))
-		return NULL;
-	if (subbuf_size > UINT_MAX / n_subbufs)
 		return NULL;
 
 	chan = kzalloc(sizeof(struct rchan), GFP_KERNEL);

@@ -204,7 +204,6 @@ static void amba_device_release(struct device *dev)
 int amba_device_register(struct amba_device *dev, struct resource *parent)
 {
 	u32 pid, cid;
-	u32 size;
 	void __iomem *tmp;
 	int i, ret;
 
@@ -230,25 +229,16 @@ int amba_device_register(struct amba_device *dev, struct resource *parent)
 	if (ret)
 		goto err_out;
 
-	/*
-	 * Dynamically calculate the size of the resource
-	 * and use this for iomap
-	 */
-	size = resource_size(&dev->res);
-	tmp = ioremap(dev->res.start, size);
+	tmp = ioremap(dev->res.start, SZ_4K);
 	if (!tmp) {
 		ret = -ENOMEM;
 		goto err_release;
 	}
 
-	/*
-	 * Read pid and cid based on size of resource
-	 * they are located at end of region
-	 */
 	for (pid = 0, i = 0; i < 4; i++)
-		pid |= (readl(tmp + size - 0x20 + 4 * i) & 255) << (i * 8);
+		pid |= (readl(tmp + 0xfe0 + 4 * i) & 255) << (i * 8);
 	for (cid = 0, i = 0; i < 4; i++)
-		cid |= (readl(tmp + size - 0x10 + 4 * i) & 255) << (i * 8);
+		cid |= (readl(tmp + 0xff0 + 4 * i) & 255) << (i * 8);
 
 	iounmap(tmp);
 
@@ -363,14 +353,11 @@ amba_find_device(const char *busid, struct device *parent, unsigned int id,
 int amba_request_regions(struct amba_device *dev, const char *name)
 {
 	int ret = 0;
-	u32 size;
 
 	if (!name)
 		name = dev->dev.driver->name;
 
-	size = resource_size(&dev->res);
-
-	if (!request_mem_region(dev->res.start, size, name))
+	if (!request_mem_region(dev->res.start, SZ_4K, name))
 		ret = -EBUSY;
 
 	return ret;
@@ -384,10 +371,7 @@ int amba_request_regions(struct amba_device *dev, const char *name)
  */
 void amba_release_regions(struct amba_device *dev)
 {
-	u32 size;
-
-	size = resource_size(&dev->res);
-	release_mem_region(dev->res.start, size);
+	release_mem_region(dev->res.start, SZ_4K);
 }
 
 EXPORT_SYMBOL(amba_driver_register);

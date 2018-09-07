@@ -16,9 +16,10 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
+ *
  * File: power.h
  *
- * Purpose: Handles 802.11 power management  functions
+ * Purpose: Handles 802.11 power managment  functions
  *
  * Author: Lyndon Chen
  *

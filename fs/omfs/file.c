@@ -322,7 +322,7 @@ static sector_t omfs_bmap(struct address_space *mapping, sector_t block)
 	return generic_block_bmap(mapping, block, omfs_get_block);
 }
 
-const struct file_operations omfs_file_operations = {
+struct file_operations omfs_file_operations = {
 	.llseek = generic_file_llseek,
 	.read = do_sync_read,
 	.write = do_sync_write,
@@ -333,11 +333,11 @@ const struct file_operations omfs_file_operations = {
 	.splice_read = generic_file_splice_read,
 };
 
-const struct inode_operations omfs_file_inops = {
+struct inode_operations omfs_file_inops = {
 	.truncate = omfs_truncate
 };
 
-const struct address_space_operations omfs_aops = {
+struct address_space_operations omfs_aops = {
 	.readpage = omfs_readpage,
 	.readpages = omfs_readpages,
 	.writepage = omfs_writepage,

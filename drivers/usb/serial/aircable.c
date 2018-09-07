@@ -554,12 +554,13 @@ static void aircable_throttle(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct aircable_private *priv = usb_get_serial_port_data(port);
+	unsigned long flags;
 
 	dbg("%s - port %d", __func__, port->number);
 
-	spin_lock_irq(&priv->rx_lock);
+	spin_lock_irqsave(&priv->rx_lock, flags);
 	priv->rx_flags |= THROTTLED;
-	spin_unlock_irq(&priv->rx_lock);
+	spin_unlock_irqrestore(&priv->rx_lock, flags);
 }
 
 /* Based on ftdi_sio.c unthrottle */
@@ -568,13 +569,14 @@ static void aircable_unthrottle(struct tty_struct *tty)
 	struct usb_serial_port *port = tty->driver_data;
 	struct aircable_private *priv = usb_get_serial_port_data(port);
 	int actually_throttled;
+	unsigned long flags;
 
 	dbg("%s - port %d", __func__, port->number);
 
-	spin_lock_irq(&priv->rx_lock);
+	spin_lock_irqsave(&priv->rx_lock, flags);
 	actually_throttled = priv->rx_flags & ACTUALLY_THROTTLED;
 	priv->rx_flags &= ~(THROTTLED | ACTUALLY_THROTTLED);
-	spin_unlock_irq(&priv->rx_lock);
+	spin_unlock_irqrestore(&priv->rx_lock, flags);
 
 	if (actually_throttled)
 		schedule_work(&priv->rx_work);

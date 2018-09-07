@@ -75,11 +75,11 @@ config MPC837x_MDS
 	  This option enables support for the MPC837x MDS Processor Board.
 
 config MPC837x_RDB
-	bool "Freescale MPC837x RDB/WLAN"
+	bool "Freescale MPC837x RDB"
 	select DEFAULT_UIMAGE
 	select PPC_MPC837x
 	help
-	  This option enables support for the MPC837x RDB and WLAN Boards.
+	  This option enables support for the MPC837x RDB Board.
 
 config SBC834x
 	bool "Wind River SBC834x"

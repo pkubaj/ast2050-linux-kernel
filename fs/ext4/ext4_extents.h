@@ -43,7 +43,8 @@
 #define CHECK_BINSEARCH__
 
 /*
- * Turn on EXT_DEBUG to get lots of info about extents operations.
+ * If EXT_DEBUG is defined you can use the 'extdebug' mount option
+ * to get lots of info about what's going on.
  */
 #define EXT_DEBUG__
 #ifdef EXT_DEBUG
@@ -137,11 +138,7 @@ typedef int (*ext_prepare_callback)(struct inode *, struct ext4_ext_path *,
 #define EXT_BREAK      1
 #define EXT_REPEAT     2
 
-/*
- * Maximum number of logical blocks in a file; ext4_extent's ee_block is
- * __le32.
- */
-#define EXT_MAX_BLOCKS	0xffffffff
+#define EXT_MAX_BLOCK	0xffffffff
 
 /*
  * EXT_INIT_MAX_LEN is the maximum number of blocks we can have in an
@@ -228,8 +225,7 @@ static inline void ext4_ext_mark_initialized(struct ext4_extent *ext)
 	ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(ext));
 }
 
-extern int ext4_ext_calc_metadata_amount(struct inode *inode,
-					 sector_t lblocks);
+extern int ext4_ext_calc_metadata_amount(struct inode *inode, int blocks);
 extern ext4_fsblk_t ext_pblock(struct ext4_extent *ex);
 extern ext4_fsblk_t idx_pblock(struct ext4_extent_idx *);
 extern void ext4_ext_store_pblock(struct ext4_extent *, ext4_fsblk_t);

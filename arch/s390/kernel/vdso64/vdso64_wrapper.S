@@ -1,8 +1,7 @@
 #include <linux/init.h>
-#include <linux/linkage.h>
 #include <asm/page.h>
 
-	__PAGE_ALIGNED_DATA
+	.section ".data.page_aligned"
 
 	.globl vdso64_start, vdso64_end
 	.balign PAGE_SIZE

@@ -326,43 +326,6 @@ void tcp_enter_memory_pressure(struct sock *sk)
 
 EXPORT_SYMBOL(tcp_enter_memory_pressure);
 
-/* Convert seconds to retransmits based on initial and max timeout */
-static u8 secs_to_retrans(int seconds, int timeout, int rto_max)
-{
-	u8 res = 0;
-
-	if (seconds > 0) {
-		int period = timeout;
-
-		res = 1;
-		while (seconds > period && res < 255) {
-			res++;
-			timeout <<= 1;
-			if (timeout > rto_max)
-				timeout = rto_max;
-			period += timeout;
-		}
-	}
-	return res;
-}
-
-/* Convert retransmits to seconds based on initial and max timeout */
-static int retrans_to_secs(u8 retrans, int timeout, int rto_max)
-{
-	int period = 0;
-
-	if (retrans > 0) {
-		period = timeout;
-		while (--retrans) {
-			timeout <<= 1;
-			if (timeout > rto_max)
-				timeout = rto_max;
-			period += timeout;
-		}
-	}
-	return period;
-}
-
 /*
  *	Wait for a TCP event.
  *
@@ -386,6 +349,8 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	 */
 
 	mask = 0;
+	if (sk->sk_err)
+		mask = POLLERR;
 
 	/*
 	 * POLLHUP is certainly not done right. But poll() doesn't
@@ -449,17 +414,11 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 				if (sk_stream_wspace(sk) >= sk_stream_min_wspace(sk))
 					mask |= POLLOUT | POLLWRNORM;
 			}
-		} else
-			mask |= POLLOUT | POLLWRNORM;
+		}
 
 		if (tp->urg_data & TCP_URG_VALID)
 			mask |= POLLPRI;
 	}
-	/* This barrier is coupled with smp_wmb() in tcp_reset() */
-	smp_rmb();
-	if (sk->sk_err)
-		mask |= POLLERR;
-
 	return mask;
 }
 
@@ -621,7 +580,7 @@ ssize_t tcp_splice_read(struct socket *sock, loff_t *ppos,
 
 	lock_sock(sk);
 
-	timeo = sock_rcvtimeo(sk, sock->file->f_flags & O_NONBLOCK);
+	timeo = sock_rcvtimeo(sk, flags & SPLICE_F_NONBLOCK);
 	while (tss.len) {
 		ret = __tcp_splice_read(sk, &tss);
 		if (ret < 0)
@@ -838,7 +797,8 @@ new_segment:
 wait_for_sndbuf:
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 wait_for_memory:
-		tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
+		if (copied)
+			tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
 
 		if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 			goto do_error;
@@ -847,7 +807,7 @@ wait_for_memory:
 	}
 
 out:
-	if (copied && !(flags & MSG_SENDPAGE_NOTLAST))
+	if (copied)
 		tcp_push(sk, flags, mss_now, tp->nonagle);
 	return copied;
 
@@ -937,7 +897,7 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 		goto out_err;
 
 	while (--iovlen >= 0) {
-		size_t seglen = iov->iov_len;
+		int seglen = iov->iov_len;
 		unsigned char __user *from = iov->iov_base;
 
 		iov++;
@@ -1186,9 +1146,7 @@ void tcp_cleanup_rbuf(struct sock *sk, int copied)
 #if TCP_DEBUG
 	struct sk_buff *skb = skb_peek(&sk->sk_receive_queue);
 
-	WARN(skb && !before(tp->copied_seq, TCP_SKB_CB(skb)->end_seq),
-	     KERN_INFO "cleanup rbuf bug: copied %X seq %X rcvnxt %X\n",
-	     tp->copied_seq, TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt);
+	WARN_ON(skb && !before(tp->copied_seq, TCP_SKB_CB(skb)->end_seq));
 #endif
 
 	if (inet_csk_ack_scheduled(sk)) {
@@ -1337,7 +1295,6 @@ int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 		sk_eat_skb(sk, skb, 0);
 		if (!desc->count)
 			break;
-		tp->copied_seq = seq;
 	}
 	tp->copied_seq = seq;
 
@@ -1436,13 +1393,11 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			/* Now that we have two receive queues this
 			 * shouldn't happen.
 			 */
-			if (WARN(before(*seq, TCP_SKB_CB(skb)->seq),
-			     KERN_INFO "recvmsg bug: copied %X "
-				       "seq %X rcvnxt %X fl %X\n", *seq,
-				       TCP_SKB_CB(skb)->seq, tp->rcv_nxt,
-				       flags))
+			if (before(*seq, TCP_SKB_CB(skb)->seq)) {
+				printk(KERN_INFO "recvmsg bug: copied %X "
+				       "seq %X\n", *seq, TCP_SKB_CB(skb)->seq);
 				break;
-
+			}
 			offset = *seq - TCP_SKB_CB(skb)->seq;
 			if (tcp_hdr(skb)->syn)
 				offset--;
@@ -1450,10 +1405,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				goto found_ok_skb;
 			if (tcp_hdr(skb)->fin)
 				goto found_fin_ok;
-			WARN(!(flags & MSG_PEEK), KERN_INFO "recvmsg bug 2: "
-					"copied %X seq %X rcvnxt %X fl %X\n",
-					*seq, TCP_SKB_CB(skb)->seq,
-					tp->rcv_nxt, flags);
+			WARN_ON(!(flags & MSG_PEEK));
 		}
 
 		/* Well, if we have backlog, try to process it now yet. */
@@ -1887,7 +1839,7 @@ void tcp_close(struct sock *sk, long timeout)
 		/* Unread data was tossed, zap the connection. */
 		NET_INC_STATS_USER(sock_net(sk), LINUX_MIB_TCPABORTONCLOSE);
 		tcp_set_state(sk, TCP_CLOSE);
-		tcp_send_active_reset(sk, sk->sk_allocation);
+		tcp_send_active_reset(sk, GFP_KERNEL);
 	} else if (sock_flag(sk, SOCK_LINGER) && !sk->sk_lingertime) {
 		/* Check zero linger _after_ checking for unread data. */
 		sk->sk_prot->disconnect(sk, 0);
@@ -1979,8 +1931,11 @@ adjudge_to_death:
 		}
 	}
 	if (sk->sk_state != TCP_CLOSE) {
+		int orphan_count = percpu_counter_read_positive(
+						sk->sk_prot->orphan_count);
+
 		sk_mem_reclaim(sk);
-		if (tcp_too_many_orphans(sk, 0)) {
+		if (tcp_too_many_orphans(sk, orphan_count)) {
 			if (net_ratelimit())
 				printk(KERN_INFO "TCP: too many of orphaned "
 				       "sockets\n");
@@ -2057,7 +2012,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->snd_cwnd = 2;
 	icsk->icsk_probes_out = 0;
 	tp->packets_out = 0;
-	tp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
+	tp->snd_ssthresh = 0x7fffffff;
 	tp->snd_cwnd_cnt = 0;
 	tp->bytes_acked = 0;
 	tcp_set_ca_state(sk, TCP_CA_Open);
@@ -2077,7 +2032,7 @@ int tcp_disconnect(struct sock *sk, int flags)
  *	Socket option code for TCP.
  */
 static int do_tcp_setsockopt(struct sock *sk, int level,
-		int optname, char __user *optval, unsigned int optlen)
+		int optname, char __user *optval, int optlen)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
@@ -2092,7 +2047,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			return -EINVAL;
 
 		val = strncpy_from_user(name, optval,
-					min_t(long, TCP_CA_NAME_MAX-1, optlen));
+					min(TCP_CA_NAME_MAX-1, optlen));
 		if (val < 0)
 			return -EFAULT;
 		name[val] = 0;
@@ -2116,7 +2071,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		/* Values greater than interface MTU won't take effect. However
 		 * at the point when this call is done we typically don't yet
 		 * know which interface is going to be used */
-		if (val < TCP_MIN_MSS || val > MAX_TCP_WINDOW) {
+		if (val < 8 || val > MAX_TCP_WINDOW) {
 			err = -EINVAL;
 			break;
 		}
@@ -2208,10 +2163,16 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		break;
 
 	case TCP_DEFER_ACCEPT:
-		/* Translate value in seconds to number of retransmits */
-		icsk->icsk_accept_queue.rskq_defer_accept =
-			secs_to_retrans(val, TCP_TIMEOUT_INIT / HZ,
-					TCP_RTO_MAX / HZ);
+		icsk->icsk_accept_queue.rskq_defer_accept = 0;
+		if (val > 0) {
+			/* Translate value in seconds to number of
+			 * retransmits */
+			while (icsk->icsk_accept_queue.rskq_defer_accept < 32 &&
+			       val > ((TCP_TIMEOUT_INIT / HZ) <<
+				       icsk->icsk_accept_queue.rskq_defer_accept))
+				icsk->icsk_accept_queue.rskq_defer_accept++;
+			icsk->icsk_accept_queue.rskq_defer_accept++;
+		}
 		break;
 
 	case TCP_WINDOW_CLAMP:
@@ -2259,7 +2220,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 }
 
 int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
-		   unsigned int optlen)
+		   int optlen)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
@@ -2271,7 +2232,7 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 
 #ifdef CONFIG_COMPAT
 int compat_tcp_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  char __user *optval, int optlen)
 {
 	if (level != SOL_TCP)
 		return inet_csk_compat_setsockopt(sk, level, optname,
@@ -2375,13 +2336,13 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		val = !!(tp->nonagle&TCP_NAGLE_CORK);
 		break;
 	case TCP_KEEPIDLE:
-		val = keepalive_time_when(tp) / HZ;
+		val = (tp->keepalive_time ? : sysctl_tcp_keepalive_time) / HZ;
 		break;
 	case TCP_KEEPINTVL:
-		val = keepalive_intvl_when(tp) / HZ;
+		val = (tp->keepalive_intvl ? : sysctl_tcp_keepalive_intvl) / HZ;
 		break;
 	case TCP_KEEPCNT:
-		val = keepalive_probes(tp);
+		val = tp->keepalive_probes ? : sysctl_tcp_keepalive_probes;
 		break;
 	case TCP_SYNCNT:
 		val = icsk->icsk_syn_retries ? : sysctl_tcp_syn_retries;
@@ -2392,8 +2353,8 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 			val = (val ? : sysctl_tcp_fin_timeout) / HZ;
 		break;
 	case TCP_DEFER_ACCEPT:
-		val = retrans_to_secs(icsk->icsk_accept_queue.rskq_defer_accept,
-				      TCP_TIMEOUT_INIT / HZ, TCP_RTO_MAX / HZ);
+		val = !icsk->icsk_accept_queue.rskq_defer_accept ? 0 :
+			((TCP_TIMEOUT_INIT / HZ) << (icsk->icsk_accept_queue.rskq_defer_accept - 1));
 		break;
 	case TCP_WINDOW_CLAMP:
 		val = tp->window_clamp;
@@ -2697,7 +2658,7 @@ void tcp_free_md5sig_pool(void)
 
 EXPORT_SYMBOL(tcp_free_md5sig_pool);
 
-static struct tcp_md5sig_pool **__tcp_alloc_md5sig_pool(struct sock *sk)
+static struct tcp_md5sig_pool **__tcp_alloc_md5sig_pool(void)
 {
 	int cpu;
 	struct tcp_md5sig_pool **pool;
@@ -2710,7 +2671,7 @@ static struct tcp_md5sig_pool **__tcp_alloc_md5sig_pool(struct sock *sk)
 		struct tcp_md5sig_pool *p;
 		struct crypto_hash *hash;
 
-		p = kzalloc(sizeof(*p), sk->sk_allocation);
+		p = kzalloc(sizeof(*p), GFP_KERNEL);
 		if (!p)
 			goto out_free;
 		*per_cpu_ptr(pool, cpu) = p;
@@ -2727,7 +2688,7 @@ out_free:
 	return NULL;
 }
 
-struct tcp_md5sig_pool **tcp_alloc_md5sig_pool(struct sock *sk)
+struct tcp_md5sig_pool **tcp_alloc_md5sig_pool(void)
 {
 	struct tcp_md5sig_pool **pool;
 	int alloc = 0;
@@ -2748,7 +2709,7 @@ retry:
 
 	if (alloc) {
 		/* we cannot hold spinlock here because this may sleep. */
-		struct tcp_md5sig_pool **p = __tcp_alloc_md5sig_pool(sk);
+		struct tcp_md5sig_pool **p = __tcp_alloc_md5sig_pool();
 		spin_lock_bh(&tcp_md5sig_pool_lock);
 		if (!p) {
 			tcp_md5sig_users--;
@@ -2826,11 +2787,7 @@ int tcp_md5_hash_skb_data(struct tcp_md5sig_pool *hp,
 
 	for (i = 0; i < shi->nr_frags; ++i) {
 		const struct skb_frag_struct *f = &shi->frags[i];
-		unsigned int offset = f->page_offset;
-		struct page *page = f->page + (offset >> PAGE_SHIFT);
-
-		sg_set_page(&sg, page, f->size,
-			    offset_in_page(offset));
+		sg_set_page(&sg, f->page, f->size, f->page_offset);
 		if (crypto_hash_update(desc, &sg, f->size))
 			return 1;
 	}
@@ -2885,7 +2842,7 @@ void __init tcp_init(void)
 {
 	struct sk_buff *skb = NULL;
 	unsigned long nr_pages, limit;
-	int i, max_share, cnt;
+	int order, i, max_share;
 
 	BUILD_BUG_ON(sizeof(struct tcp_skb_cb) > sizeof(skb->cb));
 
@@ -2934,23 +2891,31 @@ void __init tcp_init(void)
 		INIT_HLIST_HEAD(&tcp_hashinfo.bhash[i].chain);
 	}
 
-
-	cnt = tcp_hashinfo.ehash_size;
-
-	tcp_death_row.sysctl_max_tw_buckets = cnt / 2;
-	sysctl_tcp_max_orphans = cnt / 2;
-	sysctl_max_syn_backlog = max(128, cnt / 256);
+	/* Try to be a bit smarter and adjust defaults depending
+	 * on available memory.
+	 */
+	for (order = 0; ((1 << order) << PAGE_SHIFT) <
+			(tcp_hashinfo.bhash_size * sizeof(struct inet_bind_hashbucket));
+			order++)
+		;
+	if (order >= 4) {
+		tcp_death_row.sysctl_max_tw_buckets = 180000;
+		sysctl_tcp_max_orphans = 4096 << (order - 4);
+		sysctl_max_syn_backlog = 1024;
+	} else if (order < 3) {
+		tcp_death_row.sysctl_max_tw_buckets >>= (3 - order);
+		sysctl_tcp_max_orphans >>= (3 - order);
+		sysctl_max_syn_backlog = 128;
+	}
 
 	/* Set the pressure threshold to be a fraction of global memory that
 	 * is up to 1/2 at 256 MB, decreasing toward zero with the amount of
-	 * memory, with a floor of 128 pages, and a ceiling that prevents an
-	 * integer overflow.
+	 * memory, with a floor of 128 pages.
 	 */
 	nr_pages = totalram_pages - totalhigh_pages;
 	limit = min(nr_pages, 1UL<<(28-PAGE_SHIFT)) >> (20-PAGE_SHIFT);
 	limit = (limit * (nr_pages >> (20-PAGE_SHIFT))) >> (PAGE_SHIFT-11);
 	limit = max(limit, 128UL);
-	limit = min(limit, INT_MAX * 4UL / 3 / 2);
 	sysctl_tcp_mem[0] = limit / 4 * 3;
 	sysctl_tcp_mem[1] = limit;
 	sysctl_tcp_mem[2] = sysctl_tcp_mem[0] * 2;

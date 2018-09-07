@@ -26,10 +26,19 @@
  *
  */
 
+
 #ifndef __CARD_H__
 #define __CARD_H__
 
+//#if !defined(__DEVICE_H__)
+//#include "device.h"
+//#endif
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+
+
+
 
 /*---------------------  Export Definitions -------------------------*/
 //
@@ -85,6 +94,9 @@ typedef enum _CARD_OP_MODE {
 /*---------------------  Export Variables  --------------------------*/
 
 /*---------------------  Export Functions  --------------------------*/
+#ifdef __cplusplus
+extern "C" {                            /* Assume C declarations for C++ */
+#endif /* __cplusplus */
 
 BOOL ChannelValid(UINT CountryCode, UINT ChannelIndex);
 void CARDvSetRSPINF(PVOID pDeviceHandler, CARD_PHY_TYPE ePHYType);
@@ -249,6 +261,11 @@ CARDbyAutoChannelSelect(
     );
 
 BYTE CARDbyGetChannelNumber(PVOID pDeviceHandler, BYTE byChannelIndex);
+
+#ifdef __cplusplus
+}                                       /* End of extern "C" { */
+#endif /* __cplusplus */
+
 
 #endif // __CARD_H__
 

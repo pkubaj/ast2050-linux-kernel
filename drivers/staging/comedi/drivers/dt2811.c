@@ -53,95 +53,46 @@ Configuration options:
 static const char *driver_name = "dt2811";
 
 static const struct comedi_lrange range_dt2811_pgh_ai_5_unipolar = { 4, {
-									 RANGE
-									 (0, 5),
-									 RANGE
-									 (0,
-									  2.5),
-									 RANGE
-									 (0,
-									  1.25),
-									 RANGE
-									 (0,
-									  0.625)
-									 }
+			RANGE(0, 5),
+			RANGE(0, 2.5),
+			RANGE(0, 1.25),
+			RANGE(0, 0.625)
+	}
 };
-
 static const struct comedi_lrange range_dt2811_pgh_ai_2_5_bipolar = { 4, {
-									  RANGE
-									  (-2.5,
-									   2.5),
-									  RANGE
-									  (-1.25,
-									   1.25),
-									  RANGE
-									  (-0.625,
-									   0.625),
-									  RANGE
-									  (-0.3125,
-									   0.3125)
-									  }
+			RANGE(-2.5, 2.5),
+			RANGE(-1.25, 1.25),
+			RANGE(-0.625, 0.625),
+			RANGE(-0.3125, 0.3125)
+	}
 };
-
 static const struct comedi_lrange range_dt2811_pgh_ai_5_bipolar = { 4, {
-									RANGE
-									(-5, 5),
-									RANGE
-									(-2.5,
-									 2.5),
-									RANGE
-									(-1.25,
-									 1.25),
-									RANGE
-									(-0.625,
-									 0.625)
-									}
+			RANGE(-5, 5),
+			RANGE(-2.5, 2.5),
+			RANGE(-1.25, 1.25),
+			RANGE(-0.625, 0.625)
+	}
 };
-
 static const struct comedi_lrange range_dt2811_pgl_ai_5_unipolar = { 4, {
-									 RANGE
-									 (0, 5),
-									 RANGE
-									 (0,
-									  0.5),
-									 RANGE
-									 (0,
-									  0.05),
-									 RANGE
-									 (0,
-									  0.01)
-									 }
+			RANGE(0, 5),
+			RANGE(0, 0.5),
+			RANGE(0, 0.05),
+			RANGE(0, 0.01)
+	}
 };
-
 static const struct comedi_lrange range_dt2811_pgl_ai_2_5_bipolar = { 4, {
-									  RANGE
-									  (-2.5,
-									   2.5),
-									  RANGE
-									  (-0.25,
-									   0.25),
-									  RANGE
-									  (-0.025,
-									   0.025),
-									  RANGE
-									  (-0.005,
-									   0.005)
-									  }
+			RANGE(-2.5, 2.5),
+			RANGE(-0.25, 0.25),
+			RANGE(-0.025, 0.025),
+			RANGE(-0.005, 0.005)
+	}
 };
-
 static const struct comedi_lrange range_dt2811_pgl_ai_5_bipolar = { 4, {
-									RANGE
-									(-5, 5),
-									RANGE
-									(-0.5,
-									 0.5),
-									RANGE
-									(-0.05,
-									 0.05),
-									RANGE
-									(-0.01,
-									 0.01)
-									}
+			RANGE(-5, 5),
+			RANGE(-0.5, 0.5),
+			RANGE(-0.05, 0.05),
+			RANGE(-0.01, 0.01)
+	}
 };
 
 /*
@@ -251,21 +202,20 @@ struct dt2811_board {
 
 static const struct dt2811_board boardtypes[] = {
 	{"dt2811-pgh",
-	 &range_dt2811_pgh_ai_5_bipolar,
-	 &range_dt2811_pgh_ai_2_5_bipolar,
-	 &range_dt2811_pgh_ai_5_unipolar,
-	 },
+			&range_dt2811_pgh_ai_5_bipolar,
+			&range_dt2811_pgh_ai_2_5_bipolar,
+			&range_dt2811_pgh_ai_5_unipolar,
+		},
 	{"dt2811-pgl",
-	 &range_dt2811_pgl_ai_5_bipolar,
-	 &range_dt2811_pgl_ai_2_5_bipolar,
-	 &range_dt2811_pgl_ai_5_unipolar,
-	 },
+			&range_dt2811_pgl_ai_5_bipolar,
+			&range_dt2811_pgl_ai_2_5_bipolar,
+			&range_dt2811_pgl_ai_5_unipolar,
+		},
 };
 
 #define this_board ((const struct dt2811_board *)dev->board_ptr)
 
-static int dt2811_attach(struct comedi_device *dev,
-			 struct comedi_devconfig *it);
+static int dt2811_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int dt2811_detach(struct comedi_device *dev);
 static struct comedi_driver driver_dt2811 = {
 	.driver_name = "dt2811",
@@ -280,18 +230,15 @@ static struct comedi_driver driver_dt2811 = {
 COMEDI_INITCLEANUP(driver_dt2811);
 
 static int dt2811_ai_insn(struct comedi_device *dev, struct comedi_subdevice *s,
-			  struct comedi_insn *insn, unsigned int *data);
+	struct comedi_insn *insn, unsigned int *data);
 static int dt2811_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
-			  struct comedi_insn *insn, unsigned int *data);
-static int dt2811_ao_insn_read(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data);
-static int dt2811_di_insn_bits(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data);
-static int dt2811_do_insn_bits(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data);
+	struct comedi_insn *insn, unsigned int *data);
+static int dt2811_ao_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
+static int dt2811_di_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
+static int dt2811_do_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
 
 enum { card_2811_pgh, card_2811_pgl };
 
@@ -402,7 +349,7 @@ static int dt2811_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 		irqs = probe_irq_on();
 
 		outb(DT2811_CLRERROR | DT2811_INTENB,
-		     dev->iobase + DT2811_ADCSR);
+			dev->iobase + DT2811_ADCSR);
 		outb(0, dev->iobase + DT2811_ADGCR);
 
 		udelay(100);
@@ -421,7 +368,7 @@ static int dt2811_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 			i = inb(dev->iobase + DT2811_ADDATHI);
 			printk("(irq = %d)\n", irq);
 			ret = request_irq(irq, dt2811_interrupt, 0,
-					  driver_name, dev);
+				driver_name, dev);
 			if (ret < 0)
 				return -EIO;
 			dev->irq = irq;
@@ -553,7 +500,7 @@ static int dt2811_detach(struct comedi_device *dev)
 }
 
 static int dt2811_ai_insn(struct comedi_device *dev, struct comedi_subdevice *s,
-			  struct comedi_insn *insn, unsigned int *data)
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int chan = CR_CHAN(insn->chanspec);
 	int timeout = DT2811_TIMEOUT;
@@ -563,7 +510,7 @@ static int dt2811_ai_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 		outb(chan, dev->iobase + DT2811_ADGCR);
 
 		while (timeout
-		       && inb(dev->iobase + DT2811_ADCSR) & DT2811_ADBUSY)
+			&& inb(dev->iobase + DT2811_ADCSR) & DT2811_ADBUSY)
 			timeout--;
 		if (!timeout)
 			return -ETIME;
@@ -579,7 +526,7 @@ static int dt2811_ai_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 #if 0
 /* Wow.  This is code from the Comedi stone age.  But it hasn't been
  * replaced, so I'll let it stay. */
-int dt2811_adtrig(kdev_t minor, comedi_adtrig * adtrig)
+int dt2811_adtrig(kdev_t minor, comedi_adtrig *adtrig)
 {
 	struct comedi_device *dev = comedi_devices + minor;
 
@@ -590,7 +537,7 @@ int dt2811_adtrig(kdev_t minor, comedi_adtrig * adtrig)
 	case COMEDI_MDEMAND:
 		dev->ntrig = adtrig->n - 1;
 		/*printk("dt2811: AD soft trigger\n"); */
-		/*outb(DT2811_CLRERROR|DT2811_INTENB,dev->iobase+DT2811_ADCSR); *//* not neccessary */
+		/*outb(DT2811_CLRERROR|DT2811_INTENB,dev->iobase+DT2811_ADCSR); */ /* not neccessary */
 		outb(dev->curadchan, dev->iobase + DT2811_ADGCR);
 		do_gettimeofday(&trigtime);
 		break;
@@ -604,7 +551,7 @@ int dt2811_adtrig(kdev_t minor, comedi_adtrig * adtrig)
 #endif
 
 static int dt2811_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
-			  struct comedi_insn *insn, unsigned int *data)
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan;
@@ -614,16 +561,15 @@ static int dt2811_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 	for (i = 0; i < insn->n; i++) {
 		outb(data[i] & 0xff, dev->iobase + DT2811_DADAT0LO + 2 * chan);
 		outb((data[i] >> 8) & 0xff,
-		     dev->iobase + DT2811_DADAT0HI + 2 * chan);
+			dev->iobase + DT2811_DADAT0HI + 2 * chan);
 		devpriv->ao_readback[chan] = data[i];
 	}
 
 	return i;
 }
 
-static int dt2811_ao_insn_read(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data)
+static int dt2811_ao_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan;
@@ -637,9 +583,8 @@ static int dt2811_ao_insn_read(struct comedi_device *dev,
 	return i;
 }
 
-static int dt2811_di_insn_bits(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data)
+static int dt2811_di_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -649,9 +594,8 @@ static int dt2811_di_insn_bits(struct comedi_device *dev,
 	return 2;
 }
 
-static int dt2811_do_insn_bits(struct comedi_device *dev,
-			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn, unsigned int *data)
+static int dt2811_do_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;

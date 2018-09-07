@@ -53,18 +53,15 @@ extern struct iwl_cfg iwl4965_agn_cfg;
 extern struct iwl_cfg iwl5300_agn_cfg;
 extern struct iwl_cfg iwl5100_agn_cfg;
 extern struct iwl_cfg iwl5350_agn_cfg;
-extern struct iwl_cfg iwl5100_bgn_cfg;
+extern struct iwl_cfg iwl5100_bg_cfg;
 extern struct iwl_cfg iwl5100_abg_cfg;
 extern struct iwl_cfg iwl5150_agn_cfg;
-extern struct iwl_cfg iwl5150_abg_cfg;
-extern struct iwl_cfg iwl6000h_2agn_cfg;
-extern struct iwl_cfg iwl6000i_2agn_cfg;
+extern struct iwl_cfg iwl6000_2ag_cfg;
+extern struct iwl_cfg iwl6000_2agn_cfg;
 extern struct iwl_cfg iwl6000_3agn_cfg;
 extern struct iwl_cfg iwl6050_2agn_cfg;
 extern struct iwl_cfg iwl6050_3agn_cfg;
 extern struct iwl_cfg iwl1000_bgn_cfg;
-
-struct iwl_tx_queue;
 
 /* shared structures from iwl-5000.c */
 extern struct iwl_mod_params iwl50_mod_params;
@@ -82,37 +79,9 @@ extern void iwl5000_rts_tx_cmd_flag(struct ieee80211_tx_info *info,
 				    __le32 *tx_flags);
 extern int iwl5000_calc_rssi(struct iwl_priv *priv,
 			     struct iwl_rx_phy_res *rx_resp);
-extern int iwl5000_apm_init(struct iwl_priv *priv);
-extern void iwl5000_apm_stop(struct iwl_priv *priv);
-extern int iwl5000_apm_reset(struct iwl_priv *priv);
-extern void iwl5000_nic_config(struct iwl_priv *priv);
-extern u16 iwl5000_eeprom_calib_version(struct iwl_priv *priv);
-extern const u8 *iwl5000_eeprom_query_addr(const struct iwl_priv *priv,
-				    size_t offset);
-extern void iwl5000_txq_update_byte_cnt_tbl(struct iwl_priv *priv,
-					    struct iwl_tx_queue *txq,
-					    u16 byte_cnt);
-extern void iwl5000_txq_inval_byte_cnt_tbl(struct iwl_priv *priv,
-				    struct iwl_tx_queue *txq);
-extern int iwl5000_load_ucode(struct iwl_priv *priv);
-extern void iwl5000_init_alive_start(struct iwl_priv *priv);
-extern int iwl5000_alive_notify(struct iwl_priv *priv);
-extern int iwl5000_hw_set_hw_params(struct iwl_priv *priv);
-extern int iwl5000_txq_agg_enable(struct iwl_priv *priv, int txq_id,
-			   int tx_fifo, int sta_id, int tid, u16 ssn_idx);
-extern int iwl5000_txq_agg_disable(struct iwl_priv *priv, u16 txq_id,
-			    u16 ssn_idx, u8 tx_fifo);
-extern void iwl5000_txq_set_sched(struct iwl_priv *priv, u32 mask);
-extern void iwl5000_setup_deferred_work(struct iwl_priv *priv);
-extern void iwl5000_rx_handler_setup(struct iwl_priv *priv);
-extern int iwl5000_hw_valid_rtc_data_addr(u32 addr);
-extern int iwl5000_send_tx_power(struct iwl_priv *priv);
-extern void iwl5000_temperature(struct iwl_priv *priv);
 
 /* CT-KILL constants */
-#define CT_KILL_THRESHOLD_LEGACY   110 /* in Celsius */
-#define CT_KILL_THRESHOLD	   114 /* in Celsius */
-#define CT_KILL_EXIT_THRESHOLD     95  /* in Celsius */
+#define CT_KILL_THRESHOLD	110 /* in Celsius */
 
 /* Default noise level to report when noise measurement is not available.
  *   This may be because we're:
@@ -151,31 +120,6 @@ struct iwl_rx_mem_buffer {
 	struct list_head list;
 };
 
-/* defined below */
-struct iwl_device_cmd;
-
-struct iwl_cmd_meta {
-	/* only for SYNC commands, iff the reply skb is wanted */
-	struct iwl_host_cmd *source;
-	/*
-	 * only for ASYNC commands
-	 * (which is somewhat stupid -- look at iwl-sta.c for instance
-	 * which duplicates a bunch of code because the callback isn't
-	 * invoked for SYNC commands, if it were and its result passed
-	 * through it would be simpler...)
-	 */
-	void (*callback)(struct iwl_priv *priv,
-			 struct iwl_device_cmd *cmd,
-			 struct sk_buff *skb);
-
-	/* The CMD_SIZE_HUGE flag bit indicates that the command
-	 * structure is stored at the end of the shared queue memory. */
-	u32 flags;
-
-	DECLARE_PCI_UNMAP_ADDR(mapping)
-	DECLARE_PCI_UNMAP_LEN(len)
-};
-
 /*
  * Generic queue structure
  *
@@ -203,8 +147,7 @@ struct iwl_tx_info {
  * struct iwl_tx_queue - Tx Queue for DMA
  * @q: generic Rx/Tx queue descriptor
  * @bd: base of circular buffer of TFDs
- * @cmd: array of command/TX buffer pointers
- * @meta: array of meta data for each command/tx buffer
+ * @cmd: array of command/Tx buffers
  * @dma_addr_cmd: physical address of cmd/tx buffer array
  * @txb: array of per-TFD driver data
  * @need_update: indicates need to update read/write index
@@ -219,8 +162,7 @@ struct iwl_tx_info {
 struct iwl_tx_queue {
 	struct iwl_queue q;
 	void *tfds;
-	struct iwl_device_cmd **cmd;
-	struct iwl_cmd_meta *meta;
+	struct iwl_cmd *cmd[TFD_TX_CMD_SLOTS];
 	struct iwl_tx_info *txb;
 	u8 need_update;
 	u8 sched_retry;
@@ -278,8 +220,8 @@ struct iwl_channel_info {
 	struct iwl4965_channel_tgd_info tgd;
 	struct iwl4965_channel_tgh_info tgh;
 	struct iwl_eeprom_channel eeprom;	/* EEPROM regulatory limit */
-	struct iwl_eeprom_channel ht40_eeprom;	/* EEPROM regulatory limit for
-						 * HT40 channel */
+	struct iwl_eeprom_channel fat_eeprom;	/* EEPROM regulatory limit for
+						 * FAT channel */
 
 	u8 channel;	  /* channel number */
 	u8 flags;	  /* flags copied from EEPROM */
@@ -292,13 +234,13 @@ struct iwl_channel_info {
 	u8 band_index;	  /* 0-4, maps channel to band1/2/3/4/5 */
 	enum ieee80211_band band;
 
-	/* HT40 channel info */
-	s8 ht40_max_power_avg;	/* (dBm) regul. eeprom, normal Tx, any rate */
-	s8 ht40_curr_txpow;	/* (dBm) regulatory/spectrum/user (not h/w) */
-	s8 ht40_min_power;	/* always 0 */
-	s8 ht40_scan_power;	/* (dBm) eeprom, direct scans, any rate */
-	u8 ht40_flags;		/* flags copied from EEPROM */
-	u8 ht40_extension_channel; /* HT_IE_EXT_CHANNEL_* */
+	/* FAT channel info */
+	s8 fat_max_power_avg;	/* (dBm) regul. eeprom, normal Tx, any rate */
+	s8 fat_curr_txpow;	/* (dBm) regulatory/spectrum/user (not h/w) */
+	s8 fat_min_power;	/* always 0 */
+	s8 fat_scan_power;	/* (dBm) eeprom, direct scans, any rate */
+	u8 fat_flags;		/* flags copied from EEPROM */
+	u8 fat_extension_channel; /* HT_IE_EXT_CHANNEL_* */
 
 	/* Radio/DSP gain settings for each "normal" data Tx rate.
 	 * These include, in addition to RF and DSP gain, a few fields for
@@ -357,16 +299,35 @@ enum {
 	CMD_WANT_SKB = (1 << 2),
 };
 
+struct iwl_cmd;
+struct iwl_priv;
+
+struct iwl_cmd_meta {
+	struct iwl_cmd_meta *source;
+	union {
+		struct sk_buff *skb;
+		int (*callback)(struct iwl_priv *priv,
+				struct iwl_cmd *cmd, struct sk_buff *skb);
+	} __attribute__ ((packed)) u;
+
+	/* The CMD_SIZE_HUGE flag bit indicates that the command
+	 * structure is stored at the end of the shared queue memory. */
+	u32 flags;
+	DECLARE_PCI_UNMAP_ADDR(mapping)
+	DECLARE_PCI_UNMAP_LEN(len)
+} __attribute__ ((packed));
+
 #define IWL_CMD_MAX_PAYLOAD 320
 
 /**
- * struct iwl_device_cmd
+ * struct iwl_cmd
  *
  * For allocation of the command and tx queues, this establishes the overall
  * size of the largest command we send to uCode, except for a scan command
  * (which is relatively huge; space is allocated separately).
  */
-struct iwl_device_cmd {
+struct iwl_cmd {
+	struct iwl_cmd_meta meta;	/* driver data */
 	struct iwl_cmd_header hdr;	/* uCode API */
 	union {
 		u32 flags;
@@ -378,19 +339,16 @@ struct iwl_device_cmd {
 	} __attribute__ ((packed)) cmd;
 } __attribute__ ((packed));
 
-#define TFD_MAX_PAYLOAD_SIZE (sizeof(struct iwl_device_cmd))
-
 
 struct iwl_host_cmd {
-	const void *data;
-	struct sk_buff *reply_skb;
-	void (*callback)(struct iwl_priv *priv,
-			 struct iwl_device_cmd *cmd,
-			 struct sk_buff *skb);
-	u32 flags;
-	u16 len;
 	u8 id;
+	u16 len;
+	struct iwl_cmd_meta meta;
+	const void *data;
 };
+
+#define TFD_MAX_PAYLOAD_SIZE (sizeof(struct iwl_cmd) - \
+			      sizeof(struct iwl_cmd_meta))
 
 /*
  * RX related structures and functions
@@ -492,25 +450,23 @@ union iwl_ht_rate_supp {
 };
 
 #define CFG_HT_RX_AMPDU_FACTOR_DEF  (0x3)
-
-/*
- * Maximal MPDU density for TX aggregation
- * 4 - 2us density
- * 5 - 4us density
- * 6 - 8us density
- * 7 - 16us density
- */
-#define CFG_HT_MPDU_DENSITY_4USEC   (0x5)
-#define CFG_HT_MPDU_DENSITY_DEF CFG_HT_MPDU_DENSITY_4USEC
+#define CFG_HT_MPDU_DENSITY_2USEC   (0x5)
+#define CFG_HT_MPDU_DENSITY_DEF CFG_HT_MPDU_DENSITY_2USEC
 
 struct iwl_ht_info {
 	/* self configuration data */
 	u8 is_ht;
 	u8 supported_chan_width;
 	u8 sm_ps;
+	u8 is_green_field;
+	u8 sgf;			/* HT_SHORT_GI_* short guard interval */
+	u8 max_amsdu_size;
+	u8 ampdu_factor;
+	u8 mpdu_density;
 	struct ieee80211_mcs_info mcs;
 	/* BSS related data */
 	u8 extension_chan_offset;
+	u8 tx_chan_width;
 	u8 ht_protection;
 	u8 non_GF_STA_present;
 };
@@ -644,7 +600,7 @@ struct iwl_sensitivity_ranges {
  * @rx_wrt_ptr_reg: FH{39}_RSCSR_CHNL0_WPTR
  * @max_stations:
  * @bcast_sta_id:
- * @ht40_channel: is 40MHz width possible in band 2.4
+ * @fat_channel: is 40MHz width possible in band 2.4
  * BIT(IEEE80211_BAND_5GHZ) BIT(IEEE80211_BAND_5GHZ)
  * @sw_crypto: 0 for hw, 1 for sw
  * @max_xxx_size: for ucode uses
@@ -668,14 +624,12 @@ struct iwl_hw_params {
 	u32 max_pkt_size;
 	u8  max_stations;
 	u8  bcast_sta_id;
-	u8  ht40_channel;
-	u8  max_beacon_itrvl;	/* in 1024 ms */
+	u8 fat_channel;
+	u8 sw_crypto;
 	u32 max_inst_size;
 	u32 max_data_size;
 	u32 max_bsm_size;
 	u32 ct_kill_threshold; /* value in hw-dependent units */
-	u32 ct_kill_exit_threshold; /* value in hw-dependent units */
-				    /* for 1000, 6000 series and up */
 	u32 calib_init_cfg;
 	const struct iwl_sensitivity_ranges *sens;
 };
@@ -704,7 +658,7 @@ extern void iwl_txq_ctx_stop(struct iwl_priv *priv);
 extern int iwl_queue_space(const struct iwl_queue *q);
 static inline int iwl_queue_used(const struct iwl_queue *q, int i)
 {
-	return q->write_ptr >= q->read_ptr ?
+	return q->write_ptr > q->read_ptr ?
 		(i >= q->read_ptr && i < q->write_ptr) :
 		!(i < q->read_ptr && i >= q->write_ptr);
 }
@@ -726,6 +680,9 @@ struct iwl_dma_ptr {
 	void *addr;
 	size_t size;
 };
+
+#define HT_SHORT_GI_20MHZ	(1 << 0)
+#define HT_SHORT_GI_40MHZ	(1 << 1)
 
 #define IWL_CHANNEL_WIDTH_20MHZ   0
 #define IWL_CHANNEL_WIDTH_40MHZ   1
@@ -867,8 +824,6 @@ struct iwl_chain_noise_data {
 #define	EEPROM_SEM_TIMEOUT 10		/* milliseconds */
 #define EEPROM_SEM_RETRY_LIMIT 1000	/* number of attempts (not time) */
 
-#define IWL_TRAFFIC_ENTRIES	(256)
-#define IWL_TRAFFIC_ENTRY_SIZE  (64)
 
 enum {
 	MEASUREMENT_READY = (1 << 0),
@@ -892,18 +847,6 @@ enum iwl_access_mode {
 	IWL_OTP_ACCESS_RELATIVE,
 };
 
-/**
- * enum iwl_pa_type - Power Amplifier type
- * @IWL_PA_SYSTEM:  based on uCode configuration
- * @IWL_PA_HYBRID: use both Internal and external PA
- * @IWL_PA_INTERNAL: use Internal only
- */
-enum iwl_pa_type {
-	IWL_PA_SYSTEM = 0,
-	IWL_PA_HYBRID = 1,
-	IWL_PA_INTERNAL = 2,
-};
-
 /* interrupt statistics */
 struct isr_statistics {
 	u32 hw;
@@ -919,48 +862,6 @@ struct isr_statistics {
 	u32 tx;
 	u32 unhandled;
 };
-
-#ifdef CONFIG_IWLWIFI_DEBUGFS
-/* management statistics */
-enum iwl_mgmt_stats {
-	MANAGEMENT_ASSOC_REQ = 0,
-	MANAGEMENT_ASSOC_RESP,
-	MANAGEMENT_REASSOC_REQ,
-	MANAGEMENT_REASSOC_RESP,
-	MANAGEMENT_PROBE_REQ,
-	MANAGEMENT_PROBE_RESP,
-	MANAGEMENT_BEACON,
-	MANAGEMENT_ATIM,
-	MANAGEMENT_DISASSOC,
-	MANAGEMENT_AUTH,
-	MANAGEMENT_DEAUTH,
-	MANAGEMENT_ACTION,
-	MANAGEMENT_MAX,
-};
-/* control statistics */
-enum iwl_ctrl_stats {
-	CONTROL_BACK_REQ =  0,
-	CONTROL_BACK,
-	CONTROL_PSPOLL,
-	CONTROL_RTS,
-	CONTROL_CTS,
-	CONTROL_ACK,
-	CONTROL_CFEND,
-	CONTROL_CFENDACK,
-	CONTROL_MAX,
-};
-
-struct traffic_stats {
-	u32 mgmt[MANAGEMENT_MAX];
-	u32 ctrl[CONTROL_MAX];
-	u32 data_cnt;
-	u64 data_bytes;
-};
-#else
-struct traffic_stats {
-	u64 data_bytes;
-};
-#endif
 
 #define IWL_MAX_NUM_QUEUES	20 /* FIXME: do dynamic allocation */
 
@@ -1107,14 +1008,15 @@ struct iwl_priv {
 	int last_rx_noise;	/* From beacon statistics */
 
 	/* counts mgmt, ctl, and data packets */
-	struct traffic_stats tx_stats;
-	struct traffic_stats rx_stats;
+	struct traffic_stats {
+		u32 cnt;
+		u64 bytes;
+	} tx_stats[3], rx_stats[3];
 
 	/* counts interrupts */
 	struct isr_statistics isr_stats;
 
 	struct iwl_power_mgr power_data;
-	struct iwl_tt_mgmt thermal_throttle;
 
 	struct iwl_notif_statistics statistics;
 	unsigned long last_statistics_time;
@@ -1122,6 +1024,7 @@ struct iwl_priv {
 	/* context information */
 	u16 rates_mask;
 
+	u32 power_mode;
 	u8 bssid[ETH_ALEN];
 	u16 rts_threshold;
 	u8 mac_addr[ETH_ALEN];
@@ -1150,7 +1053,7 @@ struct iwl_priv {
 	u32 last_beacon_time;
 	u64 last_tsf;
 
-	/* eeprom -- this is in the card's little endian byte order */
+	/* eeprom */
 	u8 *eeprom;
 	int    nvm_device_type;
 	struct iwl_eeprom_calib_info *calib_info;
@@ -1171,7 +1074,7 @@ struct iwl_priv {
 	struct iwl_hw_params hw_params;
 
 	/* INT ICT Table */
-	__le32 *ict_tbl;
+	u32 *ict_tbl;
 	dma_addr_t ict_tbl_dma;
 	dma_addr_t aligned_ict_tbl_dma;
 	int ict_index;
@@ -1200,9 +1103,6 @@ struct iwl_priv {
 	struct work_struct report_work;
 	struct work_struct request_scan;
 	struct work_struct beacon_update;
-	struct work_struct tt_work;
-	struct work_struct ct_enter;
-	struct work_struct ct_exit;
 
 	struct tasklet_struct irq_tasklet;
 
@@ -1216,22 +1116,16 @@ struct iwl_priv {
 
 	/* TX Power */
 	s8 tx_power_user_lmt;
-	s8 tx_power_device_lmt;
+	s8 tx_power_channel_lmt;
 
 
 #ifdef CONFIG_IWLWIFI_DEBUG
 	/* debugging info */
-	u32 debug_level; /* per device debugging will override global
-			    iwl_debug_level if set */
+	u32 debug_level;
 	u32 framecnt_to_us;
 	atomic_t restrict_refcnt;
-	bool disable_ht40;
 #ifdef CONFIG_IWLWIFI_DEBUGFS
 	/* debugfs */
-	u16 tx_traffic_idx;
-	u16 rx_traffic_idx;
-	u8 *tx_traffic;
-	u8 *rx_traffic;
 	struct iwl_debugfs *dbgfs;
 #endif /* CONFIG_IWLWIFI_DEBUGFS */
 #endif /* CONFIG_IWLWIFI_DEBUG */
@@ -1263,27 +1157,8 @@ static inline void iwl_txq_ctx_deactivate(struct iwl_priv *priv, int txq_id)
 
 #ifdef CONFIG_IWLWIFI_DEBUG
 const char *iwl_get_tx_fail_reason(u32 status);
-/*
- * iwl_get_debug_level: Return active debug level for device
- *
- * Using sysfs it is possible to set per device debug level. This debug
- * level will be used if set, otherwise the global debug level which can be
- * set via module parameter is used.
- */
-static inline u32 iwl_get_debug_level(struct iwl_priv *priv)
-{
-	if (priv->debug_level)
-		return priv->debug_level;
-	else
-		return iwl_debug_level;
-}
 #else
 static inline const char *iwl_get_tx_fail_reason(u32 status) { return ""; }
-
-static inline u32 iwl_get_debug_level(struct iwl_priv *priv)
-{
-	return iwl_debug_level;
-}
 #endif
 
 

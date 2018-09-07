@@ -19,8 +19,8 @@
 #include <linux/hdreg.h>
 #include <linux/ide.h>
 #include <linux/scatterlist.h>
-#include <linux/uaccess.h>
 
+#include <asm/uaccess.h>
 #include <asm/io.h>
 
 void ide_tf_readback(ide_drive_t *drive, struct ide_cmd *cmd)
@@ -53,7 +53,7 @@ void ide_tf_dump(const char *s, struct ide_cmd *cmd)
 #endif
 }
 
-int taskfile_lib_get_identify(ide_drive_t *drive, u8 *buf)
+int taskfile_lib_get_identify (ide_drive_t *drive, u8 *buf)
 {
 	struct ide_cmd cmd;
 
@@ -86,7 +86,7 @@ ide_startstop_t do_rw_taskfile(ide_drive_t *drive, struct ide_cmd *orig_cmd)
 	if (orig_cmd->protocol == ATA_PROT_PIO &&
 	    (orig_cmd->tf_flags & IDE_TFLAG_MULTI_PIO) &&
 	    drive->mult_count == 0) {
-		pr_err("%s: multimode not set!\n", drive->name);
+		printk(KERN_ERR "%s: multimode not set!\n", drive->name);
 		return ide_stopped;
 	}
 
@@ -214,7 +214,7 @@ static u8 wait_drive_not_busy(ide_drive_t *drive)
 	}
 
 	if (stat & ATA_BUSY)
-		pr_err("%s: drive still BUSY!\n", drive->name);
+		printk(KERN_ERR "%s: drive still BUSY!\n", drive->name);
 
 	return stat;
 }
@@ -225,8 +225,8 @@ void ide_pio_bytes(ide_drive_t *drive, struct ide_cmd *cmd,
 	ide_hwif_t *hwif = drive->hwif;
 	struct scatterlist *sg = hwif->sg_table;
 	struct scatterlist *cursg = cmd->cursg;
-	unsigned long uninitialized_var(flags);
 	struct page *page;
+	unsigned long flags;
 	unsigned int offset;
 	u8 *buf;
 
@@ -236,7 +236,6 @@ void ide_pio_bytes(ide_drive_t *drive, struct ide_cmd *cmd,
 
 	while (len) {
 		unsigned nr_bytes = min(len, cursg->length - cmd->cursg_ofs);
-		int page_is_high;
 
 		if (nr_bytes > PAGE_SIZE)
 			nr_bytes = PAGE_SIZE;
@@ -248,8 +247,7 @@ void ide_pio_bytes(ide_drive_t *drive, struct ide_cmd *cmd,
 		page = nth_page(page, (offset >> PAGE_SHIFT));
 		offset %= PAGE_SIZE;
 
-		page_is_high = PageHighMem(page);
-		if (page_is_high)
+		if (PageHighMem(page))
 			local_irq_save(flags);
 
 		buf = kmap_atomic(page, KM_BIO_SRC_IRQ) + offset;
@@ -270,7 +268,7 @@ void ide_pio_bytes(ide_drive_t *drive, struct ide_cmd *cmd,
 
 		kunmap_atomic(buf, KM_BIO_SRC_IRQ);
 
-		if (page_is_high)
+		if (PageHighMem(page))
 			local_irq_restore(flags);
 
 		len -= nr_bytes;
@@ -324,17 +322,10 @@ static void ide_error_cmd(ide_drive_t *drive, struct ide_cmd *cmd)
 void ide_finish_cmd(ide_drive_t *drive, struct ide_cmd *cmd, u8 stat)
 {
 	struct request *rq = drive->hwif->rq;
-	u8 err = ide_read_error(drive), nsect = cmd->tf.nsect;
-	u8 set_xfer = !!(cmd->tf_flags & IDE_TFLAG_SET_XFER);
+	u8 err = ide_read_error(drive);
 
 	ide_complete_cmd(drive, cmd, stat, err);
 	rq->errors = err;
-
-	if (err == 0 && set_xfer) {
-		ide_set_xfer_rate(drive, nsect);
-		ide_driveid_update(drive);
-	}
-
 	ide_complete_rq(drive, err ? -EIO : 0, blk_rq_bytes(rq));
 }
 
@@ -407,7 +398,8 @@ static ide_startstop_t pre_task_out_intr(ide_drive_t *drive,
 
 	if (ide_wait_stat(&startstop, drive, ATA_DRQ,
 			  drive->bad_wstat, WAIT_DRQ)) {
-		pr_err("%s: no DRQ after issuing %sWRITE%s\n", drive->name,
+		printk(KERN_ERR "%s: no DRQ after issuing %sWRITE%s\n",
+			drive->name,
 			(cmd->tf_flags & IDE_TFLAG_MULTI_PIO) ? "MULT" : "",
 			(drive->dev_flags & IDE_DFLAG_LBA48) ? "_EXT" : "");
 		return startstop;
@@ -428,10 +420,12 @@ int ide_raw_taskfile(ide_drive_t *drive, struct ide_cmd *cmd, u8 *buf,
 {
 	struct request *rq;
 	int error;
-	int rw = !(cmd->tf_flags & IDE_TFLAG_WRITE) ? READ : WRITE;
 
-	rq = blk_get_request(drive->queue, rw, __GFP_WAIT);
+	rq = blk_get_request(drive->queue, READ, __GFP_WAIT);
 	rq->cmd_type = REQ_TYPE_ATA_TASKFILE;
+
+	if (cmd->tf_flags & IDE_TFLAG_WRITE)
+		rq->cmd_flags |= REQ_RW;
 
 	/*
 	 * (ks) We transfer currently only whole sectors.
@@ -455,6 +449,7 @@ put_req:
 	blk_put_request(rq);
 	return error;
 }
+
 EXPORT_SYMBOL(ide_raw_taskfile);
 
 int ide_no_data_taskfile(ide_drive_t *drive, struct ide_cmd *cmd)
@@ -480,9 +475,10 @@ int ide_taskfile_ioctl(ide_drive_t *drive, unsigned long arg)
 	u16 nsect		= 0;
 	char __user *buf = (char __user *)arg;
 
+//	printk("IDE Taskfile ...\n");
+
 	req_task = kzalloc(tasksize, GFP_KERNEL);
-	if (req_task == NULL)
-		return -ENOMEM;
+	if (req_task == NULL) return -ENOMEM;
 	if (copy_from_user(req_task, buf, tasksize)) {
 		kfree(req_task);
 		return -EFAULT;
@@ -490,7 +486,7 @@ int ide_taskfile_ioctl(ide_drive_t *drive, unsigned long arg)
 
 	taskout = req_task->out_size;
 	taskin  = req_task->in_size;
-
+	
 	if (taskin > 65536 || taskout > 65536) {
 		err = -EINVAL;
 		goto abort;
@@ -580,49 +576,51 @@ int ide_taskfile_ioctl(ide_drive_t *drive, unsigned long arg)
 	cmd.protocol = ATA_PROT_DMA;
 
 	switch (req_task->data_phase) {
-	case TASKFILE_MULTI_OUT:
-		if (!drive->mult_count) {
-			/* (hs): give up if multcount is not set */
-			pr_err("%s: %s Multimode Write multcount is not set\n",
-				drive->name, __func__);
-			err = -EPERM;
+		case TASKFILE_MULTI_OUT:
+			if (!drive->mult_count) {
+				/* (hs): give up if multcount is not set */
+				printk(KERN_ERR "%s: %s Multimode Write " \
+					"multcount is not set\n",
+					drive->name, __func__);
+				err = -EPERM;
+				goto abort;
+			}
+			cmd.tf_flags |= IDE_TFLAG_MULTI_PIO;
+			/* fall through */
+		case TASKFILE_OUT:
+			cmd.protocol = ATA_PROT_PIO;
+			/* fall through */
+		case TASKFILE_OUT_DMAQ:
+		case TASKFILE_OUT_DMA:
+			cmd.tf_flags |= IDE_TFLAG_WRITE;
+			nsect = taskout / SECTOR_SIZE;
+			data_buf = outbuf;
+			break;
+		case TASKFILE_MULTI_IN:
+			if (!drive->mult_count) {
+				/* (hs): give up if multcount is not set */
+				printk(KERN_ERR "%s: %s Multimode Read failure " \
+					"multcount is not set\n",
+					drive->name, __func__);
+				err = -EPERM;
+				goto abort;
+			}
+			cmd.tf_flags |= IDE_TFLAG_MULTI_PIO;
+			/* fall through */
+		case TASKFILE_IN:
+			cmd.protocol = ATA_PROT_PIO;
+			/* fall through */
+		case TASKFILE_IN_DMAQ:
+		case TASKFILE_IN_DMA:
+			nsect = taskin / SECTOR_SIZE;
+			data_buf = inbuf;
+			break;
+		case TASKFILE_NO_DATA:
+			cmd.protocol = ATA_PROT_NODATA;
+			break;
+		default:
+			err = -EFAULT;
 			goto abort;
-		}
-		cmd.tf_flags |= IDE_TFLAG_MULTI_PIO;
-		/* fall through */
-	case TASKFILE_OUT:
-		cmd.protocol = ATA_PROT_PIO;
-		/* fall through */
-	case TASKFILE_OUT_DMAQ:
-	case TASKFILE_OUT_DMA:
-		cmd.tf_flags |= IDE_TFLAG_WRITE;
-		nsect = taskout / SECTOR_SIZE;
-		data_buf = outbuf;
-		break;
-	case TASKFILE_MULTI_IN:
-		if (!drive->mult_count) {
-			/* (hs): give up if multcount is not set */
-			pr_err("%s: %s Multimode Read multcount is not set\n",
-				drive->name, __func__);
-			err = -EPERM;
-			goto abort;
-		}
-		cmd.tf_flags |= IDE_TFLAG_MULTI_PIO;
-		/* fall through */
-	case TASKFILE_IN:
-		cmd.protocol = ATA_PROT_PIO;
-		/* fall through */
-	case TASKFILE_IN_DMAQ:
-	case TASKFILE_IN_DMA:
-		nsect = taskin / SECTOR_SIZE;
-		data_buf = inbuf;
-		break;
-	case TASKFILE_NO_DATA:
-		cmd.protocol = ATA_PROT_NODATA;
-		break;
-	default:
-		err = -EFAULT;
-		goto abort;
 	}
 
 	if (req_task->req_cmd == IDE_DRIVE_TASK_NO_DATA)
@@ -631,7 +629,7 @@ int ide_taskfile_ioctl(ide_drive_t *drive, unsigned long arg)
 		nsect = (cmd.hob.nsect << 8) | cmd.tf.nsect;
 
 		if (!nsect) {
-			pr_err("%s: in/out command without data\n",
+			printk(KERN_ERR "%s: in/out command without data\n",
 					drive->name);
 			err = -EFAULT;
 			goto abort;
@@ -672,6 +670,8 @@ abort:
 	kfree(req_task);
 	kfree(outbuf);
 	kfree(inbuf);
+
+//	printk("IDE Taskfile ioctl ended. rc = %i\n", err);
 
 	return err;
 }

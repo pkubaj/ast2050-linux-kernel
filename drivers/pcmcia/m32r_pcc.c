@@ -492,9 +492,8 @@ static int _pcc_set_io_map(u_short sock, struct pccard_io_map *io)
 	u_char map;
 
 	debug(3, "m32r-pcc: SetIOMap(%d, %d, %#2.2x, %d ns, "
-		  "%#llx-%#llx)\n", sock, io->map, io->flags,
-		  io->speed, (unsigned long long)io->start,
-		  (unsigned long long)io->stop);
+		  "%#x-%#x)\n", sock, io->map, io->flags,
+		  io->speed, io->start, io->stop);
 	map = io->map;
 
 	return 0;
@@ -516,9 +515,8 @@ static int _pcc_set_mem_map(u_short sock, struct pccard_mem_map *mem)
 #endif
 
 	debug(3, "m32r-pcc: SetMemMap(%d, %d, %#2.2x, %d ns, "
-		 "%#llx,  %#x)\n", sock, map, mem->flags,
-		 mem->speed, (unsigned long long)mem->static_start,
-		 mem->card_start);
+		 "%#lx,  %#x)\n", sock, map, mem->flags,
+		 mem->speed, mem->static_start, mem->card_start);
 
 	/*
 	 * sanity check

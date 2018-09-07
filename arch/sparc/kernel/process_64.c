@@ -251,7 +251,7 @@ static void __global_reg_poll(struct global_reg_snapshot *gp)
 	}
 }
 
-void arch_trigger_all_cpu_backtrace(void)
+void __trigger_all_cpu_backtrace(void)
 {
 	struct thread_info *tp = current_thread_info();
 	struct pt_regs *regs = get_irq_regs();
@@ -304,7 +304,7 @@ void arch_trigger_all_cpu_backtrace(void)
 
 static void sysrq_handle_globreg(int key, struct tty_struct *tty)
 {
-	arch_trigger_all_cpu_backtrace();
+	__trigger_all_cpu_backtrace();
 }
 
 static struct sysrq_key_op sparc_globalreg_op = {
@@ -398,11 +398,11 @@ static unsigned long clone_stackframe(unsigned long csp, unsigned long psp)
 	} else
 		__get_user(fp, &(((struct reg_window32 __user *)psp)->ins[6]));
 
-	/* Now align the stack as this is mandatory in the Sparc ABI
-	 * due to how register windows work.  This hides the
-	 * restriction from thread libraries etc.
+	/* Now 8-byte align the stack as this is mandatory in the
+	 * Sparc ABI due to how register windows work.  This hides
+	 * the restriction from thread libraries etc.  -DaveM
 	 */
-	csp &= ~15UL;
+	csp &= ~7UL;
 
 	distance = fp - psp;
 	rval = (csp - distance);

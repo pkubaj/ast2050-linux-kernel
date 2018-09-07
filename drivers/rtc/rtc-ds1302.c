@@ -1,25 +1,26 @@
 /*
  * Dallas DS1302 RTC Support
  *
- *  Copyright (C) 2002 David McCullough
- *  Copyright (C) 2003 - 2007 Paul Mundt
+ *  Copyright (C) 2002  David McCullough
+ *  Copyright (C) 2003 - 2007  Paul Mundt
  *
  * This file is subject to the terms and conditions of the GNU General Public
- * License version 2. See the file "COPYING" in the main directory of
+ * License version 2.  See the file "COPYING" in the main directory of
  * this archive for more details.
  */
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/time.h>
 #include <linux/rtc.h>
+#include <linux/spinlock.h>
 #include <linux/io.h>
 #include <linux/bcd.h>
 #include <asm/rtc.h>
 
 #define DRV_NAME	"rtc-ds1302"
-#define DRV_VERSION	"0.1.1"
+#define DRV_VERSION	"0.1.0"
 
 #define	RTC_CMD_READ	0x81		/* Read command */
 #define	RTC_CMD_WRITE	0x80		/* Write command */
@@ -45,6 +46,11 @@
 #else
 #error "Add support for your platform"
 #endif
+
+struct ds1302_rtc {
+	struct rtc_device *rtc_dev;
+	spinlock_t lock;
+};
 
 static void ds1302_sendbits(unsigned int val)
 {
@@ -97,6 +103,10 @@ static void ds1302_writebyte(unsigned int addr, unsigned int val)
 
 static int ds1302_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
+	struct ds1302_rtc *rtc = dev_get_drvdata(dev);
+
+	spin_lock_irq(&rtc->lock);
+
 	tm->tm_sec	= bcd2bin(ds1302_readbyte(RTC_ADDR_SEC));
 	tm->tm_min	= bcd2bin(ds1302_readbyte(RTC_ADDR_MIN));
 	tm->tm_hour	= bcd2bin(ds1302_readbyte(RTC_ADDR_HOUR));
@@ -108,17 +118,26 @@ static int ds1302_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	if (tm->tm_year < 70)
 		tm->tm_year += 100;
 
+	spin_unlock_irq(&rtc->lock);
+
 	dev_dbg(dev, "%s: tm is secs=%d, mins=%d, hours=%d, "
 		"mday=%d, mon=%d, year=%d, wday=%d\n",
 		__func__,
 		tm->tm_sec, tm->tm_min, tm->tm_hour,
 		tm->tm_mday, tm->tm_mon + 1, tm->tm_year, tm->tm_wday);
 
-	return rtc_valid_tm(tm);
+	if (rtc_valid_tm(tm) < 0)
+		dev_err(dev, "invalid date\n");
+
+	return 0;
 }
 
 static int ds1302_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
+	struct ds1302_rtc *rtc = dev_get_drvdata(dev);
+
+	spin_lock_irq(&rtc->lock);
+
 	/* Stop RTC */
 	ds1302_writebyte(RTC_ADDR_SEC, ds1302_readbyte(RTC_ADDR_SEC) | 0x80);
 
@@ -132,6 +151,8 @@ static int ds1302_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 	/* Start RTC */
 	ds1302_writebyte(RTC_ADDR_SEC, ds1302_readbyte(RTC_ADDR_SEC) & ~0x80);
+
+	spin_unlock_irq(&rtc->lock);
 
 	return 0;
 }
@@ -149,7 +170,9 @@ static int ds1302_rtc_ioctl(struct device *dev, unsigned int cmd,
 		if (copy_from_user(&tcs_val, (int __user *)arg, sizeof(int)))
 			return -EFAULT;
 
+		spin_lock_irq(&rtc->lock);
 		ds1302_writebyte(RTC_ADDR_TCR, (0xa0 | tcs_val * 0xf));
+		spin_unlock_irq(&rtc->lock);
 		return 0;
 	}
 #endif
@@ -164,9 +187,10 @@ static struct rtc_class_ops ds1302_rtc_ops = {
 	.ioctl		= ds1302_rtc_ioctl,
 };
 
-static int __init ds1302_rtc_probe(struct platform_device *pdev)
+static int __devinit ds1302_rtc_probe(struct platform_device *pdev)
 {
-	struct rtc_device *rtc;
+	struct ds1302_rtc *rtc;
+	int ret;
 
 	/* Reset */
 	set_dp(get_dp() & ~(RTC_RESET | RTC_IODATA | RTC_SCLK));
@@ -176,22 +200,36 @@ static int __init ds1302_rtc_probe(struct platform_device *pdev)
 	if (ds1302_readbyte(RTC_ADDR_RAM0) != 0x42)
 		return -ENODEV;
 
-	rtc = rtc_device_register("ds1302", &pdev->dev,
+	rtc = kzalloc(sizeof(struct ds1302_rtc), GFP_KERNEL);
+	if (unlikely(!rtc))
+		return -ENOMEM;
+
+	spin_lock_init(&rtc->lock);
+	rtc->rtc_dev = rtc_device_register("ds1302", &pdev->dev,
 					   &ds1302_rtc_ops, THIS_MODULE);
-	if (IS_ERR(rtc))
-		return PTR_ERR(rtc);
+	if (IS_ERR(rtc->rtc_dev)) {
+		ret = PTR_ERR(rtc->rtc_dev);
+		goto out;
+	}
 
 	platform_set_drvdata(pdev, rtc);
 
 	return 0;
+out:
+	kfree(rtc);
+	return ret;
 }
 
 static int __devexit ds1302_rtc_remove(struct platform_device *pdev)
 {
-	struct rtc_device *rtc = platform_get_drvdata(pdev);
+	struct ds1302_rtc *rtc = platform_get_drvdata(pdev);
 
-	rtc_device_unregister(rtc);
+	if (likely(rtc->rtc_dev))
+		rtc_device_unregister(rtc->rtc_dev);
+
 	platform_set_drvdata(pdev, NULL);
+
+	kfree(rtc);
 
 	return 0;
 }
@@ -201,12 +239,13 @@ static struct platform_driver ds1302_platform_driver = {
 		.name	= DRV_NAME,
 		.owner	= THIS_MODULE,
 	},
-	.remove		= __exit_p(ds1302_rtc_remove),
+	.probe		= ds1302_rtc_probe,
+	.remove		= __devexit_p(ds1302_rtc_remove),
 };
 
 static int __init ds1302_rtc_init(void)
 {
-	return platform_driver_probe(&ds1302_platform_driver, ds1302_rtc_probe);
+	return platform_driver_register(&ds1302_platform_driver);
 }
 
 static void __exit ds1302_rtc_exit(void)

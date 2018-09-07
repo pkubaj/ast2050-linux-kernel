@@ -551,8 +551,7 @@ static int ks8842_close(struct net_device *netdev)
 	return 0;
 }
 
-static netdev_tx_t ks8842_xmit_frame(struct sk_buff *skb,
-				     struct net_device *netdev)
+static int ks8842_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
 	int ret;
 	struct ks8842_adapter *adapter = netdev_priv(netdev);
@@ -619,7 +618,7 @@ static const struct net_device_ops ks8842_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr
 };
 
-static const struct ethtool_ops ks8842_ethtool_ops = {
+static struct ethtool_ops ks8842_ethtool_ops = {
 	.get_link		= ethtool_op_get_link,
 };
 

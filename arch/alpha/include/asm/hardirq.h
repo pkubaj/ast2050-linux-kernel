@@ -1,9 +1,17 @@
 #ifndef _ALPHA_HARDIRQ_H
 #define _ALPHA_HARDIRQ_H
 
-void ack_bad_irq(unsigned int irq);
-#define ack_bad_irq ack_bad_irq
+#include <linux/threads.h>
+#include <linux/cache.h>
 
-#include <asm-generic/hardirq.h>
+
+/* entry.S is sensitive to the offsets of these fields */
+typedef struct {
+	unsigned long __softirq_pending;
+} ____cacheline_aligned irq_cpustat_t;
+
+#include <linux/irq_cpustat.h>	/* Standard mappings for irq_cpustat_t above */
+
+void ack_bad_irq(unsigned int irq);
 
 #endif /* _ALPHA_HARDIRQ_H */

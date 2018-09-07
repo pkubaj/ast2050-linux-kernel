@@ -86,9 +86,7 @@ static unsigned int rds_iw_unmap_fastreg_list(struct rds_iw_mr_pool *pool,
 			struct list_head *kill_list);
 static void rds_iw_destroy_fastreg(struct rds_iw_mr_pool *pool, struct rds_iw_mr *ibmr);
 
-static int rds_iw_get_device(struct sockaddr_in *src, struct sockaddr_in *dst,
-			     struct rds_iw_device **rds_iwdev,
-			     struct rdma_cm_id **cm_id)
+static int rds_iw_get_device(struct rds_sock *rs, struct rds_iw_device **rds_iwdev, struct rdma_cm_id **cm_id)
 {
 	struct rds_iw_device *iwdev;
 	struct rds_iw_cm_id *i_cm_id;
@@ -112,15 +110,15 @@ static int rds_iw_get_device(struct sockaddr_in *src, struct sockaddr_in *dst,
 				src_addr->sin_port,
 				dst_addr->sin_addr.s_addr,
 				dst_addr->sin_port,
-				src->sin_addr.s_addr,
-				src->sin_port,
-				dst->sin_addr.s_addr,
-				dst->sin_port);
+				rs->rs_bound_addr,
+				rs->rs_bound_port,
+				rs->rs_conn_addr,
+				rs->rs_conn_port);
 #ifdef WORKING_TUPLE_DETECTION
-			if (src_addr->sin_addr.s_addr == src->sin_addr.s_addr &&
-			    src_addr->sin_port == src->sin_port &&
-			    dst_addr->sin_addr.s_addr == dst->sin_addr.s_addr &&
-			    dst_addr->sin_port == dst->sin_port) {
+			if (src_addr->sin_addr.s_addr == rs->rs_bound_addr &&
+			    src_addr->sin_port == rs->rs_bound_port &&
+			    dst_addr->sin_addr.s_addr == rs->rs_conn_addr &&
+			    dst_addr->sin_port == rs->rs_conn_port) {
 #else
 			/* FIXME - needs to compare the local and remote
 			 * ipaddr/port tuple, but the ipaddr is the only
@@ -128,7 +126,7 @@ static int rds_iw_get_device(struct sockaddr_in *src, struct sockaddr_in *dst,
 			 * zero'ed.  It doesn't appear to be properly populated
 			 * during connection setup...
 			 */
-			if (src_addr->sin_addr.s_addr == src->sin_addr.s_addr) {
+			if (src_addr->sin_addr.s_addr == rs->rs_bound_addr) {
 #endif
 				spin_unlock_irq(&iwdev->spinlock);
 				*rds_iwdev = iwdev;
@@ -179,13 +177,19 @@ int rds_iw_update_cm_id(struct rds_iw_device *rds_iwdev, struct rdma_cm_id *cm_i
 {
 	struct sockaddr_in *src_addr, *dst_addr;
 	struct rds_iw_device *rds_iwdev_old;
+	struct rds_sock rs;
 	struct rdma_cm_id *pcm_id;
 	int rc;
 
 	src_addr = (struct sockaddr_in *)&cm_id->route.addr.src_addr;
 	dst_addr = (struct sockaddr_in *)&cm_id->route.addr.dst_addr;
 
-	rc = rds_iw_get_device(src_addr, dst_addr, &rds_iwdev_old, &pcm_id);
+	rs.rs_bound_addr = src_addr->sin_addr.s_addr;
+	rs.rs_bound_port = src_addr->sin_port;
+	rs.rs_conn_addr = dst_addr->sin_addr.s_addr;
+	rs.rs_conn_port = dst_addr->sin_port;
+
+	rc = rds_iw_get_device(&rs, &rds_iwdev_old, &pcm_id);
 	if (rc)
 		rds_iw_remove_cm_id(rds_iwdev, cm_id);
 
@@ -259,11 +263,17 @@ static void rds_iw_set_scatterlist(struct rds_iw_scatterlist *sg,
 }
 
 static u64 *rds_iw_map_scatterlist(struct rds_iw_device *rds_iwdev,
-			struct rds_iw_scatterlist *sg)
+			struct rds_iw_scatterlist *sg,
+			unsigned int dma_page_shift)
 {
 	struct ib_device *dev = rds_iwdev->dev;
 	u64 *dma_pages = NULL;
+	u64 dma_mask;
+	unsigned int dma_page_size;
 	int i, j, ret;
+
+	dma_page_size = 1 << dma_page_shift;
+	dma_mask = dma_page_size - 1;
 
 	WARN_ON(sg->dma_len);
 
@@ -285,18 +295,18 @@ static u64 *rds_iw_map_scatterlist(struct rds_iw_device *rds_iwdev,
 		sg->bytes += dma_len;
 
 		end_addr = dma_addr + dma_len;
-		if (dma_addr & PAGE_MASK) {
+		if (dma_addr & dma_mask) {
 			if (i > 0)
 				goto out_unmap;
-			dma_addr &= ~PAGE_MASK;
+			dma_addr &= ~dma_mask;
 		}
-		if (end_addr & PAGE_MASK) {
+		if (end_addr & dma_mask) {
 			if (i < sg->dma_len - 1)
 				goto out_unmap;
-			end_addr = (end_addr + PAGE_MASK) & ~PAGE_MASK;
+			end_addr = (end_addr + dma_mask) & ~dma_mask;
 		}
 
-		sg->dma_npages += (end_addr - dma_addr) >> PAGE_SHIFT;
+		sg->dma_npages += (end_addr - dma_addr) >> dma_page_shift;
 	}
 
 	/* Now gather the dma addrs into one list */
@@ -315,8 +325,8 @@ static u64 *rds_iw_map_scatterlist(struct rds_iw_device *rds_iwdev,
 		u64 end_addr;
 
 		end_addr = dma_addr + dma_len;
-		dma_addr &= ~PAGE_MASK;
-		for (; dma_addr < end_addr; dma_addr += PAGE_SIZE)
+		dma_addr &= ~dma_mask;
+		for (; dma_addr < end_addr; dma_addr += dma_page_size)
 			dma_pages[j++] = dma_addr;
 		BUG_ON(j > sg->dma_npages);
 	}
@@ -605,17 +615,9 @@ void *rds_iw_get_mr(struct scatterlist *sg, unsigned long nents,
 	struct rds_iw_device *rds_iwdev;
 	struct rds_iw_mr *ibmr = NULL;
 	struct rdma_cm_id *cm_id;
-	struct sockaddr_in src = {
-		.sin_addr.s_addr = rs->rs_bound_addr,
-		.sin_port = rs->rs_bound_port,
-	};
-	struct sockaddr_in dst = {
-		.sin_addr.s_addr = rs->rs_conn_addr,
-		.sin_port = rs->rs_conn_port,
-	};
 	int ret;
 
-	ret = rds_iw_get_device(&src, &dst, &rds_iwdev, &cm_id);
+	ret = rds_iw_get_device(rs, &rds_iwdev, &cm_id);
 	if (ret || !cm_id) {
 		ret = -ENODEV;
 		goto out;
@@ -725,7 +727,7 @@ static int rds_iw_rdma_build_fastreg(struct rds_iw_mapping *mapping)
 	f_wr.wr.fast_reg.rkey = mapping->m_rkey;
 	f_wr.wr.fast_reg.page_list = ibmr->page_list;
 	f_wr.wr.fast_reg.page_list_len = mapping->m_sg.dma_len;
-	f_wr.wr.fast_reg.page_shift = PAGE_SHIFT;
+	f_wr.wr.fast_reg.page_shift = ibmr->device->page_shift;
 	f_wr.wr.fast_reg.access_flags = IB_ACCESS_LOCAL_WRITE |
 				IB_ACCESS_REMOTE_READ |
 				IB_ACCESS_REMOTE_WRITE;
@@ -778,7 +780,9 @@ static int rds_iw_map_fastreg(struct rds_iw_mr_pool *pool,
 
 	rds_iw_set_scatterlist(&mapping->m_sg, sg, sg_len);
 
-	dma_pages = rds_iw_map_scatterlist(rds_iwdev, &mapping->m_sg);
+	dma_pages = rds_iw_map_scatterlist(rds_iwdev,
+				&mapping->m_sg,
+				rds_iwdev->page_shift);
 	if (IS_ERR(dma_pages)) {
 		ret = PTR_ERR(dma_pages);
 		dma_pages = NULL;

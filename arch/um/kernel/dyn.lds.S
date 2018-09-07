@@ -16,7 +16,11 @@ SECTIONS
   _text = .;
   _stext = .;
   __init_begin = .;
-  INIT_TEXT_SECTION(PAGE_SIZE)
+  .init.text : {
+	_sinittext = .;
+	INIT_TEXT
+	_einittext = .;
+  }
 
   . = ALIGN(PAGE_SIZE);
 
@@ -50,18 +54,8 @@ SECTIONS
   .rela.got       : { *(.rela.got) }
   .rel.bss        : { *(.rel.bss .rel.bss.* .rel.gnu.linkonce.b.*) }
   .rela.bss       : { *(.rela.bss .rela.bss.* .rela.gnu.linkonce.b.*) }
-  .rel.plt : {
-	*(.rel.plt)
-	PROVIDE_HIDDEN(__rel_iplt_start = .);
-	*(.rel.iplt)
-	PROVIDE_HIDDEN(__rel_iplt_end = .);
-  }
-  .rela.plt : {
-	*(.rela.plt)
-	PROVIDE_HIDDEN(__rela_iplt_start = .);
-	*(.rela.iplt)
-	PROVIDE_HIDDEN(__rela_iplt_end = .);
-  }
+  .rel.plt        : { *(.rel.plt) }
+  .rela.plt       : { *(.rela.plt) }
   .init           : {
     KEEP (*(.init))
   } =0x90909090
@@ -102,7 +96,8 @@ SECTIONS
   .init_array     : { *(.init_array) }
   .fini_array     : { *(.fini_array) }
   .data           : {
-    INIT_TASK_DATA(KERNEL_STACK_SIZE)
+    . = ALIGN(KERNEL_STACK_SIZE);		/* init_task */
+    *(.data.init_task)
     . = ALIGN(KERNEL_STACK_SIZE);
     *(.data.init_irqstack)
     DATA_DATA
@@ -161,6 +156,4 @@ SECTIONS
   STABS_DEBUG
 
   DWARF_DEBUG
-
-  DISCARDS
 }

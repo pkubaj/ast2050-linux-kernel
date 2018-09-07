@@ -1,9 +1,3 @@
-/*
- * Copyright 2004-2006 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
- */
-
 #ifndef _BFIN_STAT_H
 #define _BFIN_STAT_H
 

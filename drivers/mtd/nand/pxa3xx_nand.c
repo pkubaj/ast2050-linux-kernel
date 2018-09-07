@@ -102,7 +102,6 @@ enum {
 	ERR_SENDCMD	= -2,
 	ERR_DBERR	= -3,
 	ERR_BBERR	= -4,
-	ERR_SBERR	= -5,
 };
 
 enum {
@@ -316,7 +315,7 @@ static struct pxa3xx_nand_flash *builtin_flash_types[] = {
 #define tAR_NDTR1(r)	(((r) >> 0) & 0xf)
 
 /* convert nano-seconds to nand flash controller clock cycles */
-#define ns2cycle(ns, clk)	(int)((ns) * (clk / 1000000) / 1000)
+#define ns2cycle(ns, clk)	(int)(((ns) * (clk / 1000000) / 1000) - 1)
 
 /* convert nand flash controller clock cycles to nano-seconds */
 #define cycle2ns(c, clk)	((((c) + 1) * 1000000 + clk / 500) / (clk / 1000))
@@ -565,13 +564,11 @@ static irqreturn_t pxa3xx_nand_irq(int irq, void *devid)
 
 	status = nand_readl(info, NDSR);
 
-	if (status & (NDSR_RDDREQ | NDSR_DBERR | NDSR_SBERR)) {
+	if (status & (NDSR_RDDREQ | NDSR_DBERR)) {
 		if (status & NDSR_DBERR)
 			info->retcode = ERR_DBERR;
-		else if (status & NDSR_SBERR)
-			info->retcode = ERR_SBERR;
 
-		disable_int(info, NDSR_RDDREQ | NDSR_DBERR | NDSR_SBERR);
+		disable_int(info, NDSR_RDDREQ | NDSR_DBERR);
 
 		if (info->use_dma) {
 			info->state = STATE_DMA_READING;
@@ -673,7 +670,7 @@ static void pxa3xx_nand_cmdfunc(struct mtd_info *mtd, unsigned command,
 		if (prepare_read_prog_cmd(info, cmdset->read1, column, page_addr))
 			break;
 
-		pxa3xx_nand_do_cmd(info, NDSR_RDDREQ | NDSR_DBERR | NDSR_SBERR);
+		pxa3xx_nand_do_cmd(info, NDSR_RDDREQ | NDSR_DBERR);
 
 		/* We only are OOB, so if the data has error, does not matter */
 		if (info->retcode == ERR_DBERR)
@@ -690,7 +687,7 @@ static void pxa3xx_nand_cmdfunc(struct mtd_info *mtd, unsigned command,
 		if (prepare_read_prog_cmd(info, cmdset->read1, column, page_addr))
 			break;
 
-		pxa3xx_nand_do_cmd(info, NDSR_RDDREQ | NDSR_DBERR | NDSR_SBERR);
+		pxa3xx_nand_do_cmd(info, NDSR_RDDREQ | NDSR_DBERR);
 
 		if (info->retcode == ERR_DBERR) {
 			/* for blank page (all 0xff), HW will calculate its ECC as
@@ -864,12 +861,8 @@ static int pxa3xx_nand_ecc_correct(struct mtd_info *mtd,
 	 * consider it as a ecc error which will tell the caller the
 	 * read fail We have distinguish all the errors, but the
 	 * nand_read_ecc only check this function return value
-	 *
-	 * Corrected (single-bit) errors must also be noted.
 	 */
-	if (info->retcode == ERR_SBERR)
-		return 1;
-	else if (info->retcode != ERR_NONE)
+	if (info->retcode != ERR_NONE)
 		return -1;
 
 	return 0;

@@ -40,12 +40,13 @@ extern unsigned int nmi_watchdog;
 #define NMI_INVALID	3
 
 struct ctl_table;
-extern int proc_nmi_enabled(struct ctl_table *, int ,
+struct file;
+extern int proc_nmi_enabled(struct ctl_table *, int , struct file *,
 			void __user *, size_t *, loff_t *);
 extern int unknown_nmi_panic;
 
-void arch_trigger_all_cpu_backtrace(void);
-#define arch_trigger_all_cpu_backtrace arch_trigger_all_cpu_backtrace
+void __trigger_all_cpu_backtrace(void);
+#define trigger_all_cpu_backtrace() __trigger_all_cpu_backtrace()
 
 static inline void localise_nmi_watchdog(void)
 {

@@ -48,6 +48,13 @@ static __read_mostly int sched_clock_running;
 __read_mostly int sched_clock_stable;
 
 struct sched_clock_data {
+	/*
+	 * Raw spinlock - this is a special case: this might be called
+	 * from within instrumentation code so we dont want to do any
+	 * instrumentation ourselves.
+	 */
+	raw_spinlock_t		lock;
+
 	u64			tick_raw;
 	u64			tick_gtod;
 	u64			clock;
@@ -73,6 +80,7 @@ void sched_clock_init(void)
 	for_each_possible_cpu(cpu) {
 		struct sched_clock_data *scd = cpu_sdc(cpu);
 
+		scd->lock = (raw_spinlock_t)__RAW_SPIN_LOCK_UNLOCKED;
 		scd->tick_raw = 0;
 		scd->tick_gtod = ktime_now;
 		scd->clock = ktime_now;
@@ -101,18 +109,13 @@ static inline u64 wrap_max(u64 x, u64 y)
  *  - filter out backward motion
  *  - use the GTOD tick value to create a window to filter crazy TSC values
  */
-static u64 sched_clock_local(struct sched_clock_data *scd)
+static u64 __update_sched_clock(struct sched_clock_data *scd, u64 now)
 {
-	u64 now, clock, old_clock, min_clock, max_clock;
-	s64 delta;
+	s64 delta = now - scd->tick_raw;
+	u64 clock, min_clock, max_clock;
 
-again:
-	now = sched_clock();
-	delta = now - scd->tick_raw;
 	if (unlikely(delta < 0))
 		delta = 0;
-
-	old_clock = scd->clock;
 
 	/*
 	 * scd->clock = clamp(scd->tick_gtod + delta,
@@ -121,73 +124,84 @@ again:
 	 */
 
 	clock = scd->tick_gtod + delta;
-	min_clock = wrap_max(scd->tick_gtod, old_clock);
-	max_clock = wrap_max(old_clock, scd->tick_gtod + TICK_NSEC);
+	min_clock = wrap_max(scd->tick_gtod, scd->clock);
+	max_clock = wrap_max(scd->clock, scd->tick_gtod + TICK_NSEC);
 
 	clock = wrap_max(clock, min_clock);
 	clock = wrap_min(clock, max_clock);
 
-	if (cmpxchg64(&scd->clock, old_clock, clock) != old_clock)
-		goto again;
+	scd->clock = clock;
 
-	return clock;
+	return scd->clock;
 }
 
-static u64 sched_clock_remote(struct sched_clock_data *scd)
+static void lock_double_clock(struct sched_clock_data *data1,
+				struct sched_clock_data *data2)
 {
-	struct sched_clock_data *my_scd = this_scd();
-	u64 this_clock, remote_clock;
-	u64 *ptr, old_val, val;
-
-	sched_clock_local(my_scd);
-again:
-	this_clock = my_scd->clock;
-	remote_clock = scd->clock;
-
-	/*
-	 * Use the opportunity that we have both locks
-	 * taken to couple the two clocks: we take the
-	 * larger time as the latest time for both
-	 * runqueues. (this creates monotonic movement)
-	 */
-	if (likely((s64)(remote_clock - this_clock) < 0)) {
-		ptr = &scd->clock;
-		old_val = remote_clock;
-		val = this_clock;
+	if (data1 < data2) {
+		__raw_spin_lock(&data1->lock);
+		__raw_spin_lock(&data2->lock);
 	} else {
-		/*
-		 * Should be rare, but possible:
-		 */
-		ptr = &my_scd->clock;
-		old_val = this_clock;
-		val = remote_clock;
+		__raw_spin_lock(&data2->lock);
+		__raw_spin_lock(&data1->lock);
 	}
-
-	if (cmpxchg64(ptr, old_val, val) != old_val)
-		goto again;
-
-	return val;
 }
 
 u64 sched_clock_cpu(int cpu)
 {
+	u64 now, clock, this_clock, remote_clock;
 	struct sched_clock_data *scd;
-	u64 clock;
-
-	WARN_ON_ONCE(!irqs_disabled());
 
 	if (sched_clock_stable)
 		return sched_clock();
 
+	scd = cpu_sdc(cpu);
+
+	/*
+	 * Normally this is not called in NMI context - but if it is,
+	 * trying to do any locking here is totally lethal.
+	 */
+	if (unlikely(in_nmi()))
+		return scd->clock;
+
 	if (unlikely(!sched_clock_running))
 		return 0ull;
 
-	scd = cpu_sdc(cpu);
+	WARN_ON_ONCE(!irqs_disabled());
+	now = sched_clock();
 
-	if (cpu != smp_processor_id())
-		clock = sched_clock_remote(scd);
-	else
-		clock = sched_clock_local(scd);
+	if (cpu != raw_smp_processor_id()) {
+		struct sched_clock_data *my_scd = this_scd();
+
+		lock_double_clock(scd, my_scd);
+
+		this_clock = __update_sched_clock(my_scd, now);
+		remote_clock = scd->clock;
+
+		/*
+		 * Use the opportunity that we have both locks
+		 * taken to couple the two clocks: we take the
+		 * larger time as the latest time for both
+		 * runqueues. (this creates monotonic movement)
+		 */
+		if (likely((s64)(remote_clock - this_clock) < 0)) {
+			clock = this_clock;
+			scd->clock = clock;
+		} else {
+			/*
+			 * Should be rare, but possible:
+			 */
+			clock = remote_clock;
+			my_scd->clock = remote_clock;
+		}
+
+		__raw_spin_unlock(&my_scd->lock);
+	} else {
+		__raw_spin_lock(&scd->lock);
+		clock = __update_sched_clock(scd, now);
+	}
+
+	__raw_spin_unlock(&scd->lock);
 
 	return clock;
 }
@@ -209,9 +223,11 @@ void sched_clock_tick(void)
 	now_gtod = ktime_to_ns(ktime_get());
 	now = sched_clock();
 
+	__raw_spin_lock(&scd->lock);
 	scd->tick_raw = now;
 	scd->tick_gtod = now_gtod;
-	sched_clock_local(scd);
+	__update_sched_clock(scd, now);
+	__raw_spin_unlock(&scd->lock);
 }
 
 /*
@@ -236,18 +252,6 @@ void sched_clock_idle_wakeup_event(u64 delta_ns)
 }
 EXPORT_SYMBOL_GPL(sched_clock_idle_wakeup_event);
 
-unsigned long long cpu_clock(int cpu)
-{
-	unsigned long long clock;
-	unsigned long flags;
-
-	local_irq_save(flags);
-	clock = sched_clock_cpu(cpu);
-	local_irq_restore(flags);
-
-	return clock;
-}
-
 #else /* CONFIG_HAVE_UNSTABLE_SCHED_CLOCK */
 
 void sched_clock_init(void)
@@ -263,12 +267,17 @@ u64 sched_clock_cpu(int cpu)
 	return sched_clock();
 }
 
+#endif /* CONFIG_HAVE_UNSTABLE_SCHED_CLOCK */
 
 unsigned long long cpu_clock(int cpu)
 {
-	return sched_clock_cpu(cpu);
+	unsigned long long clock;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	clock = sched_clock_cpu(cpu);
+	local_irq_restore(flags);
+
+	return clock;
 }
-
-#endif /* CONFIG_HAVE_UNSTABLE_SCHED_CLOCK */
-
 EXPORT_SYMBOL_GPL(cpu_clock);

@@ -13,7 +13,4 @@ struct dma_map_ops *dma_ops;
 #endif
 };
 
-struct pdev_archdata {
-};
-
 #endif /* _ASM_X86_DEVICE_H */

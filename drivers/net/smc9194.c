@@ -299,8 +299,7 @@ static void smc_hardware_send_packet( struct net_device * dev );
  . to store the packet, I call this routine, which either sends it
  . now, or generates an interrupt when the card is ready for the
  . packet */
-static netdev_tx_t  smc_wait_to_send_packet( struct sk_buff * skb,
-					     struct net_device *dev );
+static int  smc_wait_to_send_packet( struct sk_buff * skb, struct net_device *dev );
 
 /* this does a soft reset on the device */
 static void smc_reset( int ioaddr );
@@ -488,8 +487,7 @@ static void smc_setmulticast( int ioaddr, int count, struct dev_mc_list * addrs 
  . o 	(NO): Enable interrupts and let the interrupt handler deal with it.
  . o	(YES):Send it now.
 */
-static netdev_tx_t smc_wait_to_send_packet(struct sk_buff *skb,
-					   struct net_device *dev)
+static int smc_wait_to_send_packet( struct sk_buff * skb, struct net_device * dev )
 {
 	struct smc_local *lp = netdev_priv(dev);
 	unsigned int ioaddr 	= dev->base_addr;
@@ -514,7 +512,7 @@ static netdev_tx_t smc_wait_to_send_packet(struct sk_buff *skb,
 	if (length < ETH_ZLEN) {
 		if (skb_padto(skb, ETH_ZLEN)) {
 			netif_wake_queue(dev);
-			return NETDEV_TX_OK;
+			return 0;
 		}
 		length = ETH_ZLEN;
 	}
@@ -536,7 +534,7 @@ static netdev_tx_t smc_wait_to_send_packet(struct sk_buff *skb,
 		lp->saved_skb = NULL;
 		/* this IS an error, but, i don't want the skb saved */
 		netif_wake_queue(dev);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	/* either way, a packet is waiting now */
 	lp->packets_waiting++;
@@ -573,12 +571,12 @@ static netdev_tx_t smc_wait_to_send_packet(struct sk_buff *skb,
 		SMC_ENABLE_INT( IM_ALLOC_INT );
       		PRINTK2((CARDNAME": memory allocation deferred. \n"));
 		/* it's deferred, but I'll handle it later */
-      		return NETDEV_TX_OK;
+      		return 0;
    	}
 	/* or YES! I can send the packet now.. */
 	smc_hardware_send_packet(dev);
 	netif_wake_queue(dev);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*

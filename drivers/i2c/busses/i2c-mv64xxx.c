@@ -293,13 +293,13 @@ mv64xxx_i2c_do_action(struct mv64xxx_i2c_data *drv_data)
 	}
 }
 
-static irqreturn_t
+static int
 mv64xxx_i2c_intr(int irq, void *dev_id)
 {
 	struct mv64xxx_i2c_data	*drv_data = dev_id;
 	unsigned long	flags;
 	u32		status;
-	irqreturn_t	rc = IRQ_NONE;
+	int		rc = IRQ_NONE;
 
 	spin_lock_irqsave(&drv_data->lock, flags);
 	while (readl(drv_data->reg_base + MV64XXX_I2C_REG_CONTROL) &

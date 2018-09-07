@@ -60,7 +60,16 @@
 #ifndef _P80211HDR_H
 #define _P80211HDR_H
 
+/*================================================================*/
+/* System Includes */
+
 #include <linux/if_ether.h>
+
+/*================================================================*/
+/* Project Includes */
+
+/*================================================================*/
+/* Constants */
 
 /*--- Sizes -----------------------------------------------*/
 #define WLAN_CRC_LEN			4
@@ -112,6 +121,9 @@
 #define WLAN_FSTYPE_CFPOLL		0x06
 #define WLAN_FSTYPE_CFACK_CFPOLL	0x07
 
+/*================================================================*/
+/* Macros */
+
 /*--- FC Macros ----------------------------------------------*/
 /* Macros to get/set the bitfields of the Frame Control Field */
 /*  GET_FC_??? - takes the host byte-order value of an FC     */
@@ -144,6 +156,9 @@
 #define WLAN_SET_FC_ISWEP(n)	(((u16)(n)) << 14)
 
 #define DOT11_RATE5_ISBASIC_GET(r)     (((u8)(r)) & BIT(7))
+
+/*================================================================*/
+/* Types */
 
 /* Generic 802.11 Header types */
 

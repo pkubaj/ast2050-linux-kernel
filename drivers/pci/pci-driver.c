@@ -19,98 +19,37 @@
 #include <linux/cpu.h>
 #include "pci.h"
 
+/*
+ * Dynamic device IDs are disabled for !CONFIG_HOTPLUG
+ */
+
 struct pci_dynid {
 	struct list_head node;
 	struct pci_device_id id;
 };
 
-/**
- * pci_add_dynid - add a new PCI device ID to this driver and re-probe devices
- * @drv: target pci driver
- * @vendor: PCI vendor ID
- * @device: PCI device ID
- * @subvendor: PCI subvendor ID
- * @subdevice: PCI subdevice ID
- * @class: PCI class
- * @class_mask: PCI class mask
- * @driver_data: private driver data
- *
- * Adds a new dynamic pci device ID to this driver and causes the
- * driver to probe for all devices again.  @drv must have been
- * registered prior to calling this function.
- *
- * CONTEXT:
- * Does GFP_KERNEL allocation.
- *
- * RETURNS:
- * 0 on success, -errno on failure.
- */
-int pci_add_dynid(struct pci_driver *drv,
-		  unsigned int vendor, unsigned int device,
-		  unsigned int subvendor, unsigned int subdevice,
-		  unsigned int class, unsigned int class_mask,
-		  unsigned long driver_data)
-{
-	struct pci_dynid *dynid;
-	int retval;
-
-	dynid = kzalloc(sizeof(*dynid), GFP_KERNEL);
-	if (!dynid)
-		return -ENOMEM;
-
-	dynid->id.vendor = vendor;
-	dynid->id.device = device;
-	dynid->id.subvendor = subvendor;
-	dynid->id.subdevice = subdevice;
-	dynid->id.class = class;
-	dynid->id.class_mask = class_mask;
-	dynid->id.driver_data = driver_data;
-
-	spin_lock(&drv->dynids.lock);
-	list_add_tail(&dynid->node, &drv->dynids.list);
-	spin_unlock(&drv->dynids.lock);
-
-	get_driver(&drv->driver);
-	retval = driver_attach(&drv->driver);
-	put_driver(&drv->driver);
-
-	return retval;
-}
-
-static void pci_free_dynids(struct pci_driver *drv)
-{
-	struct pci_dynid *dynid, *n;
-
-	spin_lock(&drv->dynids.lock);
-	list_for_each_entry_safe(dynid, n, &drv->dynids.list, node) {
-		list_del(&dynid->node);
-		kfree(dynid);
-	}
-	spin_unlock(&drv->dynids.lock);
-}
-
-/*
- * Dynamic device ID manipulation via sysfs is disabled for !CONFIG_HOTPLUG
- */
 #ifdef CONFIG_HOTPLUG
+
 /**
- * store_new_id - sysfs frontend to pci_add_dynid()
+ * store_new_id - add a new PCI device ID to this driver and re-probe devices
  * @driver: target device driver
  * @buf: buffer for scanning device ID data
  * @count: input size
  *
- * Allow PCI IDs to be added to an existing driver via sysfs.
+ * Adds a new dynamic pci device ID to this driver,
+ * and causes the driver to probe for all devices again.
  */
 static ssize_t
 store_new_id(struct device_driver *driver, const char *buf, size_t count)
 {
+	struct pci_dynid *dynid;
 	struct pci_driver *pdrv = to_pci_driver(driver);
 	const struct pci_device_id *ids = pdrv->id_table;
 	__u32 vendor, device, subvendor=PCI_ANY_ID,
 		subdevice=PCI_ANY_ID, class=0, class_mask=0;
 	unsigned long driver_data=0;
 	int fields=0;
-	int retval;
+	int retval=0;
 
 	fields = sscanf(buf, "%x %x %x %x %x %x %lx",
 			&vendor, &device, &subvendor, &subdevice,
@@ -133,8 +72,27 @@ store_new_id(struct device_driver *driver, const char *buf, size_t count)
 			return retval;
 	}
 
-	retval = pci_add_dynid(pdrv, vendor, device, subvendor, subdevice,
-			       class, class_mask, driver_data);
+	dynid = kzalloc(sizeof(*dynid), GFP_KERNEL);
+	if (!dynid)
+		return -ENOMEM;
+
+	dynid->id.vendor = vendor;
+	dynid->id.device = device;
+	dynid->id.subvendor = subvendor;
+	dynid->id.subdevice = subdevice;
+	dynid->id.class = class;
+	dynid->id.class_mask = class_mask;
+	dynid->id.driver_data = driver_data;
+
+	spin_lock(&pdrv->dynids.lock);
+	list_add_tail(&dynid->node, &pdrv->dynids.list);
+	spin_unlock(&pdrv->dynids.lock);
+
+	if (get_driver(&pdrv->driver)) {
+		retval = driver_attach(&pdrv->driver);
+		put_driver(&pdrv->driver);
+	}
+
 	if (retval)
 		return retval;
 	return count;
@@ -187,6 +145,19 @@ store_remove_id(struct device_driver *driver, const char *buf, size_t count)
 }
 static DRIVER_ATTR(remove_id, S_IWUSR, NULL, store_remove_id);
 
+static void
+pci_free_dynids(struct pci_driver *drv)
+{
+	struct pci_dynid *dynid, *n;
+
+	spin_lock(&drv->dynids.lock);
+	list_for_each_entry_safe(dynid, n, &drv->dynids.list, node) {
+		list_del(&dynid->node);
+		kfree(dynid);
+	}
+	spin_unlock(&drv->dynids.lock);
+}
+
 static int
 pci_create_newid_file(struct pci_driver *drv)
 {
@@ -215,6 +186,7 @@ static void pci_remove_removeid_file(struct pci_driver *drv)
 	driver_remove_file(&drv->driver, &driver_attr_remove_id);
 }
 #else /* !CONFIG_HOTPLUG */
+static inline void pci_free_dynids(struct pci_driver *drv) {}
 static inline int pci_create_newid_file(struct pci_driver *drv)
 {
 	return 0;
@@ -445,6 +417,8 @@ static int pci_legacy_suspend(struct device *dev, pm_message_t state)
 	struct pci_dev * pci_dev = to_pci_dev(dev);
 	struct pci_driver * drv = pci_dev->driver;
 
+	pci_dev->state_saved = false;
+
 	if (drv && drv->suspend) {
 		pci_power_t prev = pci_dev->current_state;
 		int error;
@@ -540,6 +514,7 @@ static int pci_restore_standard_config(struct pci_dev *pci_dev)
 static void pci_pm_default_resume_noirq(struct pci_dev *pci_dev)
 {
 	pci_restore_standard_config(pci_dev);
+	pci_dev->state_saved = false;
 	pci_fixup_device(pci_fixup_resume_early, pci_dev);
 }
 
@@ -600,10 +575,12 @@ static void pci_pm_complete(struct device *dev)
 static int pci_pm_suspend(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_suspend(dev, PMSG_SUSPEND);
+
+	pci_dev->state_saved = false;
 
 	if (!pm) {
 		pci_pm_default_suspend(pci_dev);
@@ -636,7 +613,7 @@ static int pci_pm_suspend(struct device *dev)
 static int pci_pm_suspend_noirq(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_suspend_late(dev, PMSG_SUSPEND);
@@ -695,7 +672,7 @@ static int pci_pm_resume_noirq(struct device *dev)
 static int pci_pm_resume(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 	int error = 0;
 
 	/*
@@ -717,7 +694,7 @@ static int pci_pm_resume(struct device *dev)
 		pci_pm_reenable_device(pci_dev);
 	}
 
-	return error;
+	return 0;
 }
 
 #else /* !CONFIG_SUSPEND */
@@ -734,10 +711,12 @@ static int pci_pm_resume(struct device *dev)
 static int pci_pm_freeze(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_suspend(dev, PMSG_FREEZE);
+
+	pci_dev->state_saved = false;
 
 	if (!pm) {
 		pci_pm_default_suspend(pci_dev);
@@ -801,7 +780,7 @@ static int pci_pm_thaw_noirq(struct device *dev)
 static int pci_pm_thaw(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 	int error = 0;
 
 	if (pci_has_legacy_pm_support(pci_dev))
@@ -814,18 +793,18 @@ static int pci_pm_thaw(struct device *dev)
 		pci_pm_reenable_device(pci_dev);
 	}
 
-	pci_dev->state_saved = false;
-
 	return error;
 }
 
 static int pci_pm_poweroff(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_suspend(dev, PMSG_HIBERNATE);
+
+	pci_dev->state_saved = false;
 
 	if (!pm) {
 		pci_pm_default_suspend(pci_dev);
@@ -893,7 +872,7 @@ static int pci_pm_restore_noirq(struct device *dev)
 static int pci_pm_restore(struct device *dev)
 {
 	struct pci_dev *pci_dev = to_pci_dev(dev);
-	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+	struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 	int error = 0;
 
 	/*
@@ -931,7 +910,7 @@ static int pci_pm_restore(struct device *dev)
 
 #endif /* !CONFIG_HIBERNATION */
 
-const struct dev_pm_ops pci_dev_pm_ops = {
+struct dev_pm_ops pci_dev_pm_ops = {
 	.prepare = pci_pm_prepare,
 	.complete = pci_pm_complete,
 	.suspend = pci_pm_suspend,
@@ -1127,7 +1106,6 @@ static int __init pci_driver_init(void)
 
 postcore_initcall(pci_driver_init);
 
-EXPORT_SYMBOL_GPL(pci_add_dynid);
 EXPORT_SYMBOL(pci_match_id);
 EXPORT_SYMBOL(__pci_register_driver);
 EXPORT_SYMBOL(pci_unregister_driver);

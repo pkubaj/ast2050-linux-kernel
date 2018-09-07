@@ -30,7 +30,6 @@
  */
 #include <linux/kernel.h>
 #include <linux/err.h>
-#include <linux/delay.h>
 
 #include "uwb-internal.h"
 
@@ -324,15 +323,13 @@ int uwbd_msg_handle_reset(struct uwb_event *evt)
 
 	dev_info(&rc->uwb_dev.dev, "resetting radio controller\n");
 	ret = rc->reset(rc);
-	if (ret < 0) {
+	if (ret) {
 		dev_err(&rc->uwb_dev.dev, "failed to reset hardware: %d\n", ret);
 		goto error;
 	}
 	return 0;
 error:
-	/* Nothing can be done except try the reset again. Wait a bit
-	   to avoid reset loops during probe() or remove(). */
-	msleep(1000);
+	/* Nothing can be done except try the reset again. */
 	uwb_rc_reset_all(rc);
 	return ret;
 }
@@ -371,20 +368,22 @@ void uwb_rc_pre_reset(struct uwb_rc *rc)
 }
 EXPORT_SYMBOL_GPL(uwb_rc_pre_reset);
 
-int uwb_rc_post_reset(struct uwb_rc *rc)
+void uwb_rc_post_reset(struct uwb_rc *rc)
 {
 	int ret;
 
 	ret = rc->start(rc);
 	if (ret)
-		goto out;
+		goto error;
 	ret = uwb_rc_mac_addr_set(rc, &rc->uwb_dev.mac_addr);
 	if (ret)
-		goto out;
+		goto error;
 	ret = uwb_rc_dev_addr_set(rc, &rc->uwb_dev.dev_addr);
 	if (ret)
-		goto out;
-out:
-	return ret;
+		goto error;
+	return;
+error:
+	/* Nothing can be done except try the reset again. */
+	uwb_rc_reset_all(rc);
 }
 EXPORT_SYMBOL_GPL(uwb_rc_post_reset);

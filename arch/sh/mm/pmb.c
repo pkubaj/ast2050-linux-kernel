@@ -33,8 +33,6 @@
 
 #define NR_PMB_ENTRIES	16
 
-static void __pmb_unmap(struct pmb_entry *);
-
 static struct kmem_cache *pmb_cache;
 static unsigned long pmb_map;
 
@@ -220,10 +218,9 @@ static struct {
 long pmb_remap(unsigned long vaddr, unsigned long phys,
 	       unsigned long size, unsigned long flags)
 {
-	struct pmb_entry *pmbp, *pmbe;
+	struct pmb_entry *pmbp;
 	unsigned long wanted;
 	int pmb_flags, i;
-	long err;
 
 	/* Convert typical pgprot value to the PMB equivalent */
 	if (flags & _PAGE_CACHABLE) {
@@ -239,22 +236,20 @@ long pmb_remap(unsigned long vaddr, unsigned long phys,
 
 again:
 	for (i = 0; i < ARRAY_SIZE(pmb_sizes); i++) {
+		struct pmb_entry *pmbe;
 		int ret;
 
 		if (size < pmb_sizes[i].size)
 			continue;
 
 		pmbe = pmb_alloc(vaddr, phys, pmb_flags | pmb_sizes[i].flag);
-		if (IS_ERR(pmbe)) {
-			err = PTR_ERR(pmbe);
-			goto out;
-		}
+		if (IS_ERR(pmbe))
+			return PTR_ERR(pmbe);
 
 		ret = set_pmb_entry(pmbe);
 		if (ret != 0) {
 			pmb_free(pmbe);
-			err = -EBUSY;
-			goto out;
+			return -EBUSY;
 		}
 
 		phys	+= pmb_sizes[i].size;
@@ -269,25 +264,12 @@ again:
 			pmbp->link = pmbe;
 
 		pmbp = pmbe;
-
-		/*
-		 * Instead of trying smaller sizes on every iteration
-		 * (even if we succeed in allocating space), try using
-		 * pmb_sizes[i].size again.
-		 */
-		i--;
 	}
 
 	if (size >= 0x1000000)
 		goto again;
 
 	return wanted - size;
-
-out:
-	if (pmbp)
-		__pmb_unmap(pmbp);
-
-	return err;
 }
 
 void pmb_unmap(unsigned long addr)
@@ -301,19 +283,12 @@ void pmb_unmap(unsigned long addr)
 	if (unlikely(!pmbe))
 		return;
 
-	__pmb_unmap(pmbe);
-}
-
-static void __pmb_unmap(struct pmb_entry *pmbe)
-{
 	WARN_ON(!test_bit(pmbe->entry, &pmb_map));
 
 	do {
 		struct pmb_entry *pmblink = pmbe;
 
-		if (pmbe->entry != PMB_NO_ENTRY)
-			clear_pmb_entry(pmbe);
-
+		clear_pmb_entry(pmbe);
 		pmbe = pmblink->link;
 
 		pmb_free(pmblink);

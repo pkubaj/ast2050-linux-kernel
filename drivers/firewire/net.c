@@ -663,6 +663,8 @@ static int fwnet_finish_incoming_packet(struct net_device *net,
 	if (netif_queue_stopped(net))
 		netif_wake_queue(net);
 
+	net->last_rx = jiffies;
+
 	return 0;
 }
 
@@ -1186,7 +1188,7 @@ static int fwnet_stop(struct net_device *net)
 	return 0;
 }
 
-static netdev_tx_t fwnet_tx(struct sk_buff *skb, struct net_device *net)
+static int fwnet_tx(struct sk_buff *skb, struct net_device *net)
 {
 	struct fwnet_header hdr_buf;
 	struct fwnet_device *dev = netdev_priv(net);
@@ -1340,7 +1342,7 @@ static void fwnet_get_drvinfo(struct net_device *net,
 	strcpy(info->bus_info, "ieee1394");
 }
 
-static const struct ethtool_ops fwnet_ethtool_ops = {
+static struct ethtool_ops fwnet_ethtool_ops = {
 	.get_drvinfo = fwnet_get_drvinfo,
 };
 

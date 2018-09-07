@@ -69,7 +69,7 @@ struct threshold_bank {
 	struct threshold_block	*blocks;
 	cpumask_var_t		cpus;
 };
-static DEFINE_PER_CPU(struct threshold_bank * [NR_BANKS], threshold_banks);
+static DEFINE_PER_CPU(struct threshold_bank *, threshold_banks[NR_BANKS]);
 
 #ifdef CONFIG_SMP
 static unsigned char shared_bank[NR_BANKS] = {
@@ -140,7 +140,6 @@ void mce_amd_feature_init(struct cpuinfo_x86 *c)
 				address = (low & MASK_BLKPTR_LO) >> 21;
 				if (!address)
 					break;
-
 				address += MCG_XBLK_ADDR;
 			} else
 				++address;
@@ -148,8 +147,12 @@ void mce_amd_feature_init(struct cpuinfo_x86 *c)
 			if (rdmsr_safe(address, &low, &high))
 				break;
 
-			if (!(high & MASK_VALID_HI))
-				continue;
+			if (!(high & MASK_VALID_HI)) {
+				if (block)
+					continue;
+				else
+					break;
+			}
 
 			if (!(high & MASK_CNTP_HI)  ||
 			     (high & MASK_LOCKED_HI))
@@ -468,7 +471,6 @@ recurse:
 out_free:
 	if (b) {
 		kobject_put(&b->kobj);
-		list_del(&b->miscj);
 		kfree(b);
 	}
 	return err;
@@ -487,15 +489,12 @@ static __cpuinit int threshold_create_bank(unsigned int cpu, unsigned int bank)
 	int i, err = 0;
 	struct threshold_bank *b = NULL;
 	char name[32];
-#ifdef CONFIG_SMP
-	struct cpuinfo_x86 *c = &cpu_data(cpu);
-#endif
 
 	sprintf(name, "threshold_bank%i", bank);
 
 #ifdef CONFIG_SMP
 	if (cpu_data(cpu).cpu_core_id && shared_bank[bank]) {	/* symlink */
-		i = cpumask_first(c->llc_shared_map);
+		i = cpumask_first(cpu_core_mask(cpu));
 
 		/* first core not up yet */
 		if (cpu_data(i).cpu_core_id)
@@ -515,7 +514,7 @@ static __cpuinit int threshold_create_bank(unsigned int cpu, unsigned int bank)
 		if (err)
 			goto out;
 
-		cpumask_copy(b->cpus, c->llc_shared_map);
+		cpumask_copy(b->cpus, cpu_core_mask(cpu));
 		per_cpu(threshold_banks, cpu)[bank] = b;
 
 		goto out;
@@ -540,7 +539,7 @@ static __cpuinit int threshold_create_bank(unsigned int cpu, unsigned int bank)
 #ifndef CONFIG_SMP
 	cpumask_setall(b->cpus);
 #else
-	cpumask_copy(b->cpus, c->llc_shared_map);
+	cpumask_copy(b->cpus, cpu_core_mask(cpu));
 #endif
 
 	per_cpu(threshold_banks, cpu)[bank] = b;

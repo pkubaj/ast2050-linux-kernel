@@ -22,6 +22,7 @@
 #include <linux/signal.h>
 #include <linux/resource.h>
 #include <linux/times.h>
+#include <linux/utsname.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
@@ -340,18 +341,6 @@ off_t ppc32_lseek(unsigned int fd, u32 offset, unsigned int origin)
 {
 	/* sign extend n */
 	return sys_lseek(fd, (int)offset, origin);
-}
-
-long compat_sys_truncate(const char __user * path, u32 length)
-{
-	/* sign extend length */
-	return sys_truncate(path, (int)length);
-}
-
-long compat_sys_ftruncate(int fd, u32 length)
-{
-	/* sign extend length */
-	return sys_ftruncate(fd, (int)length);
 }
 
 /* Note: it is necessary to treat bufsiz as an unsigned int,

@@ -48,8 +48,7 @@ static __always_inline cycles_t vget_cycles(void)
 extern void tsc_init(void);
 extern void mark_tsc_unstable(char *reason);
 extern int unsynchronized_tsc(void);
-extern int check_tsc_unstable(void);
-extern unsigned long native_calibrate_tsc(void);
+int check_tsc_unstable(void);
 
 /*
  * Boot-time check whether the TSCs are synchronized across
@@ -59,7 +58,5 @@ extern void check_tsc_sync_source(int cpu);
 extern void check_tsc_sync_target(void);
 
 extern int notsc_setup(char *);
-extern void save_sched_clock_state(void);
-extern void restore_sched_clock_state(void);
 
 #endif /* _ASM_X86_TSC_H */

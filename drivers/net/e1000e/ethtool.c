@@ -327,18 +327,10 @@ static int e1000_set_pauseparam(struct net_device *netdev,
 
 		hw->fc.current_mode = hw->fc.requested_mode;
 
-		if (hw->phy.media_type == e1000_media_type_fiber) {
-			retval = hw->mac.ops.setup_link(hw);
-			/* implicit goto out */
-		} else {
-			retval = e1000e_force_mac_fc(hw);
-			if (retval)
-				goto out;
-			e1000e_set_fc_watermarks(hw);
-		}
+		retval = ((hw->phy.media_type == e1000_media_type_fiber) ?
+			  hw->mac.ops.setup_link(hw) : e1000e_force_mac_fc(hw));
 	}
 
-out:
 	clear_bit(__E1000_RESETTING, &adapter->state);
 	return retval;
 }

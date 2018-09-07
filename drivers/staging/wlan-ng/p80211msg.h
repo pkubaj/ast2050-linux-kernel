@@ -48,7 +48,13 @@
 #ifndef _P80211MSG_H
 #define _P80211MSG_H
 
+/*================================================================*/
+/* Project Includes */
+
 #define WLAN_DEVNAMELEN_MAX	16
+
+/*--------------------------------------------------------------------*/
+/* Prototype msg type */
 
 typedef struct p80211msg {
 	u32 msgcode;

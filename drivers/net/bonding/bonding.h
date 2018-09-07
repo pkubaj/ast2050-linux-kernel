@@ -163,9 +163,9 @@ struct slave {
 	u32    original_flags;
 	u32    original_mtu;
 	u32    link_failure_count;
-	u8     perm_hwaddr[ETH_ALEN];
 	u16    speed;
 	u8     duplex;
+	u8     perm_hwaddr[ETH_ALEN];
 	struct ad_slave_info ad_info; /* HUGE - better to dynamically alloc */
 	struct tlb_slave_info tlb_info;
 };
@@ -236,11 +236,11 @@ static inline struct slave *bond_get_slave_by_dev(struct bonding *bond, struct n
 
 	bond_for_each_slave(bond, slave, i) {
 		if (slave->dev == slave_dev) {
-			return slave;
+			break;
 		}
 	}
 
-	return 0;
+	return slave;
 }
 
 static inline struct bonding *bond_get_bond_by_slave(struct slave *slave)

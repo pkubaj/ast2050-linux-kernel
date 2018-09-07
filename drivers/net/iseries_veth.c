@@ -1205,7 +1205,7 @@ static int veth_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 		if ( ! ((1 << rlp) & port->lpar_map) ) {
 			dev_kfree_skb(skb);
-			return NETDEV_TX_OK;
+			return 0;
 		}
 
 		lpmask = 1 << rlp;
@@ -1217,7 +1217,7 @@ static int veth_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* You must hold the connection's lock when you call this function. */

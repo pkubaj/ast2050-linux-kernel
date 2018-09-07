@@ -192,16 +192,6 @@ ath5k_eeprom_init_header(struct ath5k_hw *ah)
 	ee->ee_rfkill_pin = (u8) AR5K_REG_MS(val, AR5K_EEPROM_RFKILL_GPIO_SEL);
 	ee->ee_rfkill_pol = val & AR5K_EEPROM_RFKILL_POLARITY ? true : false;
 
-	/* Check if PCIE_OFFSET points to PCIE_SERDES_SECTION
-	 * and enable serdes programming if needed.
-	 *
-	 * XXX: Serdes values seem to be fixed so
-	 * no need to read them here, we write them
-	 * during ath5k_hw_attach */
-	AR5K_EEPROM_READ(AR5K_EEPROM_PCIE_OFFSET, val);
-	ee->ee_serdes = (val == AR5K_EEPROM_PCIE_SERDES_SECTION) ?
-							true : false;
-
 	return 0;
 }
 
@@ -439,11 +429,27 @@ static int ath5k_eeprom_read_modes(struct ath5k_hw *ah, u32 *offset,
 		break;
 	}
 
-	/*
-	 * Read turbo mode information on newer EEPROM versions
-	 */
+done:
+	/* return new offset */
+	*offset = o;
+
+	return 0;
+}
+
+/*
+ * Read turbo mode information on newer EEPROM versions
+ */
+static int
+ath5k_eeprom_read_turbo_modes(struct ath5k_hw *ah,
+			      u32 *offset, unsigned int mode)
+{
+	struct ath5k_eeprom_info *ee = &ah->ah_capabilities.cap_eeprom;
+	u32 o = *offset;
+	u16 val;
+	int ret;
+
 	if (ee->ee_version < AR5K_EEPROM_VERSION_5_0)
-		goto done;
+		return 0;
 
 	switch (mode){
 	case AR5K_EEPROM_MODE_11A:
@@ -477,7 +483,6 @@ static int ath5k_eeprom_read_modes(struct ath5k_hw *ah, u32 *offset,
 		break;
 	}
 
-done:
 	/* return new offset */
 	*offset = o;
 
@@ -512,6 +517,10 @@ ath5k_eeprom_init_modes(struct ath5k_hw *ah)
 			return ret;
 
 		ret = ath5k_eeprom_read_modes(ah, &offset, mode);
+		if (ret)
+			return ret;
+
+		ret = ath5k_eeprom_read_turbo_modes(ah, &offset, mode);
 		if (ret)
 			return ret;
 	}
@@ -1588,12 +1597,14 @@ ath5k_eeprom_free_pcal_info(struct ath5k_hw *ah, int mode)
 		if (!chinfo[pier].pd_curves)
 			continue;
 
-		for (pdg = 0; pdg < AR5K_EEPROM_N_PD_CURVES; pdg++) {
+		for (pdg = 0; pdg < ee->ee_pd_gains[mode]; pdg++) {
 			struct ath5k_pdgain_info *pd =
 					&chinfo[pier].pd_curves[pdg];
 
-			kfree(pd->pd_step);
-			kfree(pd->pd_pwr);
+			if (pd != NULL) {
+				kfree(pd->pd_step);
+				kfree(pd->pd_pwr);
+			}
 		}
 
 		kfree(chinfo[pier].pd_curves);

@@ -16,15 +16,33 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 
-void __update_tlb(struct vm_area_struct *vma, unsigned long address, pte_t pte)
+void update_mmu_cache(struct vm_area_struct * vma,
+		      unsigned long address, pte_t pte)
 {
-	unsigned long flags, pteval, vpn;
+	unsigned long flags;
+	unsigned long pteval;
+	unsigned long vpn;
 
-	/*
-	 * Handle debugger faulting in for debugee.
-	 */
+	/* Ptrace may call this routine. */
 	if (vma && current->active_mm != vma->vm_mm)
 		return;
+
+#ifndef CONFIG_CACHE_OFF
+	{
+		unsigned long pfn = pte_pfn(pte);
+
+		if (pfn_valid(pfn)) {
+			struct page *page = pfn_to_page(pfn);
+
+			if (!test_bit(PG_mapped, &page->flags)) {
+				unsigned long phys = pte_val(pte) & PTE_PHYS_MASK;
+				__flush_wback_region((void *)P1SEGADDR(phys),
+						     PAGE_SIZE);
+				__set_bit(PG_mapped, &page->flags);
+			}
+		}
+	}
+#endif
 
 	local_irq_save(flags);
 

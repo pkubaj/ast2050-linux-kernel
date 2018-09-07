@@ -40,15 +40,20 @@ u32 ath9k_hw_gettxbuf(struct ath_hw *ah, u32 q)
 	return REG_READ(ah, AR_QTXDP(q));
 }
 
-void ath9k_hw_puttxbuf(struct ath_hw *ah, u32 q, u32 txdp)
+bool ath9k_hw_puttxbuf(struct ath_hw *ah, u32 q, u32 txdp)
 {
 	REG_WRITE(ah, AR_QTXDP(q), txdp);
+
+	return true;
 }
 
-void ath9k_hw_txstart(struct ath_hw *ah, u32 q)
+bool ath9k_hw_txstart(struct ath_hw *ah, u32 q)
 {
 	DPRINTF(ah->ah_sc, ATH_DBG_QUEUE, "Enable TXE on queue: %u\n", q);
+
 	REG_WRITE(ah, AR_Q_TXE, 1 << q);
+
+	return true;
 }
 
 u32 ath9k_hw_numtxpending(struct ath_hw *ah, u32 q)
@@ -70,7 +75,7 @@ bool ath9k_hw_updatetxtriglevel(struct ath_hw *ah, bool bIncTrigLevel)
 	u32 txcfg, curLevel, newLevel;
 	enum ath9k_int omask;
 
-	if (ah->tx_trig_level >= ah->config.max_txtrig_level)
+	if (ah->tx_trig_level >= MAX_TX_FIFO_THRESHOLD)
 		return false;
 
 	omask = ath9k_hw_set_interrupts(ah, ah->mask_reg & ~ATH9K_INT_GLOBAL);
@@ -79,7 +84,7 @@ bool ath9k_hw_updatetxtriglevel(struct ath_hw *ah, bool bIncTrigLevel)
 	curLevel = MS(txcfg, AR_FTRIG);
 	newLevel = curLevel;
 	if (bIncTrigLevel) {
-		if (curLevel < ah->config.max_txtrig_level)
+		if (curLevel < MAX_TX_FIFO_THRESHOLD)
 			newLevel++;
 	} else if (curLevel > MIN_TX_FIFO_THRESHOLD)
 		newLevel--;
@@ -155,7 +160,7 @@ bool ath9k_hw_stoptxdma(struct ath_hw *ah, u32 q)
 		wait = wait_time;
 		while (ath9k_hw_numtxpending(ah, q)) {
 			if ((--wait) == 0) {
-				DPRINTF(ah->ah_sc, ATH_DBG_FATAL,
+				DPRINTF(ah->ah_sc, ATH_DBG_QUEUE,
 					"Failed to stop TX DMA in 100 "
 					"msec after killing last frame\n");
 				break;
@@ -173,7 +178,7 @@ bool ath9k_hw_stoptxdma(struct ath_hw *ah, u32 q)
 #undef ATH9K_TIME_QUANTUM
 }
 
-void ath9k_hw_filltxdesc(struct ath_hw *ah, struct ath_desc *ds,
+bool ath9k_hw_filltxdesc(struct ath_hw *ah, struct ath_desc *ds,
 			 u32 segLen, bool firstSeg,
 			 bool lastSeg, const struct ath_desc *ds0)
 {
@@ -197,6 +202,8 @@ void ath9k_hw_filltxdesc(struct ath_hw *ah, struct ath_desc *ds,
 	ads->ds_txstatus4 = ads->ds_txstatus5 = 0;
 	ads->ds_txstatus6 = ads->ds_txstatus7 = 0;
 	ads->ds_txstatus8 = ads->ds_txstatus9 = 0;
+
+	return true;
 }
 
 void ath9k_hw_cleartxdesc(struct ath_hw *ah, struct ath_desc *ds)
@@ -222,8 +229,6 @@ int ath9k_hw_txprocdesc(struct ath_hw *ah, struct ath_desc *ds)
 	ds->ds_txstat.ts_status = 0;
 	ds->ds_txstat.ts_flags = 0;
 
-	if (ads->ds_txstatus1 & AR_FrmXmitOK)
-		ds->ds_txstat.ts_status |= ATH9K_TX_ACKED;
 	if (ads->ds_txstatus1 & AR_ExcessiveRetries)
 		ds->ds_txstat.ts_status |= ATH9K_TXERR_XRETRY;
 	if (ads->ds_txstatus1 & AR_Filtered)
@@ -820,29 +825,13 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 	ds->ds_rxstat.rs_datalen = ads.ds_rxstatus1 & AR_DataLen;
 	ds->ds_rxstat.rs_tstamp = ads.AR_RcvTimestamp;
 
-	if (ads.ds_rxstatus8 & AR_PostDelimCRCErr) {
-		ds->ds_rxstat.rs_rssi = ATH9K_RSSI_BAD;
-		ds->ds_rxstat.rs_rssi_ctl0 = ATH9K_RSSI_BAD;
-		ds->ds_rxstat.rs_rssi_ctl1 = ATH9K_RSSI_BAD;
-		ds->ds_rxstat.rs_rssi_ctl2 = ATH9K_RSSI_BAD;
-		ds->ds_rxstat.rs_rssi_ext0 = ATH9K_RSSI_BAD;
-		ds->ds_rxstat.rs_rssi_ext1 = ATH9K_RSSI_BAD;
-		ds->ds_rxstat.rs_rssi_ext2 = ATH9K_RSSI_BAD;
-	} else {
-		ds->ds_rxstat.rs_rssi = MS(ads.ds_rxstatus4, AR_RxRSSICombined);
-		ds->ds_rxstat.rs_rssi_ctl0 = MS(ads.ds_rxstatus0,
-						AR_RxRSSIAnt00);
-		ds->ds_rxstat.rs_rssi_ctl1 = MS(ads.ds_rxstatus0,
-						AR_RxRSSIAnt01);
-		ds->ds_rxstat.rs_rssi_ctl2 = MS(ads.ds_rxstatus0,
-						AR_RxRSSIAnt02);
-		ds->ds_rxstat.rs_rssi_ext0 = MS(ads.ds_rxstatus4,
-						AR_RxRSSIAnt10);
-		ds->ds_rxstat.rs_rssi_ext1 = MS(ads.ds_rxstatus4,
-						AR_RxRSSIAnt11);
-		ds->ds_rxstat.rs_rssi_ext2 = MS(ads.ds_rxstatus4,
-						AR_RxRSSIAnt12);
-	}
+	ds->ds_rxstat.rs_rssi = MS(ads.ds_rxstatus4, AR_RxRSSICombined);
+	ds->ds_rxstat.rs_rssi_ctl0 = MS(ads.ds_rxstatus0, AR_RxRSSIAnt00);
+	ds->ds_rxstat.rs_rssi_ctl1 = MS(ads.ds_rxstatus0, AR_RxRSSIAnt01);
+	ds->ds_rxstat.rs_rssi_ctl2 = MS(ads.ds_rxstatus0, AR_RxRSSIAnt02);
+	ds->ds_rxstat.rs_rssi_ext0 = MS(ads.ds_rxstatus4, AR_RxRSSIAnt10);
+	ds->ds_rxstat.rs_rssi_ext1 = MS(ads.ds_rxstatus4, AR_RxRSSIAnt11);
+	ds->ds_rxstat.rs_rssi_ext2 = MS(ads.ds_rxstatus4, AR_RxRSSIAnt12);
 	if (ads.ds_rxstatus8 & AR_RxKeyIdxValid)
 		ds->ds_rxstat.rs_keyix = MS(ads.ds_rxstatus8, AR_KeyIdx);
 	else
@@ -883,7 +872,7 @@ int ath9k_hw_rxprocdesc(struct ath_hw *ah, struct ath_desc *ds,
 	return 0;
 }
 
-void ath9k_hw_setuprxdesc(struct ath_hw *ah, struct ath_desc *ds,
+bool ath9k_hw_setuprxdesc(struct ath_hw *ah, struct ath_desc *ds,
 			  u32 size, u32 flags)
 {
 	struct ar5416_desc *ads = AR5416DESC(ds);
@@ -896,6 +885,8 @@ void ath9k_hw_setuprxdesc(struct ath_hw *ah, struct ath_desc *ds,
 	ads->ds_rxstatus8 &= ~AR_RxDone;
 	if (!(pCap->hw_caps & ATH9K_HW_CAP_AUTOSLEEP))
 		memset(&(ads->u), 0, sizeof(ads->u));
+
+	return true;
 }
 
 bool ath9k_hw_setrxabort(struct ath_hw *ah, bool set)

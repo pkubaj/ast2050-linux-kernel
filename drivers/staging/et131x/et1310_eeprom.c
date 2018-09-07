@@ -2,7 +2,7 @@
  * Agere Systems Inc.
  * 10/100/1000 Base-T Ethernet Driver for the ET1301 and ET131x series MACs
  *
- * Copyright Â© 2005 Agere Systems Inc.
+ * Copyright © 2005 Agere Systems Inc.
  * All rights reserved.
  *   http://www.agere.com
  *
@@ -19,7 +19,7 @@
  * software indicates your acceptance of these terms and conditions.  If you do
  * not agree with these terms and conditions, do not use the software.
  *
- * Copyright Â© 2005 Agere Systems Inc.
+ * Copyright © 2005 Agere Systems Inc.
  * All rights reserved.
  *
  * Redistribution and use in source or binary forms, with or without
@@ -40,7 +40,7 @@
  *
  * Disclaimer
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * THIS SOFTWARE IS PROVIDED “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,
  * INCLUDING, BUT NOT LIMITED TO, INFRINGEMENT AND THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  ANY
  * USE, MODIFICATION OR DISTRIBUTION OF THIS SOFTWARE IS SOLELY AT THE USERS OWN
@@ -56,6 +56,7 @@
  */
 
 #include "et131x_version.h"
+#include "et131x_debug.h"
 #include "et131x_defs.h"
 
 #include <linux/pci.h>
@@ -73,9 +74,9 @@
 #include <linux/interrupt.h>
 #include <linux/in.h>
 #include <linux/delay.h>
-#include <linux/bitops.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -136,30 +137,34 @@
  * Define macros that allow individual register values to be extracted from a
  * DWORD1 register grouping
  */
-#define EXTRACT_DATA_REGISTER(x)    (u8)(x & 0xFF)
-#define EXTRACT_STATUS_REGISTER(x)  (u8)((x >> 16) & 0xFF)
-#define EXTRACT_CONTROL_REG(x)      (u8)((x >> 8) & 0xFF)
+#define EXTRACT_DATA_REGISTER(x)    (uint8_t)(x & 0xFF)
+#define EXTRACT_STATUS_REGISTER(x)  (uint8_t)((x >> 16) & 0xFF)
+#define EXTRACT_CONTROL_REG(x)      (uint8_t)((x >> 8) & 0xFF)
 
 /**
  * EepromWriteByte - Write a byte to the ET1310's EEPROM
- * @etdev: pointer to our private adapter structure
- * @addr: the address to write
- * @data: the value to write
+ * @pAdapter: pointer to our private adapter structure
+ * @unAddress: the address to write
+ * @bData: the value to write
+ * @unEepronId: the ID of the EEPROM
+ * @unAddressingMode: how the EEPROM is to be accessed
  *
  * Returns SUCCESS or FAILURE
  */
-int EepromWriteByte(struct et131x_adapter *etdev, u32 addr, u8 data)
+int32_t EepromWriteByte(struct et131x_adapter *pAdapter, uint32_t unAddress,
+			uint8_t bData, uint32_t unEepromId,
+			uint32_t unAddressingMode)
 {
-	struct pci_dev *pdev = etdev->pdev;
-	int index;
-	int retries;
-	int err = 0;
-	int i2c_wack = 0;
-	int writeok = 0;
-	u8 control;
-	u8 status = 0;
-	u32 dword1 = 0;
-	u32 val = 0;
+        struct pci_dev *pdev = pAdapter->pdev;
+	int32_t nIndex;
+	int32_t nRetries;
+	int32_t nError = false;
+	int32_t nI2CWriteActive = 0;
+	int32_t nWriteSuccessful = 0;
+	uint8_t bControl;
+	uint8_t bStatus = 0;
+	uint32_t unDword1 = 0;
+	uint32_t unData = 0;
 
 	/*
 	 * The following excerpt is from "Serial EEPROM HW Design
@@ -210,84 +215,93 @@ int EepromWriteByte(struct et131x_adapter *etdev, u32 addr, u8 data)
 	 */
 
 	/* Step 1: */
-	for (index = 0; index < MAX_NUM_REGISTER_POLLS; index++) {
+	for (nIndex = 0; nIndex < MAX_NUM_REGISTER_POLLS; nIndex++) {
 		/* Read registers grouped in DWORD1 */
 		if (pci_read_config_dword(pdev, LBCIF_DWORD1_GROUP_OFFSET,
-					  &dword1)) {
-			err = 1;
+					  &unDword1)) {
+			nError = 1;
 			break;
 		}
 
-		status = EXTRACT_STATUS_REGISTER(dword1);
+		bStatus = EXTRACT_STATUS_REGISTER(unDword1);
 
-		if (status & LBCIF_STATUS_PHY_QUEUE_AVAIL &&
-			status & LBCIF_STATUS_I2C_IDLE)
-			/* bits 1:0 are equal to 1 */
+		if (bStatus & LBCIF_STATUS_PHY_QUEUE_AVAIL &&
+		    bStatus & LBCIF_STATUS_I2C_IDLE) {
+		    	/* bits 1:0 are equal to 1 */
 			break;
+		}
 	}
 
-	if (err || (index >= MAX_NUM_REGISTER_POLLS))
+	if (nError || (nIndex >= MAX_NUM_REGISTER_POLLS)) {
 		return FAILURE;
+	}
 
 	/* Step 2: */
-	control = 0;
-	control |= LBCIF_CONTROL_LBCIF_ENABLE | LBCIF_CONTROL_I2C_WRITE;
+	bControl = 0;
+	bControl |= LBCIF_CONTROL_LBCIF_ENABLE | LBCIF_CONTROL_I2C_WRITE;
+
+	if (unAddressingMode == DUAL_BYTE) {
+		bControl |= LBCIF_CONTROL_TWO_BYTE_ADDR;
+	}
 
 	if (pci_write_config_byte(pdev, LBCIF_CONTROL_REGISTER_OFFSET,
-				  control)) {
+				  bControl)) {
 		return FAILURE;
 	}
 
-	i2c_wack = 1;
+	nI2CWriteActive = 1;
 
 	/* Prepare EEPROM address for Step 3 */
+	unAddress |= (unAddressingMode == DUAL_BYTE) ?
+	    (unEepromId << 16) : (unEepromId << 8);
 
-	for (retries = 0; retries < MAX_NUM_WRITE_RETRIES; retries++) {
+	for (nRetries = 0; nRetries < MAX_NUM_WRITE_RETRIES; nRetries++) {
 		/* Step 3:*/
 		if (pci_write_config_dword(pdev, LBCIF_ADDRESS_REGISTER_OFFSET,
-					   addr)) {
+					   unAddress)) {
 			break;
 		}
 
 		/* Step 4: */
 		if (pci_write_config_byte(pdev, LBCIF_DATA_REGISTER_OFFSET,
-					  data)) {
+					  bData)) {
 			break;
 		}
 
 		/* Step 5: */
-		for (index = 0; index < MAX_NUM_REGISTER_POLLS; index++) {
+		for (nIndex = 0; nIndex < MAX_NUM_REGISTER_POLLS; nIndex++) {
 			/* Read registers grouped in DWORD1 */
 			if (pci_read_config_dword(pdev,
 						  LBCIF_DWORD1_GROUP_OFFSET,
-						  &dword1)) {
-				err = 1;
+						  &unDword1)) {
+				nError = 1;
 				break;
 			}
 
-			status = EXTRACT_STATUS_REGISTER(dword1);
+			bStatus = EXTRACT_STATUS_REGISTER(unDword1);
 
-			if (status & LBCIF_STATUS_PHY_QUEUE_AVAIL &&
-				status & LBCIF_STATUS_I2C_IDLE) {
-				/* I2C write complete */
+			if (bStatus & LBCIF_STATUS_PHY_QUEUE_AVAIL &&
+			    bStatus & LBCIF_STATUS_I2C_IDLE) {
+			    	/* I2C write complete */
 				break;
 			}
 		}
 
-		if (err || (index >= MAX_NUM_REGISTER_POLLS))
+		if (nError || (nIndex >= MAX_NUM_REGISTER_POLLS)) {
 			break;
+		}
 
 		/*
 		 * Step 6: Don't break here if we are revision 1, this is
 		 *	   so we do a blind write for load bug.
-		 */
-		if (status & LBCIF_STATUS_GENERAL_ERROR
-		    && etdev->pdev->revision == 0) {
+	         */
+		if (bStatus & LBCIF_STATUS_GENERAL_ERROR
+		    && pAdapter->RevisionID == 0) {
 			break;
 		}
 
 		/* Step 7 */
-		if (status & LBCIF_STATUS_ACK_ERROR) {
+		if (bStatus & LBCIF_STATUS_ACK_ERROR) {
 			/*
 			 * This could be due to an actual hardware failure
 			 * or the EEPROM may still be in its internal write
@@ -298,19 +312,19 @@ int EepromWriteByte(struct et131x_adapter *etdev, u32 addr, u8 data)
 			continue;
 		}
 
-		writeok = 1;
+		nWriteSuccessful = 1;
 		break;
 	}
 
 	/* Step 8: */
 	udelay(10);
-	index = 0;
-	while (i2c_wack) {
-		control &= ~LBCIF_CONTROL_I2C_WRITE;
+	nIndex = 0;
+	while (nI2CWriteActive) {
+		bControl &= ~LBCIF_CONTROL_I2C_WRITE;
 
 		if (pci_write_config_byte(pdev, LBCIF_CONTROL_REGISTER_OFFSET,
-					  control)) {
-			writeok = 0;
+					  bControl)) {
+			nWriteSuccessful = 0;
 		}
 
 		/* Do read until internal ACK_ERROR goes away meaning write
@@ -319,42 +333,45 @@ int EepromWriteByte(struct et131x_adapter *etdev, u32 addr, u8 data)
 		do {
 			pci_write_config_dword(pdev,
 					       LBCIF_ADDRESS_REGISTER_OFFSET,
-					       addr);
+					       unAddress);
 			do {
 				pci_read_config_dword(pdev,
-					LBCIF_DATA_REGISTER_OFFSET, &val);
-			} while ((val & 0x00010000) == 0);
-		} while (val & 0x00040000);
+					LBCIF_DATA_REGISTER_OFFSET, &unData);
+			} while ((unData & 0x00010000) == 0);
+		} while (unData & 0x00040000);
 
-		control = EXTRACT_CONTROL_REG(val);
+		bControl = EXTRACT_CONTROL_REG(unData);
 
-		if (control != 0xC0 || index == 10000)
+		if (bControl != 0xC0 || nIndex == 10000) {
 			break;
+		}
 
-		index++;
+		nIndex++;
 	}
 
-	return writeok ? SUCCESS : FAILURE;
+	return nWriteSuccessful ? SUCCESS : FAILURE;
 }
 
 /**
  * EepromReadByte - Read a byte from the ET1310's EEPROM
- * @etdev: pointer to our private adapter structure
- * @addr: the address from which to read
- * @pdata: a pointer to a byte in which to store the value of the read
- * @eeprom_id: the ID of the EEPROM
- * @addrmode: how the EEPROM is to be accessed
+ * @pAdapter: pointer to our private adapter structure
+ * @unAddress: the address from which to read
+ * @pbData: a pointer to a byte in which to store the value of the read
+ * @unEepronId: the ID of the EEPROM
+ * @unAddressingMode: how the EEPROM is to be accessed
  *
  * Returns SUCCESS or FAILURE
  */
-int EepromReadByte(struct et131x_adapter *etdev, u32 addr, u8 *pdata)
+int32_t EepromReadByte(struct et131x_adapter *pAdapter, uint32_t unAddress,
+		       uint8_t *pbData, uint32_t unEepromId,
+		       uint32_t unAddressingMode)
 {
-	struct pci_dev *pdev = etdev->pdev;
-	int index;
-	int err = 0;
-	u8 control;
-	u8 status = 0;
-	u32 dword1 = 0;
+        struct pci_dev *pdev = pAdapter->pdev;
+	int32_t nIndex;
+	int32_t nError = 0;
+	uint8_t bControl;
+	uint8_t bStatus = 0;
+	uint32_t unDword1 = 0;
 
 	/*
 	 * The following excerpt is from "Serial EEPROM HW Design
@@ -391,65 +408,73 @@ int EepromReadByte(struct et131x_adapter *etdev, u32 addr, u8 *pdata)
 	 */
 
 	/* Step 1: */
-	for (index = 0; index < MAX_NUM_REGISTER_POLLS; index++) {
+	for (nIndex = 0; nIndex < MAX_NUM_REGISTER_POLLS; nIndex++) {
 		/* Read registers grouped in DWORD1 */
 		if (pci_read_config_dword(pdev, LBCIF_DWORD1_GROUP_OFFSET,
-					  &dword1)) {
-			err = 1;
+					  &unDword1)) {
+			nError = 1;
 			break;
 		}
 
-		status = EXTRACT_STATUS_REGISTER(dword1);
+		bStatus = EXTRACT_STATUS_REGISTER(unDword1);
 
-		if (status & LBCIF_STATUS_PHY_QUEUE_AVAIL &&
-		    status & LBCIF_STATUS_I2C_IDLE) {
+		if (bStatus & LBCIF_STATUS_PHY_QUEUE_AVAIL &&
+		    bStatus & LBCIF_STATUS_I2C_IDLE) {
 			/* bits 1:0 are equal to 1 */
 			break;
 		}
 	}
 
-	if (err || (index >= MAX_NUM_REGISTER_POLLS))
+	if (nError || (nIndex >= MAX_NUM_REGISTER_POLLS)) {
 		return FAILURE;
+	}
 
 	/* Step 2: */
-	control = 0;
-	control |= LBCIF_CONTROL_LBCIF_ENABLE;
+	bControl = 0;
+	bControl |= LBCIF_CONTROL_LBCIF_ENABLE;
+
+	if (unAddressingMode == DUAL_BYTE) {
+		bControl |= LBCIF_CONTROL_TWO_BYTE_ADDR;
+	}
 
 	if (pci_write_config_byte(pdev, LBCIF_CONTROL_REGISTER_OFFSET,
-				  control)) {
+				  bControl)) {
 		return FAILURE;
 	}
 
 	/* Step 3: */
+	unAddress |= (unAddressingMode == DUAL_BYTE) ?
+	    (unEepromId << 16) : (unEepromId << 8);
 
 	if (pci_write_config_dword(pdev, LBCIF_ADDRESS_REGISTER_OFFSET,
-				   addr)) {
+				   unAddress)) {
 		return FAILURE;
 	}
 
 	/* Step 4: */
-	for (index = 0; index < MAX_NUM_REGISTER_POLLS; index++) {
+	for (nIndex = 0; nIndex < MAX_NUM_REGISTER_POLLS; nIndex++) {
 		/* Read registers grouped in DWORD1 */
 		if (pci_read_config_dword(pdev, LBCIF_DWORD1_GROUP_OFFSET,
-					  &dword1)) {
-			err = 1;
+					  &unDword1)) {
+			nError = 1;
 			break;
 		}
 
-		status = EXTRACT_STATUS_REGISTER(dword1);
+		bStatus = EXTRACT_STATUS_REGISTER(unDword1);
 
-		if (status & LBCIF_STATUS_PHY_QUEUE_AVAIL
-		    && status & LBCIF_STATUS_I2C_IDLE) {
+		if (bStatus & LBCIF_STATUS_PHY_QUEUE_AVAIL
+		    && bStatus & LBCIF_STATUS_I2C_IDLE) {
 			/* I2C read complete */
 			break;
 		}
 	}
 
-	if (err || (index >= MAX_NUM_REGISTER_POLLS))
+	if (nError || (nIndex >= MAX_NUM_REGISTER_POLLS)) {
 		return FAILURE;
+	}
 
 	/* Step 6: */
-	*pdata = EXTRACT_DATA_REGISTER(dword1);
+	*pbData = EXTRACT_DATA_REGISTER(unDword1);
 
-	return (status & LBCIF_STATUS_ACK_ERROR) ? FAILURE : SUCCESS;
+	return (bStatus & LBCIF_STATUS_ACK_ERROR) ? FAILURE : SUCCESS;
 }

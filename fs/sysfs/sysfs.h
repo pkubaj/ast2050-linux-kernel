@@ -8,8 +8,6 @@
  * This file is released under the GPLv2.
  */
 
-#include <linux/fs.h>
-
 struct sysfs_open_dirent;
 
 /* type-specific structures for sysfs_dirent->s_* union members */
@@ -31,12 +29,6 @@ struct sysfs_elem_attr {
 struct sysfs_elem_bin_attr {
 	struct bin_attribute	*bin_attr;
 	struct hlist_head	buffers;
-};
-
-struct sysfs_inode_attrs {
-	struct iattr	ia_iattr;
-	void		*ia_secdata;
-	u32		ia_secdata_len;
 };
 
 /*
@@ -64,7 +56,7 @@ struct sysfs_dirent {
 	unsigned int		s_flags;
 	ino_t			s_ino;
 	umode_t			s_mode;
-	struct sysfs_inode_attrs *s_iattr;
+	struct iattr		*s_iattr;
 };
 
 #define SD_DEACTIVATED_BIAS		INT_MIN
@@ -156,8 +148,6 @@ static inline void __sysfs_put(struct sysfs_dirent *sd)
 struct inode *sysfs_get_inode(struct sysfs_dirent *sd);
 void sysfs_delete_inode(struct inode *inode);
 int sysfs_setattr(struct dentry *dentry, struct iattr *iattr);
-int sysfs_setxattr(struct dentry *dentry, const char *name, const void *value,
-		size_t size, int flags);
 int sysfs_hash_and_remove(struct sysfs_dirent *dir_sd, const char *name);
 int sysfs_inode_init(void);
 

@@ -186,33 +186,43 @@ static const struct file_operations stack_max_size_fops = {
 };
 
 static void *
-__next(struct seq_file *m, loff_t *pos)
-{
-	long n = *pos - 1;
-
-	if (n >= max_stack_trace.nr_entries || stack_dump_trace[n] == ULONG_MAX)
-		return NULL;
-
-	m->private = (void *)n;
-	return &m->private;
-}
-
-static void *
 t_next(struct seq_file *m, void *v, loff_t *pos)
 {
+	long i;
+
 	(*pos)++;
-	return __next(m, pos);
+
+	if (v == SEQ_START_TOKEN)
+		i = 0;
+	else {
+		i = *(long *)v;
+		i++;
+	}
+
+	if (i >= max_stack_trace.nr_entries ||
+	    stack_dump_trace[i] == ULONG_MAX)
+		return NULL;
+
+	m->private = (void *)i;
+
+	return &m->private;
 }
 
 static void *t_start(struct seq_file *m, loff_t *pos)
 {
+	void *t = SEQ_START_TOKEN;
+	loff_t l = 0;
+
 	local_irq_disable();
 	__raw_spin_lock(&max_stack_lock);
 
 	if (*pos == 0)
 		return SEQ_START_TOKEN;
 
-	return __next(m, pos);
+	for (; t && l < *pos; t = t_next(m, t, &l))
+		;
+
+	return t;
 }
 
 static void t_stop(struct seq_file *m, void *p)
@@ -224,8 +234,15 @@ static void t_stop(struct seq_file *m, void *p)
 static int trace_lookup_stack(struct seq_file *m, long i)
 {
 	unsigned long addr = stack_dump_trace[i];
+#ifdef CONFIG_KALLSYMS
+	char str[KSYM_SYMBOL_LEN];
 
-	return seq_printf(m, "%pF\n", (void *)addr);
+	sprint_symbol(str, addr);
+
+	return seq_printf(m, "%s\n", str);
+#else
+	return seq_printf(m, "%p\n", (void*)addr);
+#endif
 }
 
 static void print_disabled(struct seq_file *m)
@@ -296,14 +313,14 @@ static const struct file_operations stack_trace_fops = {
 
 int
 stack_trace_sysctl(struct ctl_table *table, int write,
-		   void __user *buffer, size_t *lenp,
+		   struct file *file, void __user *buffer, size_t *lenp,
 		   loff_t *ppos)
 {
 	int ret;
 
 	mutex_lock(&stack_sysctl_mutex);
 
-	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+	ret = proc_dointvec(table, write, file, buffer, lenp, ppos);
 
 	if (ret || !write ||
 	    (last_stack_tracer_enabled == !!stack_tracer_enabled))

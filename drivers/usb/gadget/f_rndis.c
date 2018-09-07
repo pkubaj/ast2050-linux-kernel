@@ -286,17 +286,12 @@ static struct usb_gadget_strings *rndis_strings[] = {
 
 /*-------------------------------------------------------------------------*/
 
-static struct sk_buff *rndis_add_header(struct gether *port,
-					struct sk_buff *skb)
+static struct sk_buff *rndis_add_header(struct sk_buff *skb)
 {
-	struct sk_buff *skb2;
-
-	skb2 = skb_realloc_headroom(skb, sizeof(struct rndis_packet_msg_type));
-	if (skb2)
-		rndis_add_hdr(skb2);
-
-	dev_kfree_skb_any(skb);
-	return skb2;
+	skb = skb_realloc_headroom(skb, sizeof(struct rndis_packet_msg_type));
+	if (skb)
+		rndis_add_hdr(skb);
+	return skb;
 }
 
 static void rndis_response_available(void *_rndis)
@@ -400,7 +395,8 @@ rndis_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 	 */
 	case ((USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8)
 			| USB_CDC_SEND_ENCAPSULATED_COMMAND:
-		if (w_value || w_index != rndis->ctrl_id)
+		if (w_length > req->length || w_value
+				|| w_index != rndis->ctrl_id)
 			goto invalid;
 		/* read the request; process it later */
 		value = w_length;

@@ -774,10 +774,7 @@ int __init omap_dm_timer_init(void)
 
 	for (i = 0; i < dm_timer_count; i++) {
 		timer = &dm_timers[i];
-		if (cpu_class_is_omap1())
-			timer->io_base = OMAP1_IO_ADDRESS(timer->phys_base);
-		else
-			timer->io_base = OMAP2_IO_ADDRESS(timer->phys_base);
+		timer->io_base = IO_ADDRESS(timer->phys_base);
 #if defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3) || \
 					defined(CONFIG_ARCH_OMAP4)
 		if (cpu_class_is_omap2()) {

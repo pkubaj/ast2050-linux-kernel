@@ -99,8 +99,7 @@ This driver has suffered bitrot.
 #define	C2 0x80
 #define	RWLH 0x30
 
-static int das6402_attach(struct comedi_device *dev,
-			  struct comedi_devconfig *it);
+static int das6402_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int das6402_detach(struct comedi_device *dev);
 static struct comedi_driver driver_das6402 = {
 	.driver_name = "das6402",
@@ -118,8 +117,7 @@ struct das6402_private {
 };
 #define devpriv ((struct das6402_private *)dev->private)
 
-static void das6402_ai_fifo_dregs(struct comedi_device *dev,
-				  struct comedi_subdevice *s);
+static void das6402_ai_fifo_dregs(struct comedi_device *dev, struct comedi_subdevice *s);
 
 static void das6402_setcounter(struct comedi_device *dev)
 {
@@ -165,7 +163,7 @@ static irqreturn_t intr_handler(int irq, void *d)
 	}
 #ifdef DEBUG
 	printk("das6402: interrupt! das6402_irqcount=%i\n",
-	       devpriv->das6402_irqcount);
+		devpriv->das6402_irqcount);
 	printk("das6402: iobase+2=%i\n", inw_p(dev->iobase + 2));
 #endif
 
@@ -176,7 +174,7 @@ static irqreturn_t intr_handler(int irq, void *d)
 		outb(0x07, dev->iobase + 8);	/* clears all flip-flops */
 #ifdef DEBUG
 		printk("das6402: Got %i samples\n\n",
-		       devpriv->das6402_wordsread - diff);
+			devpriv->das6402_wordsread - diff);
 #endif
 		s->async->events |= COMEDI_CB_EOA;
 		comedi_event(dev, s);
@@ -198,8 +196,7 @@ static void das6402_ai_fifo_read(struct comedi_device *dev, short *data, int n)
 }
 #endif
 
-static void das6402_ai_fifo_dregs(struct comedi_device *dev,
-				  struct comedi_subdevice *s)
+static void das6402_ai_fifo_dregs(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	while (1) {
 		if (!(inb(dev->iobase + 8) & 0x01))
@@ -208,8 +205,7 @@ static void das6402_ai_fifo_dregs(struct comedi_device *dev,
 	}
 }
 
-static int das6402_ai_cancel(struct comedi_device *dev,
-			     struct comedi_subdevice *s)
+static int das6402_ai_cancel(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	/*
 	 *  This function should reset the board from whatever condition it
@@ -231,8 +227,8 @@ static int das6402_ai_cancel(struct comedi_device *dev,
 }
 
 #ifdef unused
-static int das6402_ai_mode2(struct comedi_device *dev,
-			    struct comedi_subdevice *s, comedi_trig * it)
+static int das6402_ai_mode2(struct comedi_device *dev, struct comedi_subdevice *s,
+	comedi_trig *it)
 {
 	devpriv->das6402_ignoreirq = 1;
 
@@ -304,8 +300,7 @@ static int das6402_detach(struct comedi_device *dev)
 	return 0;
 }
 
-static int das6402_attach(struct comedi_device *dev,
-			  struct comedi_devconfig *it)
+static int das6402_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	unsigned int irq;
 	unsigned long iobase;

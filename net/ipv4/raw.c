@@ -352,24 +352,13 @@ static int raw_send_hdrinc(struct sock *sk, void *from, size_t length,
 	skb->ip_summed = CHECKSUM_NONE;
 
 	skb->transport_header = skb->network_header;
-	err = -EFAULT;
-	if (memcpy_fromiovecend((void *)iph, from, 0, length))
-		goto error_free;
+	err = memcpy_fromiovecend((void *)iph, from, 0, length);
+	if (err)
+		goto error_fault;
 
+	/* We don't modify invalid header */
 	iphlen = iph->ihl * 4;
-
-	/*
-	 * We don't want to modify the ip header, but we do need to
-	 * be sure that it won't cause problems later along the network
-	 * stack.  Specifically we want to make sure that iph->ihl is a
-	 * sane value.  If ihl points beyond the length of the buffer passed
-	 * in, reject the frame as invalid
-	 */
-	err = -EINVAL;
-	if (iphlen > length)
-		goto error_free;
-
-	if (iphlen >= sizeof(*iph)) {
+	if (iphlen >= sizeof(*iph) && iphlen <= length) {
 		if (!iph->saddr)
 			iph->saddr = rt->rt_src;
 		iph->check   = 0;
@@ -386,18 +375,17 @@ static int raw_send_hdrinc(struct sock *sk, void *from, size_t length,
 	err = NF_HOOK(PF_INET, NF_INET_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
 		      dst_output);
 	if (err > 0)
-		err = net_xmit_errno(err);
+		err = inet->recverr ? net_xmit_errno(err) : 0;
 	if (err)
 		goto error;
 out:
 	return 0;
 
-error_free:
+error_fault:
+	err = -EFAULT;
 	kfree_skb(skb);
 error:
 	IP_INC_STATS(net, IPSTATS_MIB_OUTDISCARDS);
-	if (err == -ENOBUFS && !inet->recverr)
-		err = 0;
 	return err;
 }
 
@@ -459,7 +447,6 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	__be32 saddr;
 	u8  tos;
 	int err;
-	struct ip_options_data opt_copy;
 
 	err = -EMSGSIZE;
 	if (len > 0xFFFF)
@@ -520,18 +507,8 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	saddr = ipc.addr;
 	ipc.addr = daddr;
 
-	if (!ipc.opt) {
-		struct ip_options_rcu *inet_opt;
-
-		rcu_read_lock();
-		inet_opt = rcu_dereference(inet->inet_opt);
-		if (inet_opt) {
-			memcpy(&opt_copy, inet_opt,
-			       sizeof(*inet_opt) + inet_opt->opt.optlen);
-			ipc.opt = &opt_copy.opt;
-		}
-		rcu_read_unlock();
-	}
+	if (!ipc.opt)
+		ipc.opt = inet->opt;
 
 	if (ipc.opt) {
 		err = -EINVAL;
@@ -540,10 +517,10 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		 */
 		if (inet->hdrincl)
 			goto done;
-		if (ipc.opt->opt.srr) {
+		if (ipc.opt->srr) {
 			if (!daddr)
 				goto done;
-			daddr = ipc.opt->opt.faddr;
+			daddr = ipc.opt->faddr;
 		}
 	}
 	tos = RT_CONN_FLAGS(sk);
@@ -599,11 +576,8 @@ back_from_confirm:
 					&ipc, &rt, msg->msg_flags);
 		if (err)
 			ip_flush_pending_frames(sk);
-		else if (!(msg->msg_flags & MSG_MORE)) {
+		else if (!(msg->msg_flags & MSG_MORE))
 			err = ip_push_pending_frames(sk);
-			if (err == -ENOBUFS && !inet->recverr)
-				err = 0;
-		}
 		release_sock(sk);
 	}
 done:
@@ -681,8 +655,11 @@ static int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (flags & MSG_OOB)
 		goto out;
 
+	if (addr_len)
+		*addr_len = sizeof(*sin);
+
 	if (flags & MSG_ERRQUEUE) {
-		err = ip_recv_error(sk, msg, len, addr_len);
+		err = ip_recv_error(sk, msg, len);
 		goto out;
 	}
 
@@ -708,7 +685,6 @@ static int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		sin->sin_addr.s_addr = ip_hdr(skb)->saddr;
 		sin->sin_port = 0;
 		memset(&sin->sin_zero, 0, sizeof(sin->sin_zero));
-		*addr_len = sizeof(*sin);
 	}
 	if (inet->cmsg_flags)
 		ip_cmsg_recv(msg, skb);
@@ -760,7 +736,7 @@ out:	return ret;
 }
 
 static int do_raw_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  char __user *optval, int optlen)
 {
 	if (optname == ICMP_FILTER) {
 		if (inet_sk(sk)->num != IPPROTO_ICMP)
@@ -772,7 +748,7 @@ static int do_raw_setsockopt(struct sock *sk, int level, int optname,
 }
 
 static int raw_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  char __user *optval, int optlen)
 {
 	if (level != SOL_RAW)
 		return ip_setsockopt(sk, level, optname, optval, optlen);
@@ -781,7 +757,7 @@ static int raw_setsockopt(struct sock *sk, int level, int optname,
 
 #ifdef CONFIG_COMPAT
 static int compat_raw_setsockopt(struct sock *sk, int level, int optname,
-				 char __user *optval, unsigned int optlen)
+				 char __user *optval, int optlen)
 {
 	if (level != SOL_RAW)
 		return compat_ip_setsockopt(sk, level, optname, optval, optlen);

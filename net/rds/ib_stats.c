@@ -37,9 +37,9 @@
 #include "rds.h"
 #include "ib.h"
 
-DEFINE_PER_CPU_SHARED_ALIGNED(struct rds_ib_statistics, rds_ib_stats);
+DEFINE_PER_CPU(struct rds_ib_statistics, rds_ib_stats) ____cacheline_aligned;
 
-static const char *const rds_ib_stat_names[] = {
+static char *rds_ib_stat_names[] = {
 	"ib_connect_raced",
 	"ib_listen_closed_stale",
 	"ib_tx_cq_call",

@@ -60,7 +60,6 @@
 #define TICK_SIZE tick
 
 u64 sched_clock_base_cc = -1;	/* Force to data section. */
-EXPORT_SYMBOL_GPL(sched_clock_base_cc);
 
 static DEFINE_PER_CPU(struct clock_event_device, comparators);
 
@@ -69,7 +68,7 @@ static DEFINE_PER_CPU(struct clock_event_device, comparators);
  */
 unsigned long long notrace sched_clock(void)
 {
-	return (get_clock_monotonic() * 125) >> 9;
+	return ((get_clock_xt() - sched_clock_base_cc) * 125) >> 9;
 }
 
 /*
@@ -91,7 +90,6 @@ void tod_to_timeval(__u64 todval, struct timespec *xtime)
 	todval -= (sec * 1000000) << 12;
 	xtime->tv_nsec = ((todval * 1000) >> 12);
 }
-EXPORT_SYMBOL(tod_to_timeval);
 
 void clock_comparator_work(void)
 {
@@ -184,14 +182,12 @@ static void timing_alert_interrupt(__u16 code)
 static void etr_reset(void);
 static void stp_reset(void);
 
-void read_persistent_clock(struct timespec *ts)
+unsigned long read_persistent_clock(void)
 {
-	tod_to_timeval(get_clock() - TOD_UNIX_EPOCH, ts);
-}
+	struct timespec ts;
 
-void read_boot_clock(struct timespec *ts)
-{
-	tod_to_timeval(sched_clock_base_cc - TOD_UNIX_EPOCH, ts);
+	tod_to_timeval(get_clock() - TOD_UNIX_EPOCH, &ts);
+	return ts.tv_sec;
 }
 
 static cycle_t read_tod_clock(struct clocksource *cs)
@@ -209,13 +205,8 @@ static struct clocksource clocksource_tod = {
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
-struct clocksource * __init clocksource_default_clock(void)
-{
-	return &clocksource_tod;
-}
 
-void update_vsyscall(struct timespec *wall_time, struct clocksource *clock,
-		     u32 mult)
+void update_vsyscall(struct timespec *wall_time, struct clocksource *clock)
 {
 	if (clock != &clocksource_tod)
 		return;
@@ -251,6 +242,10 @@ void update_vsyscall_tz(void)
  */
 void __init time_init(void)
 {
+	struct timespec ts;
+	unsigned long flags;
+	cycle_t now;
+
 	/* Reset time synchronization interfaces. */
 	etr_reset();
 	stp_reset();
@@ -265,6 +260,26 @@ void __init time_init(void)
 
 	if (clocksource_register(&clocksource_tod) != 0)
 		panic("Could not register TOD clock source");
+
+	/*
+	 * The TOD clock is an accurate clock. The xtime should be
+	 * initialized in a way that the difference between TOD and
+	 * xtime is reasonably small. Too bad that timekeeping_init
+	 * sets xtime.tv_nsec to zero. In addition the clock source
+	 * change from the jiffies clock source to the TOD clock
+	 * source add another error of up to 1/HZ second. The same
+	 * function sets wall_to_monotonic to a value that is too
+	 * small for /proc/uptime to be accurate.
+	 * Reset xtime and wall_to_monotonic to sane values.
+	 */
+	write_seqlock_irqsave(&xtime_lock, flags);
+	now = get_clock();
+	tod_to_timeval(now - TOD_UNIX_EPOCH, &xtime);
+	clocksource_tod.cycle_last = now;
+	clocksource_tod.raw_time = xtime;
+	tod_to_timeval(sched_clock_base_cc - TOD_UNIX_EPOCH, &ts);
+	set_normalized_timespec(&wall_to_monotonic, -ts.tv_sec, -ts.tv_nsec);
+	write_sequnlock_irqrestore(&xtime_lock, flags);
 
 	/* Enable TOD clock interrupts on the boot cpu. */
 	init_cpu_timer();

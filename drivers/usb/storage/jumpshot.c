@@ -335,7 +335,7 @@ static int jumpshot_id_device(struct us_data *us,
 	unsigned char *reply;
 	int 	 rc;
 
-	if (!info)
+	if (!us || !info)
 		return USB_STOR_TRANSPORT_ERROR;
 
 	command[0] = 0xE0;

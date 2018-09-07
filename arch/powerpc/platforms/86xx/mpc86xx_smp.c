@@ -27,6 +27,7 @@
 #include "mpc86xx.h"
 
 extern void __secondary_start_mpc86xx(void);
+extern unsigned long __secondary_hold_acknowledge;
 
 #define MCM_PORT_CONFIG_OFFSET	0x10
 

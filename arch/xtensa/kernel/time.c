@@ -13,7 +13,6 @@
  */
 
 #include <linux/errno.h>
-#include <linux/sched.h>
 #include <linux/time.h>
 #include <linux/clocksource.h>
 #include <linux/interrupt.h>
@@ -60,8 +59,9 @@ static struct irqaction timer_irqaction = {
 
 void __init time_init(void)
 {
-	/* FIXME: xtime&wall_to_monotonic are set in timekeeping_init. */
-	read_persistent_clock(&xtime);
+	xtime.tv_nsec = 0;
+	xtime.tv_sec = read_persistent_clock();
+
 	set_normalized_timespec(&wall_to_monotonic,
 		-xtime.tv_sec, -xtime.tv_nsec);
 

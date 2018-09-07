@@ -9,7 +9,6 @@
  * the Free Software Foundation.
  */
 
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #include <linux/poll.h>

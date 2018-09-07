@@ -1,9 +1,29 @@
 /*
- * Global extern defines for blackfin
+ * File:         include/asm-blackfin/bfin-global.h
+ * Based on:
+ * Author: *
+ * Created:
+ * Description:  Global extern defines for blackfin
  *
- * Copyright 2006-2009 Analog Devices Inc.
+ * Modified:
+ *               Copyright 2004-2006 Analog Devices Inc.
  *
- * Licensed under the GPL-2 or later.
+ * Bugs:         Enter bugs at http://blackfin.uclinux.org/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see the file COPYING, or write
+ * to the Free Software Foundation, Inc.,
+ * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #ifndef _BFIN_GLOBAL_H_
@@ -46,6 +66,7 @@ extern void program_IAR(void);
 
 extern asmlinkage void lower_to_irq14(void);
 extern asmlinkage void bfin_return_from_exception(void);
+extern asmlinkage void evt14_softirq(void);
 extern asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs);
 extern int bfin_internal_set_wake(unsigned int irq, unsigned int state);
 
@@ -78,6 +99,11 @@ extern const char bfin_board_name[];
 extern unsigned long bfin_sic_iwr[];
 extern unsigned vr_wakeup;
 extern u16 _bfin_swrst; /* shadow for Software Reset Register (SWRST) */
+
+#ifdef CONFIG_BFIN_ICACHE_LOCK
+extern void cache_grab_lock(int way);
+extern void bfin_cache_lock(int way);
+#endif
 
 #endif
 

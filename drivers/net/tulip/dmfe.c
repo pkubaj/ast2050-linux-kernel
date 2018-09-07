@@ -92,10 +92,6 @@
 #include <asm/uaccess.h>
 #include <asm/irq.h>
 
-#ifdef CONFIG_TULIP_DM910X
-#include <linux/of.h>
-#endif
-
 
 /* Board/System/Debug information/definition ---------------- */
 #define PCI_DM9132_ID   0x91321282      /* Davicom DM9132 ID */
@@ -315,7 +311,7 @@ static u8 SF_mode;		/* Special Function: 1:VLAN, 2:RX Flow Control
 
 /* function declaration ------------------------------------- */
 static int dmfe_open(struct DEVICE *);
-static netdev_tx_t dmfe_start_xmit(struct sk_buff *, struct DEVICE *);
+static int dmfe_start_xmit(struct sk_buff *, struct DEVICE *);
 static int dmfe_stop(struct DEVICE *);
 static void dmfe_set_filter_mode(struct DEVICE *);
 static const struct ethtool_ops netdev_ethtool_ops;
@@ -380,23 +376,6 @@ static int __devinit dmfe_init_one (struct pci_dev *pdev,
 
 	if (!printed_version++)
 		printk(version);
-
-	/*
-	 *	SPARC on-board DM910x chips should be handled by the main
-	 *	tulip driver, except for early DM9100s.
-	 */
-#ifdef CONFIG_TULIP_DM910X
-	if ((ent->driver_data == PCI_DM9100_ID && pdev->revision >= 0x30) ||
-	    ent->driver_data == PCI_DM9102_ID) {
-		struct device_node *dp = pci_device_to_OF_node(pdev);
-
-		if (dp && of_get_property(dp, "local-mac-address", NULL)) {
-			printk(KERN_INFO DRV_NAME
-			       ": skipping on-board DM910x (use tulip)\n");
-			return -ENODEV;
-		}
-	}
-#endif
 
 	/* Init network device */
 	dev = alloc_etherdev(sizeof(*db));
@@ -682,8 +661,7 @@ static void dmfe_init_dm910x(struct DEVICE *dev)
  *	Send a packet to media from the upper layer.
  */
 
-static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
-					 struct DEVICE *dev)
+static int dmfe_start_xmit(struct sk_buff *skb, struct DEVICE *dev)
 {
 	struct dmfe_board_info *db = netdev_priv(dev);
 	struct tx_desc *txptr;
@@ -698,7 +676,7 @@ static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
 	if (skb->len > MAX_PACKET_SIZE) {
 		printk(KERN_ERR DRV_NAME ": big packet = %d\n", (u16)skb->len);
 		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	spin_lock_irqsave(&db->lock, flags);
@@ -744,7 +722,7 @@ static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
 	/* free this SKB */
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 

@@ -99,6 +99,10 @@ static int ipmr_cache_report(struct net *net,
 			     struct sk_buff *pkt, vifi_t vifi, int assert);
 static int ipmr_fill_mroute(struct sk_buff *skb, struct mfc_cache *c, struct rtmsg *rtm);
 
+#ifdef CONFIG_IP_PIMSM_V2
+static struct net_protocol pim_protocol;
+#endif
+
 static struct timer_list ipmr_expire_timer;
 
 /* Service routines creating virtual interfaces: DVMRP tunnels and PIMREG */
@@ -197,7 +201,7 @@ failure:
 
 #ifdef CONFIG_IP_PIMSM
 
-static netdev_tx_t reg_vif_xmit(struct sk_buff *skb, struct net_device *dev)
+static int reg_vif_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct net *net = dev_net(dev);
 
@@ -208,7 +212,7 @@ static netdev_tx_t reg_vif_xmit(struct sk_buff *skb, struct net_device *dev)
 			  IGMPMSG_WHOLEPKT);
 	read_unlock(&mrt_lock);
 	kfree_skb(skb);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static const struct net_device_ops reg_vif_netdev_ops = {
@@ -483,10 +487,8 @@ static int vif_add(struct net *net, struct vifctl *vifc, int mrtsock)
 		return -EINVAL;
 	}
 
-	if ((in_dev = __in_dev_get_rtnl(dev)) == NULL) {
-		dev_put(dev);
+	if ((in_dev = __in_dev_get_rtnl(dev)) == NULL)
 		return -EADDRNOTAVAIL;
-	}
 	IPV4_DEVCONF(in_dev->cnf, MC_FORWARDING)++;
 	ip_rt_multicast_event(in_dev);
 
@@ -933,7 +935,7 @@ static void mrtsock_destruct(struct sock *sk)
  *	MOSPF/PIM router set up we can clean this up.
  */
 
-int ip_mroute_setsockopt(struct sock *sk, int optname, char __user *optval, unsigned int optlen)
+int ip_mroute_setsockopt(struct sock *sk, int optname, char __user *optval, int optlen)
 {
 	int ret;
 	struct vifctl vif;
@@ -1203,7 +1205,7 @@ static inline int ipmr_forward_finish(struct sk_buff *skb)
 {
 	struct ip_options * opt	= &(IPCB(skb)->opt);
 
-	IP_INC_STATS(dev_net(skb_dst(skb)->dev), IPSTATS_MIB_OUTFORWDATAGRAMS);
+	IP_INC_STATS_BH(dev_net(skb_dst(skb)->dev), IPSTATS_MIB_OUTFORWDATAGRAMS);
 
 	if (unlikely(opt->optlen))
 		ip_forward_options(skb);
@@ -1266,7 +1268,7 @@ static void ipmr_queue_xmit(struct sk_buff *skb, struct mfc_cache *c, int vifi)
 		   to blackhole.
 		 */
 
-		IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGFAILS);
+		IP_INC_STATS_BH(dev_net(dev), IPSTATS_MIB_FRAGFAILS);
 		ip_rt_put(rt);
 		goto out_free;
 	}
@@ -1943,7 +1945,7 @@ static const struct file_operations ipmr_mfc_fops = {
 #endif
 
 #ifdef CONFIG_IP_PIMSM_V2
-static const struct net_protocol pim_protocol = {
+static struct net_protocol pim_protocol = {
 	.handler	=	pim_rcv,
 	.netns_ok	=	1,
 };

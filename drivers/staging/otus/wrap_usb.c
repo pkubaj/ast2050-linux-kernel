@@ -28,7 +28,10 @@
 #include "usbdrv.h"
 
 #include <linux/netlink.h>
+
+#if WIRELESS_EXT > 12
 #include <net/iw_handler.h>
+#endif
 
 extern void zfLnxInitUsbTxQ(zdev_t* dev);
 extern void zfLnxInitUsbRxQ(zdev_t* dev);

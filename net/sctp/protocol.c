@@ -431,13 +431,15 @@ static int sctp_v4_available(union sctp_addr *addr, struct sctp_sock *sp)
  * of requested destination address, sender and receiver
  * SHOULD include all of its addresses with level greater
  * than or equal to L.
- *
- * IPv4 scoping can be controlled through sysctl option
- * net.sctp.addr_scope_policy
  */
 static sctp_scope_t sctp_v4_scope(union sctp_addr *addr)
 {
 	sctp_scope_t retval;
+
+	/* Should IPv4 scoping be a sysctl configurable option
+	 * so users can turn it off (default on) for certain
+	 * unconventional networking environments?
+	 */
 
 	/* Check for unusable SCTP addresses. */
 	if (IS_IPV4_UNUSABLE_ADDRESS(addr->v4.sin_addr.s_addr)) {
@@ -924,7 +926,7 @@ static struct inet_protosw sctp_stream_protosw = {
 };
 
 /* Register with IP layer.  */
-static const struct net_protocol sctp_protocol = {
+static struct net_protocol sctp_protocol = {
 	.handler     = sctp_rcv,
 	.err_handler = sctp_v4_err,
 	.no_policy   = 1,
@@ -1157,8 +1159,7 @@ SCTP_STATIC __init int sctp_init(void)
 
 	/* Set the pressure threshold to be a fraction of global memory that
 	 * is up to 1/2 at 256 MB, decreasing toward zero with the amount of
-	 * memory, with a floor of 128 pages, and a ceiling that prevents an
-	 * integer overflow.
+	 * memory, with a floor of 128 pages.
 	 * Note this initalizes the data in sctpv6_prot too
 	 * Unabashedly stolen from tcp_init
 	 */
@@ -1166,7 +1167,6 @@ SCTP_STATIC __init int sctp_init(void)
 	limit = min(nr_pages, 1UL<<(28-PAGE_SHIFT)) >> (20-PAGE_SHIFT);
 	limit = (limit * (nr_pages >> (20-PAGE_SHIFT))) >> (PAGE_SHIFT-11);
 	limit = max(limit, 128UL);
-	limit = min(limit, INT_MAX * 4UL / 3 / 2);
 	sysctl_sctp_mem[0] = limit / 4 * 3;
 	sysctl_sctp_mem[1] = limit;
 	sysctl_sctp_mem[2] = sysctl_sctp_mem[0] * 2;
@@ -1258,9 +1258,6 @@ SCTP_STATIC __init int sctp_init(void)
 
 	/* Disable AUTH by default. */
 	sctp_auth_enable = 0;
-
-	/* Set SCOPE policy to enabled */
-	sctp_scope_policy = SCTP_SCOPE_POLICY_ENABLE;
 
 	sctp_sysctl_register();
 

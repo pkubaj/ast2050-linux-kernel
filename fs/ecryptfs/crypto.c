@@ -245,11 +245,13 @@ void ecryptfs_destroy_crypt_stat(struct ecryptfs_crypt_stat *crypt_stat)
 		crypto_free_blkcipher(crypt_stat->tfm);
 	if (crypt_stat->hash_tfm)
 		crypto_free_hash(crypt_stat->hash_tfm);
+	mutex_lock(&crypt_stat->keysig_list_mutex);
 	list_for_each_entry_safe(key_sig, key_sig_tmp,
 				 &crypt_stat->keysig_list, crypt_stat_list) {
 		list_del(&key_sig->crypt_stat_list);
 		kmem_cache_free(ecryptfs_key_sig_cache, key_sig);
 	}
+	mutex_unlock(&crypt_stat->keysig_list_mutex);
 	memset(crypt_stat, 0, sizeof(struct ecryptfs_crypt_stat));
 }
 
@@ -509,14 +511,13 @@ int ecryptfs_encrypt_page(struct page *page)
 				  + extent_offset), crypt_stat);
 		rc = ecryptfs_write_lower(ecryptfs_inode, enc_extent_virt,
 					  offset, crypt_stat->extent_size);
-		if (rc < 0) {
+		if (rc) {
 			ecryptfs_printk(KERN_ERR, "Error attempting "
 					"to write lower page; rc = [%d]"
 					"\n", rc);
 			goto out;
 		}
 	}
-	rc = 0;
 out:
 	if (enc_extent_page) {
 		kunmap(enc_extent_page);
@@ -632,7 +633,7 @@ int ecryptfs_decrypt_page(struct page *page)
 		rc = ecryptfs_read_lower(enc_extent_virt, offset,
 					 crypt_stat->extent_size,
 					 ecryptfs_inode);
-		if (rc < 0) {
+		if (rc) {
 			ecryptfs_printk(KERN_ERR, "Error attempting "
 					"to read lower page; rc = [%d]"
 					"\n", rc);
@@ -925,9 +926,7 @@ static int ecryptfs_copy_mount_wide_sigs_to_inode_sigs(
 	struct ecryptfs_global_auth_tok *global_auth_tok;
 	int rc = 0;
 
-	mutex_lock(&crypt_stat->keysig_list_mutex);
 	mutex_lock(&mount_crypt_stat->global_auth_tok_list_mutex);
-
 	list_for_each_entry(global_auth_tok,
 			    &mount_crypt_stat->global_auth_tok_list,
 			    mount_crypt_stat_list) {
@@ -936,13 +935,13 @@ static int ecryptfs_copy_mount_wide_sigs_to_inode_sigs(
 		rc = ecryptfs_add_keysig(crypt_stat, global_auth_tok->sig);
 		if (rc) {
 			printk(KERN_ERR "Error adding keysig; rc = [%d]\n", rc);
+			mutex_unlock(
+				&mount_crypt_stat->global_auth_tok_list_mutex);
 			goto out;
 		}
 	}
-
-out:
 	mutex_unlock(&mount_crypt_stat->global_auth_tok_list_mutex);
-	mutex_unlock(&crypt_stat->keysig_list_mutex);
+out:
 	return rc;
 }
 
@@ -1214,15 +1213,14 @@ int ecryptfs_read_and_validate_header_region(char *data,
 		crypt_stat->extent_size = ECRYPTFS_DEFAULT_EXTENT_SIZE;
 	rc = ecryptfs_read_lower(data, 0, crypt_stat->extent_size,
 				 ecryptfs_inode);
-	if (rc < 0) {
+	if (rc) {
 		printk(KERN_ERR "%s: Error reading header region; rc = [%d]\n",
 		       __func__, rc);
 		goto out;
 	}
 	if (!contains_ecryptfs_marker(data + ECRYPTFS_FILE_SIZE_BYTES)) {
 		rc = -EINVAL;
-	} else
-		rc = 0;
+	}
 out:
 	return rc;
 }
@@ -1317,11 +1315,10 @@ ecryptfs_write_metadata_to_contents(struct dentry *ecryptfs_dentry,
 
 	rc = ecryptfs_write_lower(ecryptfs_dentry->d_inode, virt,
 				  0, virt_len);
-	if (rc < 0)
+	if (rc)
 		printk(KERN_ERR "%s: Error attempting to write header "
-		       "information to lower file; rc = [%d]\n", __func__, rc);
-	else
-		rc = 0;
+		       "information to lower file; rc = [%d]\n", __func__,
+		       rc);
 	return rc;
 }
 
@@ -1455,25 +1452,6 @@ static void set_default_header_data(struct ecryptfs_crypt_stat *crypt_stat)
 		ECRYPTFS_MINIMUM_HEADER_EXTENT_SIZE;
 }
 
-void ecryptfs_i_size_init(const char *page_virt, struct inode *inode)
-{
-	struct ecryptfs_mount_crypt_stat *mount_crypt_stat;
-	struct ecryptfs_crypt_stat *crypt_stat;
-	u64 file_size;
-
-	crypt_stat = &ecryptfs_inode_to_private(inode)->crypt_stat;
-	mount_crypt_stat =
-		&ecryptfs_superblock_to_private(inode->i_sb)->mount_crypt_stat;
-	if (mount_crypt_stat->flags & ECRYPTFS_ENCRYPTED_VIEW_ENABLED) {
-		file_size = i_size_read(ecryptfs_inode_to_lower(inode));
-		if (crypt_stat->flags & ECRYPTFS_METADATA_IN_XATTR)
-			file_size += crypt_stat->num_header_bytes_at_front;
-	} else
-		file_size = get_unaligned_be64(page_virt);
-	i_size_write(inode, (loff_t)file_size);
-	crypt_stat->flags |= ECRYPTFS_I_SIZE_INITIALIZED;
-}
-
 /**
  * ecryptfs_read_headers_virt
  * @page_virt: The virtual address into which to read the headers
@@ -1504,8 +1482,6 @@ static int ecryptfs_read_headers_virt(char *page_virt,
 		rc = -EINVAL;
 		goto out;
 	}
-	if (!(crypt_stat->flags & ECRYPTFS_I_SIZE_INITIALIZED))
-		ecryptfs_i_size_init(page_virt, ecryptfs_dentry->d_inode);
 	offset += MAGIC_ECRYPTFS_MARKER_SIZE_BYTES;
 	rc = ecryptfs_process_flags(crypt_stat, (page_virt + offset),
 				    &bytes_read);
@@ -1622,7 +1598,7 @@ int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 	}
 	rc = ecryptfs_read_lower(page_virt, 0, crypt_stat->extent_size,
 				 ecryptfs_inode);
-	if (rc >= 0)
+	if (!rc)
 		rc = ecryptfs_read_headers_virt(page_virt, crypt_stat,
 						ecryptfs_dentry,
 						ECRYPTFS_VALIDATE_HEADER_SIZE);
@@ -1630,8 +1606,7 @@ int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 		rc = ecryptfs_read_xattr_region(page_virt, ecryptfs_inode);
 		if (rc) {
 			printk(KERN_DEBUG "Valid eCryptfs headers not found in "
-			       "file header region or xattr region, inode %lu\n",
-				ecryptfs_inode->i_ino);
+			       "file header region or xattr region\n");
 			rc = -EINVAL;
 			goto out;
 		}
@@ -1640,8 +1615,7 @@ int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 						ECRYPTFS_DONT_VALIDATE_HEADER_SIZE);
 		if (rc) {
 			printk(KERN_DEBUG "Valid eCryptfs headers not found in "
-			       "file xattr region either, inode %lu\n",
-				ecryptfs_inode->i_ino);
+			       "file xattr region either\n");
 			rc = -EINVAL;
 		}
 		if (crypt_stat->mount_crypt_stat->flags
@@ -1652,8 +1626,7 @@ int ecryptfs_read_metadata(struct dentry *ecryptfs_dentry)
 			       "crypto metadata only in the extended attribute "
 			       "region, but eCryptfs was mounted without "
 			       "xattr support enabled. eCryptfs will not treat "
-			       "this like an encrypted file, inode %lu\n",
-				ecryptfs_inode->i_ino);
+			       "this like an encrypted file.\n");
 			rc = -EINVAL;
 		}
 	}
@@ -1790,7 +1763,7 @@ ecryptfs_process_key_cipher(struct crypto_blkcipher **key_tfm,
 	if (IS_ERR(*key_tfm)) {
 		rc = PTR_ERR(*key_tfm);
 		printk(KERN_ERR "Unable to allocate crypto cipher with name "
-		       "[%s]; rc = [%d]\n", full_alg_name, rc);
+		       "[%s]; rc = [%d]\n", cipher_name, rc);
 		goto out;
 	}
 	crypto_blkcipher_set_flags(*key_tfm, CRYPTO_TFM_REQ_WEAK_KEY);
@@ -1803,8 +1776,7 @@ ecryptfs_process_key_cipher(struct crypto_blkcipher **key_tfm,
 	rc = crypto_blkcipher_setkey(*key_tfm, dummy_key, *key_size);
 	if (rc) {
 		printk(KERN_ERR "Error attempting to set key of size [%zd] for "
-		       "cipher [%s]; rc = [%d]\n", *key_size, full_alg_name,
-		       rc);
+		       "cipher [%s]; rc = [%d]\n", *key_size, cipher_name, rc);
 		rc = -EINVAL;
 		goto out;
 	}
@@ -1958,7 +1930,7 @@ static unsigned char *portable_filename_chars = ("-.0123456789ABCD"
 
 /* We could either offset on every reverse map or just pad some 0x00's
  * at the front here */
-static const unsigned char filename_rev_map[256] = {
+static const unsigned char filename_rev_map[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* 7 */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* 15 */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* 23 */
@@ -1974,7 +1946,7 @@ static const unsigned char filename_rev_map[256] = {
 	0x00, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, /* 103 */
 	0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, /* 111 */
 	0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, /* 119 */
-	0x3D, 0x3E, 0x3F /* 123 - 255 initialized to 0x00 */
+	0x3D, 0x3E, 0x3F
 };
 
 /**
@@ -2088,6 +2060,7 @@ ecryptfs_decode_from_filename(unsigned char *dst, size_t *dst_size,
 			break;
 		case 2:
 			dst[dst_byte_offset++] |= (src_byte);
+			dst[dst_byte_offset] = 0;
 			current_bit_offset = 0;
 			break;
 		}

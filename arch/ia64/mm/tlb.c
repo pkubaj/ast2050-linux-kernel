@@ -100,36 +100,24 @@ wrap_mmu_context (struct mm_struct *mm)
  * this primitive it can be moved up to a spinaphore.h header.
  */
 struct spinaphore {
-	unsigned long	ticket;
-	unsigned long	serve;
+	atomic_t	cur;
 };
 
 static inline void spinaphore_init(struct spinaphore *ss, int val)
 {
-	ss->ticket = 0;
-	ss->serve = val;
+	atomic_set(&ss->cur, val);
 }
 
 static inline void down_spin(struct spinaphore *ss)
 {
-	unsigned long t = ia64_fetchadd(1, &ss->ticket, acq), serve;
-
-	if (time_before(t, ss->serve))
-		return;
-
-	ia64_invala();
-
-	for (;;) {
-		asm volatile ("ld8.c.nc %0=[%1]" : "=r"(serve) : "r"(&ss->serve) : "memory");
-		if (time_before(t, serve))
-			return;
-		cpu_relax();
-	}
+	while (unlikely(!atomic_add_unless(&ss->cur, -1, 0)))
+		while (atomic_read(&ss->cur) == 0)
+			cpu_relax();
 }
 
 static inline void up_spin(struct spinaphore *ss)
 {
-	ia64_fetchadd(1, &ss->serve, rel);
+	atomic_add(1, &ss->cur);
 }
 
 static struct spinaphore ptcg_sem;

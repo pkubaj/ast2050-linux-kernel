@@ -13,7 +13,6 @@
 #include <linux/smp.h>
 #include <linux/errno.h>
 #include <linux/ptrace.h>
-#include <linux/tracehook.h>
 #include <linux/user.h>
 #include <linux/personality.h>
 #include <linux/security.h>
@@ -36,8 +35,7 @@
  */
 void ptrace_disable(struct task_struct *task)
 {
-	clear_tsk_thread_flag(task, TIF_SINGLESTEP);
-	clear_tsk_thread_flag(task, TIF_BLOCKSTEP);
+	task->ptrace &= ~(PT_SINGLESTEP|PT_BLOCKSTEP);
 
 	/* make sure the trap bits are not set */
 	pa_psw(task)->r = 0;
@@ -57,8 +55,8 @@ void user_disable_single_step(struct task_struct *task)
 
 void user_enable_single_step(struct task_struct *task)
 {
-	clear_tsk_thread_flag(task, TIF_BLOCKSTEP);
-	set_tsk_thread_flag(task, TIF_SINGLESTEP);
+	task->ptrace &= ~PT_BLOCKSTEP;
+	task->ptrace |= PT_SINGLESTEP;
 
 	if (pa_psw(task)->n) {
 		struct siginfo si;
@@ -100,8 +98,8 @@ void user_enable_single_step(struct task_struct *task)
 
 void user_enable_block_step(struct task_struct *task)
 {
-	clear_tsk_thread_flag(task, TIF_SINGLESTEP);
-	set_tsk_thread_flag(task, TIF_BLOCKSTEP);
+	task->ptrace &= ~PT_SINGLESTEP;
+	task->ptrace |= PT_BLOCKSTEP;
 
 	/* Enable taken branch trap. */
 	pa_psw(task)->r = 0;
@@ -265,20 +263,22 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 }
 #endif
 
-long do_syscall_trace_enter(struct pt_regs *regs)
+
+void syscall_trace(void)
 {
-	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
-	    tracehook_report_syscall_entry(regs))
-		return -1L;
-
-	return regs->gr[20];
-}
-
-void do_syscall_trace_exit(struct pt_regs *regs)
-{
-	int stepping = test_thread_flag(TIF_SINGLESTEP) ||
-		test_thread_flag(TIF_BLOCKSTEP);
-
-	if (stepping || test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(regs, stepping);
+	if (!test_thread_flag(TIF_SYSCALL_TRACE))
+		return;
+	if (!(current->ptrace & PT_PTRACED))
+		return;
+	ptrace_notify(SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+				 ? 0x80 : 0));
+	/*
+	 * this isn't the same as continuing with a signal, but it will do
+	 * for normal use.  strace only continues with a signal if the
+	 * stopping signal is not SIGTRAP.  -brl
+	 */
+	if (current->exit_code) {
+		send_sig(current->exit_code, current, 1);
+		current->exit_code = 0;
+	}
 }

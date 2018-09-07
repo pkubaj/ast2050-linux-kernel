@@ -18,7 +18,7 @@ int fd;
  * the PC Watchdog card to reset its internal timer so it doesn't trigger
  * a computer reset.
  */
-static void keep_alive(void)
+void keep_alive(void)
 {
     int dummy;
 

@@ -21,29 +21,44 @@
 #include <linux/debug_locks.h>
 #include <linux/module.h>
 
-#ifndef _spin_trylock
 int __lockfunc _spin_trylock(spinlock_t *lock)
 {
-	return __spin_trylock(lock);
+	preempt_disable();
+	if (_raw_spin_trylock(lock)) {
+		spin_acquire(&lock->dep_map, 0, 1, _RET_IP_);
+		return 1;
+	}
+	
+	preempt_enable();
+	return 0;
 }
 EXPORT_SYMBOL(_spin_trylock);
-#endif
 
-#ifndef _read_trylock
 int __lockfunc _read_trylock(rwlock_t *lock)
 {
-	return __read_trylock(lock);
+	preempt_disable();
+	if (_raw_read_trylock(lock)) {
+		rwlock_acquire_read(&lock->dep_map, 0, 1, _RET_IP_);
+		return 1;
+	}
+
+	preempt_enable();
+	return 0;
 }
 EXPORT_SYMBOL(_read_trylock);
-#endif
 
-#ifndef _write_trylock
 int __lockfunc _write_trylock(rwlock_t *lock)
 {
-	return __write_trylock(lock);
+	preempt_disable();
+	if (_raw_write_trylock(lock)) {
+		rwlock_acquire(&lock->dep_map, 0, 1, _RET_IP_);
+		return 1;
+	}
+
+	preempt_enable();
+	return 0;
 }
 EXPORT_SYMBOL(_write_trylock);
-#endif
 
 /*
  * If lockdep is enabled then we use the non-preemption spin-ops
@@ -52,101 +67,132 @@ EXPORT_SYMBOL(_write_trylock);
  */
 #if !defined(CONFIG_GENERIC_LOCKBREAK) || defined(CONFIG_DEBUG_LOCK_ALLOC)
 
-#ifndef _read_lock
 void __lockfunc _read_lock(rwlock_t *lock)
 {
-	__read_lock(lock);
+	preempt_disable();
+	rwlock_acquire_read(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_read_trylock, _raw_read_lock);
 }
 EXPORT_SYMBOL(_read_lock);
-#endif
 
-#ifndef _spin_lock_irqsave
 unsigned long __lockfunc _spin_lock_irqsave(spinlock_t *lock)
 {
-	return __spin_lock_irqsave(lock);
+	unsigned long flags;
+
+	local_irq_save(flags);
+	preempt_disable();
+	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	/*
+	 * On lockdep we dont want the hand-coded irq-enable of
+	 * _raw_spin_lock_flags() code, because lockdep assumes
+	 * that interrupts are not re-enabled during lock-acquire:
+	 */
+#ifdef CONFIG_LOCKDEP
+	LOCK_CONTENDED(lock, _raw_spin_trylock, _raw_spin_lock);
+#else
+	_raw_spin_lock_flags(lock, &flags);
+#endif
+	return flags;
 }
 EXPORT_SYMBOL(_spin_lock_irqsave);
-#endif
 
-#ifndef _spin_lock_irq
 void __lockfunc _spin_lock_irq(spinlock_t *lock)
 {
-	__spin_lock_irq(lock);
+	local_irq_disable();
+	preempt_disable();
+	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_spin_trylock, _raw_spin_lock);
 }
 EXPORT_SYMBOL(_spin_lock_irq);
-#endif
 
-#ifndef _spin_lock_bh
 void __lockfunc _spin_lock_bh(spinlock_t *lock)
 {
-	__spin_lock_bh(lock);
+	local_bh_disable();
+	preempt_disable();
+	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_spin_trylock, _raw_spin_lock);
 }
 EXPORT_SYMBOL(_spin_lock_bh);
-#endif
 
-#ifndef _read_lock_irqsave
 unsigned long __lockfunc _read_lock_irqsave(rwlock_t *lock)
 {
-	return __read_lock_irqsave(lock);
+	unsigned long flags;
+
+	local_irq_save(flags);
+	preempt_disable();
+	rwlock_acquire_read(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED_FLAGS(lock, _raw_read_trylock, _raw_read_lock,
+			     _raw_read_lock_flags, &flags);
+	return flags;
 }
 EXPORT_SYMBOL(_read_lock_irqsave);
-#endif
 
-#ifndef _read_lock_irq
 void __lockfunc _read_lock_irq(rwlock_t *lock)
 {
-	__read_lock_irq(lock);
+	local_irq_disable();
+	preempt_disable();
+	rwlock_acquire_read(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_read_trylock, _raw_read_lock);
 }
 EXPORT_SYMBOL(_read_lock_irq);
-#endif
 
-#ifndef _read_lock_bh
 void __lockfunc _read_lock_bh(rwlock_t *lock)
 {
-	__read_lock_bh(lock);
+	local_bh_disable();
+	preempt_disable();
+	rwlock_acquire_read(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_read_trylock, _raw_read_lock);
 }
 EXPORT_SYMBOL(_read_lock_bh);
-#endif
 
-#ifndef _write_lock_irqsave
 unsigned long __lockfunc _write_lock_irqsave(rwlock_t *lock)
 {
-	return __write_lock_irqsave(lock);
+	unsigned long flags;
+
+	local_irq_save(flags);
+	preempt_disable();
+	rwlock_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED_FLAGS(lock, _raw_write_trylock, _raw_write_lock,
+			     _raw_write_lock_flags, &flags);
+	return flags;
 }
 EXPORT_SYMBOL(_write_lock_irqsave);
-#endif
 
-#ifndef _write_lock_irq
 void __lockfunc _write_lock_irq(rwlock_t *lock)
 {
-	__write_lock_irq(lock);
+	local_irq_disable();
+	preempt_disable();
+	rwlock_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_write_trylock, _raw_write_lock);
 }
 EXPORT_SYMBOL(_write_lock_irq);
-#endif
 
-#ifndef _write_lock_bh
 void __lockfunc _write_lock_bh(rwlock_t *lock)
 {
-	__write_lock_bh(lock);
+	local_bh_disable();
+	preempt_disable();
+	rwlock_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_write_trylock, _raw_write_lock);
 }
 EXPORT_SYMBOL(_write_lock_bh);
-#endif
 
-#ifndef _spin_lock
 void __lockfunc _spin_lock(spinlock_t *lock)
 {
-	__spin_lock(lock);
+	preempt_disable();
+	spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_spin_trylock, _raw_spin_lock);
 }
-EXPORT_SYMBOL(_spin_lock);
-#endif
 
-#ifndef _write_lock
+EXPORT_SYMBOL(_spin_lock);
+
 void __lockfunc _write_lock(rwlock_t *lock)
 {
-	__write_lock(lock);
+	preempt_disable();
+	rwlock_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+	LOCK_CONTENDED(lock, _raw_write_trylock, _raw_write_lock);
 }
+
 EXPORT_SYMBOL(_write_lock);
-#endif
 
 #else /* CONFIG_PREEMPT: */
 
@@ -272,109 +318,125 @@ EXPORT_SYMBOL(_spin_lock_nest_lock);
 
 #endif
 
-#ifndef _spin_unlock
 void __lockfunc _spin_unlock(spinlock_t *lock)
 {
-	__spin_unlock(lock);
+	spin_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_spin_unlock(lock);
+	preempt_enable();
 }
 EXPORT_SYMBOL(_spin_unlock);
-#endif
 
-#ifndef _write_unlock
 void __lockfunc _write_unlock(rwlock_t *lock)
 {
-	__write_unlock(lock);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_write_unlock(lock);
+	preempt_enable();
 }
 EXPORT_SYMBOL(_write_unlock);
-#endif
 
-#ifndef _read_unlock
 void __lockfunc _read_unlock(rwlock_t *lock)
 {
-	__read_unlock(lock);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_read_unlock(lock);
+	preempt_enable();
 }
 EXPORT_SYMBOL(_read_unlock);
-#endif
 
-#ifndef _spin_unlock_irqrestore
 void __lockfunc _spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags)
 {
-	__spin_unlock_irqrestore(lock, flags);
+	spin_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_spin_unlock(lock);
+	local_irq_restore(flags);
+	preempt_enable();
 }
 EXPORT_SYMBOL(_spin_unlock_irqrestore);
-#endif
 
-#ifndef _spin_unlock_irq
 void __lockfunc _spin_unlock_irq(spinlock_t *lock)
 {
-	__spin_unlock_irq(lock);
+	spin_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_spin_unlock(lock);
+	local_irq_enable();
+	preempt_enable();
 }
 EXPORT_SYMBOL(_spin_unlock_irq);
-#endif
 
-#ifndef _spin_unlock_bh
 void __lockfunc _spin_unlock_bh(spinlock_t *lock)
 {
-	__spin_unlock_bh(lock);
+	spin_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_spin_unlock(lock);
+	preempt_enable_no_resched();
+	local_bh_enable_ip((unsigned long)__builtin_return_address(0));
 }
 EXPORT_SYMBOL(_spin_unlock_bh);
-#endif
 
-#ifndef _read_unlock_irqrestore
 void __lockfunc _read_unlock_irqrestore(rwlock_t *lock, unsigned long flags)
 {
-	__read_unlock_irqrestore(lock, flags);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_read_unlock(lock);
+	local_irq_restore(flags);
+	preempt_enable();
 }
 EXPORT_SYMBOL(_read_unlock_irqrestore);
-#endif
 
-#ifndef _read_unlock_irq
 void __lockfunc _read_unlock_irq(rwlock_t *lock)
 {
-	__read_unlock_irq(lock);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_read_unlock(lock);
+	local_irq_enable();
+	preempt_enable();
 }
 EXPORT_SYMBOL(_read_unlock_irq);
-#endif
 
-#ifndef _read_unlock_bh
 void __lockfunc _read_unlock_bh(rwlock_t *lock)
 {
-	__read_unlock_bh(lock);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_read_unlock(lock);
+	preempt_enable_no_resched();
+	local_bh_enable_ip((unsigned long)__builtin_return_address(0));
 }
 EXPORT_SYMBOL(_read_unlock_bh);
-#endif
 
-#ifndef _write_unlock_irqrestore
 void __lockfunc _write_unlock_irqrestore(rwlock_t *lock, unsigned long flags)
 {
-	__write_unlock_irqrestore(lock, flags);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_write_unlock(lock);
+	local_irq_restore(flags);
+	preempt_enable();
 }
 EXPORT_SYMBOL(_write_unlock_irqrestore);
-#endif
 
-#ifndef _write_unlock_irq
 void __lockfunc _write_unlock_irq(rwlock_t *lock)
 {
-	__write_unlock_irq(lock);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_write_unlock(lock);
+	local_irq_enable();
+	preempt_enable();
 }
 EXPORT_SYMBOL(_write_unlock_irq);
-#endif
 
-#ifndef _write_unlock_bh
 void __lockfunc _write_unlock_bh(rwlock_t *lock)
 {
-	__write_unlock_bh(lock);
+	rwlock_release(&lock->dep_map, 1, _RET_IP_);
+	_raw_write_unlock(lock);
+	preempt_enable_no_resched();
+	local_bh_enable_ip((unsigned long)__builtin_return_address(0));
 }
 EXPORT_SYMBOL(_write_unlock_bh);
-#endif
 
-#ifndef _spin_trylock_bh
 int __lockfunc _spin_trylock_bh(spinlock_t *lock)
 {
-	return __spin_trylock_bh(lock);
+	local_bh_disable();
+	preempt_disable();
+	if (_raw_spin_trylock(lock)) {
+		spin_acquire(&lock->dep_map, 0, 1, _RET_IP_);
+		return 1;
+	}
+
+	preempt_enable_no_resched();
+	local_bh_enable_ip((unsigned long)__builtin_return_address(0));
+	return 0;
 }
 EXPORT_SYMBOL(_spin_trylock_bh);
-#endif
 
 notrace int in_lock_functions(unsigned long addr)
 {

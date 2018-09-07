@@ -57,13 +57,6 @@
  *
  *	Restore registers with the values previously saved with the
  *	'preserv' macro. Called upon code termination.
- *
- * LDR1W_SHIFT
- * STR1W_SHIFT
- *
- *	Correction to be applied to the "ip" register when branching into
- *	the ldr1w or str1w instructions (some of these macros may expand to
- *	than one 32bit instruction in Thumb-2)
  */
 
 
@@ -106,15 +99,9 @@
 
 5:		ands	ip, r2, #28
 		rsb	ip, ip, #32
-#if LDR1W_SHIFT > 0
-		lsl	ip, ip, #LDR1W_SHIFT
-#endif
 		addne	pc, pc, ip		@ C is always clear here
 		b	7f
-6:
-		.rept	(1 << LDR1W_SHIFT)
-		W(nop)
-		.endr
+6:		nop
 		ldr1w	r1, r3, abort=20f
 		ldr1w	r1, r4, abort=20f
 		ldr1w	r1, r5, abort=20f
@@ -123,16 +110,9 @@
 		ldr1w	r1, r8, abort=20f
 		ldr1w	r1, lr, abort=20f
 
-#if LDR1W_SHIFT < STR1W_SHIFT
-		lsl	ip, ip, #STR1W_SHIFT - LDR1W_SHIFT
-#elif LDR1W_SHIFT > STR1W_SHIFT
-		lsr	ip, ip, #LDR1W_SHIFT - STR1W_SHIFT
-#endif
 		add	pc, pc, ip
 		nop
-		.rept	(1 << STR1W_SHIFT)
-		W(nop)
-		.endr
+		nop
 		str1w	r0, r3, abort=20f
 		str1w	r0, r4, abort=20f
 		str1w	r0, r5, abort=20f

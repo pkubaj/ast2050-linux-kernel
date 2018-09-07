@@ -34,14 +34,15 @@
  *
  * Write data to the lower file.
  *
- * Returns bytes written on success; less than zero on error
+ * Returns zero on success; non-zero on error
  */
 int ecryptfs_write_lower(struct inode *ecryptfs_inode, char *data,
 			 loff_t offset, size_t size)
 {
 	struct ecryptfs_inode_info *inode_info;
+	ssize_t octets_written;
 	mm_segment_t fs_save;
-	ssize_t rc;
+	int rc = 0;
 
 	inode_info = ecryptfs_inode_to_private(ecryptfs_inode);
 	mutex_lock(&inode_info->lower_file_mutex);
@@ -49,9 +50,14 @@ int ecryptfs_write_lower(struct inode *ecryptfs_inode, char *data,
 	inode_info->lower_file->f_pos = offset;
 	fs_save = get_fs();
 	set_fs(get_ds());
-	rc = vfs_write(inode_info->lower_file, data, size,
-		       &inode_info->lower_file->f_pos);
+	octets_written = vfs_write(inode_info->lower_file, data, size,
+				   &inode_info->lower_file->f_pos);
 	set_fs(fs_save);
+	if (octets_written < 0) {
+		printk(KERN_ERR "%s: octets_written = [%td]; "
+		       "expected [%td]\n", __func__, octets_written, size);
+		rc = -EINVAL;
+	}
 	mutex_unlock(&inode_info->lower_file_mutex);
 	mark_inode_dirty_sync(ecryptfs_inode);
 	return rc;
@@ -85,8 +91,6 @@ int ecryptfs_write_lower_page_segment(struct inode *ecryptfs_inode,
 		  + offset_in_page);
 	virt = kmap(page_for_lower);
 	rc = ecryptfs_write_lower(ecryptfs_inode, virt, offset, size);
-	if (rc > 0)
-		rc = 0;
 	kunmap(page_for_lower);
 	return rc;
 }
@@ -134,18 +138,13 @@ int ecryptfs_write(struct file *ecryptfs_file, char *data, loff_t offset,
 		pgoff_t ecryptfs_page_idx = (pos >> PAGE_CACHE_SHIFT);
 		size_t start_offset_in_page = (pos & ~PAGE_CACHE_MASK);
 		size_t num_bytes = (PAGE_CACHE_SIZE - start_offset_in_page);
-		loff_t total_remaining_bytes = ((offset + size) - pos);
-
-		if (fatal_signal_pending(current)) {
-			rc = -EINTR;
-			break;
-		}
+		size_t total_remaining_bytes = ((offset + size) - pos);
 
 		if (num_bytes > total_remaining_bytes)
 			num_bytes = total_remaining_bytes;
 		if (pos < offset) {
 			/* remaining zeros to write, up to destination offset */
-			loff_t total_remaining_zeros = (offset - pos);
+			size_t total_remaining_zeros = (offset - pos);
 
 			if (num_bytes > total_remaining_zeros)
 				num_bytes = total_remaining_zeros;
@@ -202,19 +201,15 @@ int ecryptfs_write(struct file *ecryptfs_file, char *data, loff_t offset,
 		}
 		pos += num_bytes;
 	}
-	if (pos > ecryptfs_file_size) {
-		i_size_write(ecryptfs_inode, pos);
+	if ((offset + size) > ecryptfs_file_size) {
+		i_size_write(ecryptfs_inode, (offset + size));
 		if (crypt_stat->flags & ECRYPTFS_ENCRYPTED) {
-			int rc2;
-
-			rc2 = ecryptfs_write_inode_size_to_metadata(
+			rc = ecryptfs_write_inode_size_to_metadata(
 								ecryptfs_inode);
-			if (rc2) {
+			if (rc) {
 				printk(KERN_ERR	"Problem with "
 				       "ecryptfs_write_inode_size_to_metadata; "
-				       "rc = [%d]\n", rc2);
-				if (!rc)
-					rc = rc2;
+				       "rc = [%d]\n", rc);
 				goto out;
 			}
 		}
@@ -234,24 +229,30 @@ out:
  * Read @size bytes of data at byte offset @offset from the lower
  * inode into memory location @data.
  *
- * Returns bytes read on success; 0 on EOF; less than zero on error
+ * Returns zero on success; non-zero on error
  */
 int ecryptfs_read_lower(char *data, loff_t offset, size_t size,
 			struct inode *ecryptfs_inode)
 {
 	struct ecryptfs_inode_info *inode_info =
 		ecryptfs_inode_to_private(ecryptfs_inode);
+	ssize_t octets_read;
 	mm_segment_t fs_save;
-	ssize_t rc;
+	int rc = 0;
 
 	mutex_lock(&inode_info->lower_file_mutex);
 	BUG_ON(!inode_info->lower_file);
 	inode_info->lower_file->f_pos = offset;
 	fs_save = get_fs();
 	set_fs(get_ds());
-	rc = vfs_read(inode_info->lower_file, data, size,
-		      &inode_info->lower_file->f_pos);
+	octets_read = vfs_read(inode_info->lower_file, data, size,
+			       &inode_info->lower_file->f_pos);
 	set_fs(fs_save);
+	if (octets_read < 0) {
+		printk(KERN_ERR "%s: octets_read = [%td]; "
+		       "expected [%td]\n", __func__, octets_read, size);
+		rc = -EINVAL;
+	}
 	mutex_unlock(&inode_info->lower_file_mutex);
 	return rc;
 }
@@ -283,8 +284,6 @@ int ecryptfs_read_lower_page_segment(struct page *page_for_ecryptfs,
 	offset = ((((loff_t)page_index) << PAGE_CACHE_SHIFT) + offset_in_page);
 	virt = kmap(page_for_ecryptfs);
 	rc = ecryptfs_read_lower(virt, offset, size, ecryptfs_inode);
-	if (rc > 0)
-		rc = 0;
 	kunmap(page_for_ecryptfs);
 	flush_dcache_page(page_for_ecryptfs);
 	return rc;

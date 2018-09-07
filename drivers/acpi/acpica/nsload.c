@@ -270,7 +270,8 @@ static acpi_status acpi_ns_delete_subtree(acpi_handle start_handle)
 
 	/* Now delete the starting object, and we are done */
 
-	acpi_ns_remove_node(child_handle);
+	acpi_ns_delete_node(child_handle);
+
 	return_ACPI_STATUS(AE_OK);
 }
 

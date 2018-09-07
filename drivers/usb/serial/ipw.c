@@ -193,7 +193,8 @@ static void ipw_read_bulk_callback(struct urb *urb)
 	return;
 }
 
-static int ipw_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int ipw_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct usb_device *dev = port->serial->dev;
 	u8 buf_flow_static[16] = IPW_BYTES_FLOWINIT;

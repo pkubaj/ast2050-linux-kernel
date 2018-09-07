@@ -100,7 +100,7 @@ static __init void prom_init_console(void)
 
 static __init void prom_init_cmdline(void)
 {
-	static char buf[CL_SIZE] __initdata;
+	char buf[CL_SIZE];
 
 	/* Get the kernel command line from CFE */
 	if (cfe_getenv("LINUX_CMDLINE", buf, CL_SIZE) >= 0) {

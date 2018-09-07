@@ -30,7 +30,11 @@
 #ifndef __RC4_H__
 #define __RC4_H__
 
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+
+
 
 /*---------------------  Export Definitions -------------------------*/
 /*---------------------  Export Types  ------------------------------*/
@@ -38,7 +42,7 @@ typedef struct {
     UINT ux;
     UINT uy;
     BYTE abystate[256];
-} RC4Ext, *PRC4Ext;
+} RC4Ext, DEF* PRC4Ext;
 
 VOID rc4_init(PRC4Ext pRC4, PBYTE pbyKey, UINT cbKey_len);
 UINT rc4_byte(PRC4Ext pRC4);

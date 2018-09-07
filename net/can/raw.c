@@ -280,12 +280,7 @@ static int raw_init(struct sock *sk)
 static int raw_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
-	struct raw_sock *ro;
-
-	if (!sk)
-		return 0;
-
-	ro = raw_sk(sk);
+	struct raw_sock *ro = raw_sk(sk);
 
 	unregister_netdevice_notifier(&ro->notifier);
 
@@ -416,7 +411,7 @@ static int raw_getname(struct socket *sock, struct sockaddr *uaddr,
 }
 
 static int raw_setsockopt(struct socket *sock, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
 	struct raw_sock *ro = raw_sk(sk);

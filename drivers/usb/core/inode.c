@@ -48,6 +48,7 @@
 #define USBFS_DEFAULT_BUSMODE (S_IXUGO | S_IRUGO)
 #define USBFS_DEFAULT_LISTMODE S_IRUGO
 
+static struct super_operations usbfs_ops;
 static const struct file_operations default_file_operations;
 static struct vfsmount *usbfs_mount;
 static int usbfs_mount_count;	/* = 0 */
@@ -448,7 +449,7 @@ static const struct file_operations default_file_operations = {
 	.llseek =	default_file_lseek,
 };
 
-static const struct super_operations usbfs_ops = {
+static struct super_operations usbfs_ops = {
 	.statfs =	simple_statfs,
 	.drop_inode =	generic_delete_inode,
 	.remount_fs =	remount,
@@ -515,13 +516,13 @@ static int fs_create_by_name (const char *name, mode_t mode,
 	*dentry = NULL;
 	mutex_lock(&parent->d_inode->i_mutex);
 	*dentry = lookup_one_len(name, parent, strlen(name));
-	if (!IS_ERR(*dentry)) {
+	if (!IS_ERR(dentry)) {
 		if ((mode & S_IFMT) == S_IFDIR)
 			error = usbfs_mkdir (parent->d_inode, *dentry, mode);
 		else 
 			error = usbfs_create (parent->d_inode, *dentry, mode);
 	} else
-		error = PTR_ERR(*dentry);
+		error = PTR_ERR(dentry);
 	mutex_unlock(&parent->d_inode->i_mutex);
 
 	return error;

@@ -14,7 +14,6 @@
 #include <linux/module.h>
 #include <linux/backing-dev.h>
 #include <linux/wait.h>
-#include <linux/rwsem.h>
 #include <linux/hash.h>
 #include <linux/swap.h>
 #include <linux/security.h>
@@ -88,18 +87,14 @@ static struct hlist_head *inode_hashtable __read_mostly;
 DEFINE_SPINLOCK(inode_lock);
 
 /*
- * iprune_sem provides exclusion between the kswapd or try_to_free_pages
+ * iprune_mutex provides exclusion between the kswapd or try_to_free_pages
  * icache shrinking path, and the umount path.  Without this exclusion,
  * by the time prune_icache calls iput for the inode whose pages it has
  * been invalidating, or by the time it calls clear_inode & destroy_inode
  * from its final dispose_list, the struct super_block they refer to
  * (for inode->i_sb->s_op) may already have been freed and reused.
- *
- * We make this an rwsem because the fastpath is icache shrinking. In
- * some cases a filesystem may be doing a significant amount of work in
- * its inode reclaim code, so this should improve parallelism.
  */
-static DECLARE_RWSEM(iprune_sem);
+static DEFINE_MUTEX(iprune_mutex);
 
 /*
  * Statistics gathering..
@@ -128,7 +123,7 @@ static void wake_up_inode(struct inode *inode)
 int inode_init_always(struct super_block *sb, struct inode *inode)
 {
 	static const struct address_space_operations empty_aops;
-	static const struct inode_operations empty_iops;
+	static struct inode_operations empty_iops;
 	static const struct file_operations empty_fops;
 	struct address_space *const mapping = &inode->i_data;
 
@@ -187,7 +182,9 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	if (sb->s_bdev) {
 		struct backing_dev_info *bdi;
 
-		bdi = sb->s_bdev->bd_inode->i_mapping->backing_dev_info;
+		bdi = sb->s_bdev->bd_inode_backing_dev_info;
+		if (!bdi)
+			bdi = sb->s_bdev->bd_inode->i_mapping->backing_dev_info;
 		mapping->backing_dev_info = bdi;
 	}
 	inode->i_private = NULL;
@@ -256,20 +253,6 @@ void destroy_inode(struct inode *inode)
 		kmem_cache_free(inode_cachep, (inode));
 }
 
-void address_space_init_once(struct address_space *mapping)
-{
-	memset(mapping, 0, sizeof(*mapping));
-	INIT_RADIX_TREE(&mapping->page_tree, GFP_ATOMIC);
-	spin_lock_init(&mapping->tree_lock);
-	spin_lock_init(&mapping->i_mmap_lock);
-	INIT_LIST_HEAD(&mapping->private_list);
-	spin_lock_init(&mapping->private_lock);
-	INIT_RAW_PRIO_TREE_ROOT(&mapping->i_mmap);
-	INIT_LIST_HEAD(&mapping->i_mmap_nonlinear);
-	mutex_init(&mapping->unmap_mutex);
-}
-EXPORT_SYMBOL(address_space_init_once);
-
 /*
  * These are initializations that only need to be done
  * once, because the fields are idempotent across use
@@ -281,7 +264,13 @@ void inode_init_once(struct inode *inode)
 	INIT_HLIST_NODE(&inode->i_hash);
 	INIT_LIST_HEAD(&inode->i_dentry);
 	INIT_LIST_HEAD(&inode->i_devices);
-	address_space_init_once(&inode->i_data);
+	INIT_RADIX_TREE(&inode->i_data.page_tree, GFP_ATOMIC);
+	spin_lock_init(&inode->i_data.tree_lock);
+	spin_lock_init(&inode->i_data.i_mmap_lock);
+	INIT_LIST_HEAD(&inode->i_data.private_list);
+	spin_lock_init(&inode->i_data.private_lock);
+	INIT_RAW_PRIO_TREE_ROOT(&inode->i_data.i_mmap);
+	INIT_LIST_HEAD(&inode->i_data.i_mmap_nonlinear);
 	i_size_ordered_init(inode);
 #ifdef CONFIG_INOTIFY
 	INIT_LIST_HEAD(&inode->inotify_watches);
@@ -394,7 +383,7 @@ static int invalidate_list(struct list_head *head, struct list_head *dispose)
 		/*
 		 * We can reschedule here without worrying about the list's
 		 * consistency because the per-sb list of inodes must not
-		 * change during umount anymore, and because iprune_sem keeps
+		 * change during umount anymore, and because iprune_mutex keeps
 		 * shrink_icache_memory() away.
 		 */
 		cond_resched_lock(&inode_lock);
@@ -433,7 +422,7 @@ int invalidate_inodes(struct super_block *sb)
 	int busy;
 	LIST_HEAD(throw_away);
 
-	down_write(&iprune_sem);
+	mutex_lock(&iprune_mutex);
 	spin_lock(&inode_lock);
 	inotify_unmount_inodes(&sb->s_inodes);
 	fsnotify_unmount_inodes(&sb->s_inodes);
@@ -441,7 +430,7 @@ int invalidate_inodes(struct super_block *sb)
 	spin_unlock(&inode_lock);
 
 	dispose_list(&throw_away);
-	up_write(&iprune_sem);
+	mutex_unlock(&iprune_mutex);
 
 	return busy;
 }
@@ -480,7 +469,7 @@ static void prune_icache(int nr_to_scan)
 	int nr_scanned;
 	unsigned long reap = 0;
 
-	down_read(&iprune_sem);
+	mutex_lock(&iprune_mutex);
 	spin_lock(&inode_lock);
 	for (nr_scanned = 0; nr_scanned < nr_to_scan; nr_scanned++) {
 		struct inode *inode;
@@ -522,7 +511,7 @@ static void prune_icache(int nr_to_scan)
 	spin_unlock(&inode_lock);
 
 	dispose_list(&freeable);
-	up_read(&iprune_sem);
+	mutex_unlock(&iprune_mutex);
 }
 
 /*
@@ -1249,16 +1238,7 @@ void generic_delete_inode(struct inode *inode)
 }
 EXPORT_SYMBOL(generic_delete_inode);
 
-/**
- *	generic_detach_inode - remove inode from inode lists
- *	@inode: inode to remove
- *
- *	Remove inode from inode lists, write it if it's dirty. This is just an
- *	internal VFS helper exported for hugetlbfs. Do not use!
- *
- *	Returns 1 if inode should be completely destroyed.
- */
-int generic_detach_inode(struct inode *inode)
+static void generic_forget_inode(struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
 
@@ -1268,7 +1248,7 @@ int generic_detach_inode(struct inode *inode)
 		inodes_stat.nr_unused++;
 		if (sb->s_flags & MS_ACTIVE) {
 			spin_unlock(&inode_lock);
-			return 0;
+			return;
 		}
 		WARN_ON(inode->i_state & I_NEW);
 		inode->i_state |= I_WILL_FREE;
@@ -1286,14 +1266,6 @@ int generic_detach_inode(struct inode *inode)
 	inode->i_state |= I_FREEING;
 	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
-	return 1;
-}
-EXPORT_SYMBOL_GPL(generic_detach_inode);
-
-static void generic_forget_inode(struct inode *inode)
-{
-	if (!generic_detach_inode(inode))
-		return;
 	if (inode->i_data.nrpages)
 		truncate_inode_pages(&inode->i_data, 0);
 	clear_inode(inode);
@@ -1424,31 +1396,31 @@ void touch_atime(struct vfsmount *mnt, struct dentry *dentry)
 	struct inode *inode = dentry->d_inode;
 	struct timespec now;
 
+	if (mnt_want_write(mnt))
+		return;
 	if (inode->i_flags & S_NOATIME)
-		return;
+		goto out;
 	if (IS_NOATIME(inode))
-		return;
+		goto out;
 	if ((inode->i_sb->s_flags & MS_NODIRATIME) && S_ISDIR(inode->i_mode))
-		return;
+		goto out;
 
 	if (mnt->mnt_flags & MNT_NOATIME)
-		return;
+		goto out;
 	if ((mnt->mnt_flags & MNT_NODIRATIME) && S_ISDIR(inode->i_mode))
-		return;
+		goto out;
 
 	now = current_fs_time(inode->i_sb);
 
 	if (!relatime_need_update(mnt, inode, now))
-		return;
+		goto out;
 
 	if (timespec_equal(&inode->i_atime, &now))
-		return;
-
-	if (mnt_want_write(mnt))
-		return;
+		goto out;
 
 	inode->i_atime = now;
 	mark_inode_dirty_sync(inode);
+out:
 	mnt_drop_write(mnt);
 }
 EXPORT_SYMBOL(touch_atime);
@@ -1469,37 +1441,34 @@ void file_update_time(struct file *file)
 {
 	struct inode *inode = file->f_path.dentry->d_inode;
 	struct timespec now;
-	enum { S_MTIME = 1, S_CTIME = 2, S_VERSION = 4 } sync_it = 0;
+	int sync_it = 0;
+	int err;
 
-	/* First try to exhaust all avenues to not sync */
 	if (IS_NOCMTIME(inode))
 		return;
 
+	err = mnt_want_write_file(file);
+	if (err)
+		return;
+
 	now = current_fs_time(inode->i_sb);
-	if (!timespec_equal(&inode->i_mtime, &now))
-		sync_it = S_MTIME;
-
-	if (!timespec_equal(&inode->i_ctime, &now))
-		sync_it |= S_CTIME;
-
-	if (IS_I_VERSION(inode))
-		sync_it |= S_VERSION;
-
-	if (!sync_it)
-		return;
-
-	/* Finally allowed to write? Takes lock. */
-	if (mnt_want_write_file(file))
-		return;
-
-	/* Only change inode inside the lock region */
-	if (sync_it & S_VERSION)
-		inode_inc_iversion(inode);
-	if (sync_it & S_CTIME)
-		inode->i_ctime = now;
-	if (sync_it & S_MTIME)
+	if (!timespec_equal(&inode->i_mtime, &now)) {
 		inode->i_mtime = now;
-	mark_inode_dirty_sync(inode);
+		sync_it = 1;
+	}
+
+	if (!timespec_equal(&inode->i_ctime, &now)) {
+		inode->i_ctime = now;
+		sync_it = 1;
+	}
+
+	if (IS_I_VERSION(inode)) {
+		inode_inc_iversion(inode);
+		sync_it = 1;
+	}
+
+	if (sync_it)
+		mark_inode_dirty_sync(inode);
 	mnt_drop_write(file->f_path.mnt);
 }
 EXPORT_SYMBOL(file_update_time);
@@ -1627,8 +1596,7 @@ void init_special_inode(struct inode *inode, umode_t mode, dev_t rdev)
 	else if (S_ISSOCK(mode))
 		inode->i_fop = &bad_sock_fops;
 	else
-		printk(KERN_DEBUG "init_special_inode: bogus i_mode (%o) for"
-				  " inode %s:%lu\n", mode, inode->i_sb->s_id,
-				  inode->i_ino);
+		printk(KERN_DEBUG "init_special_inode: bogus i_mode (%o)\n",
+		       mode);
 }
 EXPORT_SYMBOL(init_special_inode);

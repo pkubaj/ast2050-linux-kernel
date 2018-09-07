@@ -32,10 +32,24 @@
  *
  */
 
+#if !defined(__DEVICE_H__)
 #include "device.h"
+#endif
+#if !defined(__TMACRO_H__)
 #include "tmacro.h"
+#endif
+#if !defined(__TBIT_H__)
+#include "tbit.h"
+#endif
+#if !defined(__TCRC_H__)
 #include "tcrc.h"
+#endif
+#if !defined(__TETHER_H__)
 #include "tether.h"
+#endif
+
+
+
 
 /*---------------------  Static Definitions -------------------------*/
 
@@ -73,7 +87,7 @@ BYTE ETHbyGetHashIndexByCrc32 (PBYTE pbyMultiAddr)
     // reverse most bit to least bit
     for (ii = 0; ii < (sizeof(byTmpHash) * 8); ii++) {
         byHash <<= 1;
-        if (byTmpHash & 0x01)
+        if (BITbIsBitOn(byTmpHash, 0x01))
             byHash |= 1;
         byTmpHash >>= 1;
     }

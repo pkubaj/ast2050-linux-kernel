@@ -31,8 +31,4 @@ static inline bool kvm_exception_is_soft(unsigned int nr)
 {
 	return (nr == BP_VECTOR) || (nr == OF_VECTOR);
 }
-
-struct kvm_cpuid_entry2 *kvm_find_cpuid_entry(struct kvm_vcpu *vcpu,
-                                             u32 function, u32 index);
-
 #endif

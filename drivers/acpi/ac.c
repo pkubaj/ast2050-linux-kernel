@@ -37,8 +37,6 @@
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
 
-#define PREFIX "ACPI: "
-
 #define ACPI_AC_CLASS			"ac_adapter"
 #define ACPI_AC_DEVICE_NAME		"AC Adapter"
 #define ACPI_AC_FILE_STATE		"state"
@@ -245,7 +243,6 @@ static void acpi_ac_notify(struct acpi_device *device, u32 event)
 		acpi_bus_generate_netlink_event(device->pnp.device_class,
 						  dev_name(&device->dev), event,
 						  (u32) ac->state);
-		acpi_notifier_call_chain(device, event, (u32) ac->state);
 #ifdef CONFIG_ACPI_SYSFS_POWER
 		kobject_uevent(&ac->charger.dev->kobj, KOBJ_CHANGE);
 #endif
@@ -287,9 +284,7 @@ static int acpi_ac_add(struct acpi_device *device)
 	ac->charger.properties = ac_props;
 	ac->charger.num_properties = ARRAY_SIZE(ac_props);
 	ac->charger.get_property = get_ac_property;
-	result = power_supply_register(&ac->device->dev, &ac->charger);
-	if (result)
-		goto end;
+	power_supply_register(&ac->device->dev, &ac->charger);
 #endif
 
 	printk(KERN_INFO PREFIX "%s [%s] (%s)\n",

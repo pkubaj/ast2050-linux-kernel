@@ -69,23 +69,6 @@ static void psc_dma_bcom_enqueue_next_buffer(struct psc_dma_stream *s)
 
 static void psc_dma_bcom_enqueue_tx(struct psc_dma_stream *s)
 {
-	if (s->appl_ptr > s->runtime->control->appl_ptr) {
-		/*
-		 * In this case s->runtime->control->appl_ptr has wrapped around.
-		 * Play the data to the end of the boundary, then wrap our own
-		 * appl_ptr back around.
-		 */
-		while (s->appl_ptr < s->runtime->boundary) {
-			if (bcom_queue_full(s->bcom_task))
-				return;
-
-			s->appl_ptr += s->period_size;
-
-			psc_dma_bcom_enqueue_next_buffer(s);
-		}
-		s->appl_ptr -= s->runtime->boundary;
-	}
-
 	while (s->appl_ptr < s->runtime->control->appl_ptr) {
 
 		if (bcom_queue_full(s->bcom_task))
@@ -447,7 +430,6 @@ int mpc5200_audio_dma_create(struct of_device *op)
 	int size, irq, rc;
 	const __be32 *prop;
 	void __iomem *regs;
-	int ret;
 
 	/* Fetch the registers and IRQ of the PSC */
 	irq = irq_of_parse_and_map(op->node, 0);
@@ -464,16 +446,14 @@ int mpc5200_audio_dma_create(struct of_device *op)
 	/* Allocate and initialize the driver private data */
 	psc_dma = kzalloc(sizeof *psc_dma, GFP_KERNEL);
 	if (!psc_dma) {
-		ret = -ENOMEM;
-		goto out_unmap;
+		iounmap(regs);
+		return -ENOMEM;
 	}
 
 	/* Get the PSC ID */
 	prop = of_get_property(op->node, "cell-index", &size);
-	if (!prop || size < sizeof *prop) {
-		ret = -ENODEV;
-		goto out_free;
-	}
+	if (!prop || size < sizeof *prop)
+		return -ENODEV;
 
 	spin_lock_init(&psc_dma->lock);
 	mutex_init(&psc_dma->mutex);
@@ -496,8 +476,9 @@ int mpc5200_audio_dma_create(struct of_device *op)
 	if (!psc_dma->capture.bcom_task ||
 	    !psc_dma->playback.bcom_task) {
 		dev_err(&op->dev, "Could not allocate bestcomm tasks\n");
-		ret = -ENODEV;
-		goto out_free;
+		iounmap(regs);
+		kfree(psc_dma);
+		return -ENODEV;
 	}
 
 	/* Disable all interrupts and reset the PSC */
@@ -539,8 +520,12 @@ int mpc5200_audio_dma_create(struct of_device *op)
 			  &psc_dma_bcom_irq_tx, IRQF_SHARED,
 			  "psc-dma-playback", &psc_dma->playback);
 	if (rc) {
-		ret = -ENODEV;
-		goto out_irq;
+		free_irq(psc_dma->irq, psc_dma);
+		free_irq(psc_dma->capture.irq,
+			 &psc_dma->capture);
+		free_irq(psc_dma->playback.irq,
+			 &psc_dma->playback);
+		return -ENODEV;
 	}
 
 	/* Save what we've done so it can be found again later */
@@ -548,15 +533,6 @@ int mpc5200_audio_dma_create(struct of_device *op)
 
 	/* Tell the ASoC OF helpers about it */
 	return snd_soc_register_platform(&mpc5200_audio_dma_platform);
-out_irq:
-	free_irq(psc_dma->irq, psc_dma);
-	free_irq(psc_dma->capture.irq, &psc_dma->capture);
-	free_irq(psc_dma->playback.irq, &psc_dma->playback);
-out_free:
-	kfree(psc_dma);
-out_unmap:
-	iounmap(regs);
-	return ret;
 }
 EXPORT_SYMBOL_GPL(mpc5200_audio_dma_create);
 

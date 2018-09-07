@@ -25,7 +25,6 @@ struct old_serial_port {
 	unsigned char io_type;
 	unsigned char *iomem_base;
 	unsigned short iomem_reg_shift;
-	unsigned long irqflags;
 };
 
 /*

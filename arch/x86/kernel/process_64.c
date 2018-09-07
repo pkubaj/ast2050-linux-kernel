@@ -55,6 +55,9 @@
 
 asmlinkage extern void ret_from_fork(void);
 
+DEFINE_PER_CPU(struct task_struct *, current_task) = &init_task;
+EXPORT_PER_CPU_SYMBOL(current_task);
+
 DEFINE_PER_CPU(unsigned long, old_rsp);
 static DEFINE_PER_CPU(unsigned char, is_idle);
 
@@ -295,10 +298,11 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 
 	set_tsk_thread_flag(p, TIF_FORK);
 
+	p->thread.fs = me->thread.fs;
+	p->thread.gs = me->thread.gs;
+
 	savesegment(gs, p->thread.gsindex);
-	p->thread.gs = p->thread.gsindex ? 0 : me->thread.gs;
 	savesegment(fs, p->thread.fsindex);
-	p->thread.fs = p->thread.fsindex ? 0 : me->thread.fs;
 	savesegment(es, p->thread.es);
 	savesegment(ds, p->thread.ds);
 
@@ -356,6 +360,7 @@ start_thread(struct pt_regs *regs, unsigned long new_ip, unsigned long new_sp)
 	regs->cs		= __USER_CS;
 	regs->ss		= __USER_DS;
 	regs->flags		= 0x200;
+	set_fs(USER_DS);
 	/*
 	 * Free the old FP and other extended state
 	 */
@@ -381,17 +386,9 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	int cpu = smp_processor_id();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 	unsigned fsindex, gsindex;
-	bool preload_fpu;
-
-	/*
-	 * If the task has used fpu the last 5 timeslices, just do a full
-	 * restore of the math state immediately to avoid the trap; the
-	 * chances of needing FPU soon are obviously high now
-	 */
-	preload_fpu = tsk_used_math(next_p) && next_p->fpu_counter > 5;
 
 	/* we're going to use this soon, after a few expensive things */
-	if (preload_fpu)
+	if (next_p->fpu_counter > 5)
 		prefetch(next->xstate);
 
 	/*
@@ -421,13 +418,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	savesegment(gs, gsindex);
 
 	load_TLS(next, cpu);
-
-	/* Must be after DS reload */
-	unlazy_fpu(prev_p);
-
-	/* Make sure cpu is ready for new context */
-	if (preload_fpu)
-		clts();
 
 	/*
 	 * Leave lazy mode, flushing any hypercalls made here.
@@ -469,6 +459,9 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		wrmsrl(MSR_KERNEL_GS_BASE, next->gs);
 	prev->gsindex = gsindex;
 
+	/* Must be after DS reload */
+	unlazy_fpu(prev_p);
+
 	/*
 	 * Switch the PDA and FPU contexts.
 	 */
@@ -487,12 +480,15 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
 
-	/*
-	 * Preload the FPU context, now that we've determined that the
-	 * task is likely to be using it. 
+	/* If the task has used fpu the last 5 timeslices, just do a full
+	 * restore of the math state immediately to avoid the trap; the
+	 * chances of needing FPU soon are obviously high now
+	 *
+	 * tsk_used_math() checks prevent calling math_state_restore(),
+	 * which can sleep in the case of !tsk_used_math()
 	 */
-	if (preload_fpu)
-		__math_state_restore();
+	if (tsk_used_math(next_p) && next_p->fpu_counter > 5)
+		math_state_restore();
 	return prev_p;
 }
 
@@ -544,65 +540,32 @@ void set_personality_ia32(void)
 
 	/* Make sure to be in 32bit mode */
 	set_thread_flag(TIF_IA32);
-	current->personality |= force_personality32;
 
 	/* Prepare the first "return" to user space */
 	current_thread_info()->status |= TS_COMPAT;
 }
 
-/*
- * Called from fs/proc with a reference on @p to find the function
- * which called into schedule(). This needs to be done carefully
- * because the task might wake up and we might look at a stack
- * changing under us.
- */
 unsigned long get_wchan(struct task_struct *p)
 {
-	unsigned long start, bottom, top, sp, fp, ip;
+	unsigned long stack;
+	u64 fp, ip;
 	int count = 0;
 
 	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
-
-	start = (unsigned long)task_stack_page(p);
-	if (!start)
+	stack = (unsigned long)task_stack_page(p);
+	if (p->thread.sp < stack || p->thread.sp >= stack+THREAD_SIZE)
 		return 0;
-
-	/*
-	 * Layout of the stack page:
-	 *
-	 * ----------- topmax = start + THREAD_SIZE - sizeof(unsigned long)
-	 * PADDING
-	 * ----------- top = topmax - TOP_OF_KERNEL_STACK_PADDING
-	 * stack
-	 * ----------- bottom = start + sizeof(thread_info)
-	 * thread_info
-	 * ----------- start
-	 *
-	 * The tasks stack pointer points at the location where the
-	 * framepointer is stored. The data on the stack is:
-	 * ... IP FP ... IP FP
-	 *
-	 * We need to read FP and IP, so we need to adjust the upper
-	 * bound by another unsigned long.
-	 */
-	top = start + THREAD_SIZE;
-	top -= 2 * sizeof(unsigned long);
-	bottom = start + sizeof(struct thread_info);
-
-	sp = ACCESS_ONCE(p->thread.sp);
-	if (sp < bottom || sp > top)
-		return 0;
-
-	fp = ACCESS_ONCE(*(unsigned long *)sp);
+	fp = *(u64 *)(p->thread.sp);
 	do {
-		if (fp < bottom || fp > top)
+		if (fp < (unsigned long)stack ||
+		    fp >= (unsigned long)stack+THREAD_SIZE)
 			return 0;
-		ip = ACCESS_ONCE(*(unsigned long *)(fp + sizeof(unsigned long)));
+		ip = *(u64 *)(fp+8);
 		if (!in_sched_functions(ip))
 			return ip;
-		fp = ACCESS_ONCE(*(unsigned long *)fp);
-	} while (count++ < 16 && p->state != TASK_RUNNING);
+		fp = *(u64 *)fp;
+	} while (count++ < 16);
 	return 0;
 }
 
@@ -706,8 +669,3 @@ long sys_arch_prctl(int code, unsigned long addr)
 	return do_arch_prctl(current, code, addr);
 }
 
-unsigned long KSTK_ESP(struct task_struct *task)
-{
-	return (test_tsk_thread_flag(task, TIF_IA32)) ?
-			(task_pt_regs(task)->sp) : ((task)->thread.usersp);
-}

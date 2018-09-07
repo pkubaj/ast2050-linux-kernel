@@ -91,10 +91,6 @@ OPTIONS
 --no-samples::
 	Don't sample.
 
--R::
---raw-samples::
-Collect raw sample records from all opened counters (typically for tracepoint counters).
-
 SEE ALSO
 --------
 linkperf:perf-stat[1], linkperf:perf-list[1]

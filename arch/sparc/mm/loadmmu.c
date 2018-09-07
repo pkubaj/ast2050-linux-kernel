@@ -33,7 +33,6 @@ void __init load_mmu(void)
 		break;
 	case sun4m:
 	case sun4d:
-	case sparc_leon:
 		ld_mmu_srmmu();
 		break;
 	default:

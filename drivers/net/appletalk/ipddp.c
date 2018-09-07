@@ -48,8 +48,7 @@ static int ipddp_mode = IPDDP_DECAP;
 #endif
 
 /* Index to functions, as function prototypes. */
-static netdev_tx_t ipddp_xmit(struct sk_buff *skb,
-				    struct net_device *dev);
+static int ipddp_xmit(struct sk_buff *skb, struct net_device *dev);
 static int ipddp_create(struct ipddp_route *new_rt);
 static int ipddp_delete(struct ipddp_route *rt);
 static struct ipddp_route* __ipddp_find_route(struct ipddp_route *rt);
@@ -114,7 +113,7 @@ static struct net_device * __init ipddp_init(void)
 /*
  * Transmit LLAP/ELAP frame using aarp_send_ddp.
  */
-static netdev_tx_t ipddp_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ipddp_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	__be32 paddr = skb_rtable(skb)->rt_gateway;
         struct ddpehdr *ddp;
@@ -133,7 +132,7 @@ static netdev_tx_t ipddp_xmit(struct sk_buff *skb, struct net_device *dev)
         }
         if(rt == NULL) {
 		spin_unlock(&ipddp_route_lock);
-                return NETDEV_TX_OK;
+                return 0;
 	}
 
         our_addr = atalk_find_dev_addr(rt->dev);
@@ -181,7 +180,7 @@ static netdev_tx_t ipddp_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	spin_unlock(&ipddp_route_lock);
 
-        return NETDEV_TX_OK;
+        return 0;
 }
 
 /*

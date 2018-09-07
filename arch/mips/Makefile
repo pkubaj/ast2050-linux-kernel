@@ -120,11 +120,7 @@ cflags-$(CONFIG_CPU_R4300)	+= -march=r4300 -Wa,--trap
 cflags-$(CONFIG_CPU_VR41XX)	+= -march=r4100 -Wa,--trap
 cflags-$(CONFIG_CPU_R4X00)	+= -march=r4600 -Wa,--trap
 cflags-$(CONFIG_CPU_TX49XX)	+= -march=r4600 -Wa,--trap
-# only gcc >= 4.4 have the loongson-specific support
-cflags-$(CONFIG_CPU_LOONGSON2)	+= -Wa,--trap
-cflags-$(CONFIG_CPU_LOONGSON2E) += \
-	$(call cc-option,-march=loongson2e,-march=r4600)
-
+cflags-$(CONFIG_CPU_LOONGSON2)	+= -march=r4600 -Wa,--trap
 cflags-$(CONFIG_CPU_MIPS32_R1)	+= $(call cc-option,-march=mips32,-mips32 -U_MIPS_ISA -D_MIPS_ISA=_MIPS_ISA_MIPS32) \
 			-Wa,-mips32 -Wa,--trap
 cflags-$(CONFIG_CPU_MIPS32_R2)	+= $(call cc-option,-march=mips32r2,-mips32r2 -U_MIPS_ISA -D_MIPS_ISA=_MIPS_ISA_MIPS32) \
@@ -318,12 +314,11 @@ cflags-$(CONFIG_WR_PPMC)		+= -I$(srctree)/arch/mips/include/asm/mach-wrppmc
 load-$(CONFIG_WR_PPMC)		+= 0xffffffff80100000
 
 #
-# Loongson family
+# lemote fulong mini-PC board
 #
-core-$(CONFIG_MACH_LOONGSON) +=arch/mips/loongson/
-cflags-$(CONFIG_MACH_LOONGSON) += -I$(srctree)/arch/mips/include/asm/mach-loongson \
-                    -mno-branch-likely
-load-$(CONFIG_LEMOTE_FULOONG2E) +=0xffffffff80100000
+core-$(CONFIG_LEMOTE_FULONG) +=arch/mips/lemote/lm2e/
+load-$(CONFIG_LEMOTE_FULONG) +=0xffffffff80100000
+cflags-$(CONFIG_LEMOTE_FULONG) += -I$(srctree)/arch/mips/include/asm/mach-lemote
 
 #
 # MIPS Malta board
@@ -565,13 +560,6 @@ cflags-$(CONFIG_BCM47XX)	+= -I$(srctree)/arch/mips/include/asm/mach-bcm47xx
 load-$(CONFIG_BCM47XX)		:= 0xffffffff80001000
 
 #
-# Broadcom BCM63XX boards
-#
-core-$(CONFIG_BCM63XX)		+= arch/mips/bcm63xx/
-cflags-$(CONFIG_BCM63XX)	+= -I$(srctree)/arch/mips/include/asm/mach-bcm63xx/
-load-$(CONFIG_BCM63XX)		:= 0xffffffff80010000
-
-#
 # SNI RM
 #
 core-$(CONFIG_SNI_RM)		+= arch/mips/sni/
@@ -657,7 +645,7 @@ KBUILD_CPPFLAGS += -D"DATAOFFSET=$(if $(dataoffset-y),$(dataoffset-y),0)"
 LDFLAGS			+= -m $(ld-emul)
 
 ifdef CONFIG_MIPS
-CHECKFLAGS += $(shell $(CC) $(KBUILD_CFLAGS) -dM -E -x c /dev/null | \
+CHECKFLAGS += $(shell $(CC) $(KBUILD_CFLAGS) -dM -E -xc /dev/null | \
 	egrep -vw '__GNUC_(|MINOR_|PATCHLEVEL_)_' | \
 	sed -e 's/^\#define /-D/' -e "s/ /='/" -e "s/$$/'/")
 ifdef CONFIG_64BIT

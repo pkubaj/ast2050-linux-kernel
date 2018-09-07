@@ -489,7 +489,7 @@ out:
 	return ret;
 }
 
-const struct inode_operations omfs_dir_inops = {
+struct inode_operations omfs_dir_inops = {
 	.lookup = omfs_lookup,
 	.mkdir = omfs_mkdir,
 	.rename = omfs_rename,
@@ -498,7 +498,7 @@ const struct inode_operations omfs_dir_inops = {
 	.rmdir = omfs_rmdir,
 };
 
-const struct file_operations omfs_dir_operations = {
+struct file_operations omfs_dir_operations = {
 	.read = generic_read_dir,
 	.readdir = omfs_readdir,
 	.llseek = generic_file_llseek,

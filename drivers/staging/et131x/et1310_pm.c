@@ -2,7 +2,7 @@
  * Agere Systems Inc.
  * 10/100/1000 Base-T Ethernet Driver for the ET1301 and ET131x series MACs
  *
- * Copyright Â© 2005 Agere Systems Inc.
+ * Copyright © 2005 Agere Systems Inc.
  * All rights reserved.
  *   http://www.agere.com
  *
@@ -19,7 +19,7 @@
  * software indicates your acceptance of these terms and conditions.  If you do
  * not agree with these terms and conditions, do not use the software.
  *
- * Copyright Â© 2005 Agere Systems Inc.
+ * Copyright © 2005 Agere Systems Inc.
  * All rights reserved.
  *
  * Redistribution and use in source or binary forms, with or without
@@ -40,7 +40,7 @@
  *
  * Disclaimer
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * THIS SOFTWARE IS PROVIDED “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,
  * INCLUDING, BUT NOT LIMITED TO, INFRINGEMENT AND THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  ANY
  * USE, MODIFICATION OR DISTRIBUTION OF THIS SOFTWARE IS SOLELY AT THE USERS OWN
@@ -56,6 +56,7 @@
  */
 
 #include "et131x_version.h"
+#include "et131x_debug.h"
 #include "et131x_defs.h"
 
 #include <linux/init.h>
@@ -72,9 +73,9 @@
 #include <linux/interrupt.h>
 #include <linux/in.h>
 #include <linux/delay.h>
-#include <linux/io.h>
-#include <linux/bitops.h>
+#include <asm/io.h>
 #include <asm/system.h>
+#include <asm/bitops.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -91,9 +92,14 @@
 #include "et131x_adapter.h"
 #include "et131x_initpci.h"
 
+/* Data for debugging facilities */
+#ifdef CONFIG_ET131X_DEBUG
+extern dbg_info_t *et131x_dbginfo;
+#endif /* CONFIG_ET131X_DEBUG */
+
 /**
  * EnablePhyComa - called when network cable is unplugged
- * @etdev: pointer to our adapter structure
+ * @pAdapter: pointer to our adapter structure
  *
  * driver receive an phy status change interrupt while in D0 and check that
  * phy_status is down.
@@ -111,75 +117,91 @@
  *       indicating linkup status, call the MPDisablePhyComa routine to
  *             restore JAGCore and gigE PHY
  */
-void EnablePhyComa(struct et131x_adapter *etdev)
+void EnablePhyComa(struct et131x_adapter *pAdapter)
 {
-	unsigned long flags;
-	u32 GlobalPmCSR;
+	unsigned long lockflags;
+	PM_CSR_t GlobalPmCSR;
+	int32_t LoopCounter = 10;
 
-	GlobalPmCSR = readl(&etdev->regs->global.pm_csr);
+	DBG_ENTER(et131x_dbginfo);
+
+	GlobalPmCSR.value = readl(&pAdapter->CSRAddress->global.pm_csr.value);
 
 	/* Save the GbE PHY speed and duplex modes. Need to restore this
 	 * when cable is plugged back in
 	 */
-	etdev->PoMgmt.PowerDownSpeed = etdev->AiForceSpeed;
-	etdev->PoMgmt.PowerDownDuplex = etdev->AiForceDpx;
+	pAdapter->PoMgmt.PowerDownSpeed = pAdapter->AiForceSpeed;
+	pAdapter->PoMgmt.PowerDownDuplex = pAdapter->AiForceDpx;
 
 	/* Stop sending packets. */
-	spin_lock_irqsave(&etdev->SendHWLock, flags);
-	etdev->Flags |= fMP_ADAPTER_LOWER_POWER;
-	spin_unlock_irqrestore(&etdev->SendHWLock, flags);
+	spin_lock_irqsave(&pAdapter->SendHWLock, lockflags);
+	MP_SET_FLAG(pAdapter, fMP_ADAPTER_LOWER_POWER);
+	spin_unlock_irqrestore(&pAdapter->SendHWLock, lockflags);
 
 	/* Wait for outstanding Receive packets */
+	while ((MP_GET_RCV_REF(pAdapter) != 0) && (LoopCounter-- > 0)) {
+		mdelay(2);
+	}
 
 	/* Gate off JAGCore 3 clock domains */
-	GlobalPmCSR &= ~ET_PMCSR_INIT;
-	writel(GlobalPmCSR, &etdev->regs->global.pm_csr);
+	GlobalPmCSR.bits.pm_sysclk_gate = 0;
+	GlobalPmCSR.bits.pm_txclk_gate = 0;
+	GlobalPmCSR.bits.pm_rxclk_gate = 0;
+	writel(GlobalPmCSR.value, &pAdapter->CSRAddress->global.pm_csr.value);
 
 	/* Program gigE PHY in to Coma mode */
-	GlobalPmCSR |= ET_PM_PHY_SW_COMA;
-	writel(GlobalPmCSR, &etdev->regs->global.pm_csr);
+	GlobalPmCSR.bits.pm_phy_sw_coma = 1;
+	writel(GlobalPmCSR.value, &pAdapter->CSRAddress->global.pm_csr.value);
+
+	DBG_LEAVE(et131x_dbginfo);
 }
 
 /**
  * DisablePhyComa - Disable the Phy Coma Mode
- * @etdev: pointer to our adapter structure
+ * @pAdapter: pointer to our adapter structure
  */
-void DisablePhyComa(struct et131x_adapter *etdev)
+void DisablePhyComa(struct et131x_adapter *pAdapter)
 {
-	u32 GlobalPmCSR;
+	PM_CSR_t GlobalPmCSR;
 
-	GlobalPmCSR = readl(&etdev->regs->global.pm_csr);
+	DBG_ENTER(et131x_dbginfo);
+
+	GlobalPmCSR.value = readl(&pAdapter->CSRAddress->global.pm_csr.value);
 
 	/* Disable phy_sw_coma register and re-enable JAGCore clocks */
-	GlobalPmCSR |= ET_PMCSR_INIT;
-	GlobalPmCSR &= ~ET_PM_PHY_SW_COMA;
-	writel(GlobalPmCSR, &etdev->regs->global.pm_csr);
+	GlobalPmCSR.bits.pm_sysclk_gate = 1;
+	GlobalPmCSR.bits.pm_txclk_gate = 1;
+	GlobalPmCSR.bits.pm_rxclk_gate = 1;
+	GlobalPmCSR.bits.pm_phy_sw_coma = 0;
+	writel(GlobalPmCSR.value, &pAdapter->CSRAddress->global.pm_csr.value);
 
 	/* Restore the GbE PHY speed and duplex modes;
 	 * Reset JAGCore; re-configure and initialize JAGCore and gigE PHY
 	 */
-	etdev->AiForceSpeed = etdev->PoMgmt.PowerDownSpeed;
-	etdev->AiForceDpx = etdev->PoMgmt.PowerDownDuplex;
+	pAdapter->AiForceSpeed = pAdapter->PoMgmt.PowerDownSpeed;
+	pAdapter->AiForceDpx = pAdapter->PoMgmt.PowerDownDuplex;
 
 	/* Re-initialize the send structures */
-	et131x_init_send(etdev);
+	et131x_init_send(pAdapter);
 
 	/* Reset the RFD list and re-start RU  */
-	et131x_reset_recv(etdev);
+	et131x_reset_recv(pAdapter);
 
 	/* Bring the device back to the state it was during init prior to
-	 * autonegotiation being complete.  This way, when we get the auto-neg
-	 * complete interrupt, we can complete init by calling ConfigMacREGS2.
-	 */
-	et131x_soft_reset(etdev);
+         * autonegotiation being complete.  This way, when we get the auto-neg
+         * complete interrupt, we can complete init by calling ConfigMacREGS2.
+         */
+	et131x_soft_reset(pAdapter);
 
 	/* setup et1310 as per the documentation ?? */
-	et131x_adapter_setup(etdev);
+	et131x_adapter_setup(pAdapter);
 
 	/* Allow Tx to restart */
-	etdev->Flags &= ~fMP_ADAPTER_LOWER_POWER;
+	MP_CLEAR_FLAG(pAdapter, fMP_ADAPTER_LOWER_POWER);
 
 	/* Need to re-enable Rx. */
-	et131x_rx_dma_enable(etdev);
+	et131x_rx_dma_enable(pAdapter);
+
+	DBG_LEAVE(et131x_dbginfo);
 }
 

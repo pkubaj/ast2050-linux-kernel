@@ -1,7 +1,30 @@
 /*
- * Copyright 2004-2009 Analog Devices Inc.
+ * File:         arch/blackfin/mm/init.c
+ * Based on:
+ * Author:
  *
- * Licensed under the GPL-2 or later.
+ * Created:
+ * Description:
+ *
+ * Modified:
+ *               Copyright 2004-2007 Analog Devices Inc.
+ *
+ * Bugs:         Enter bugs at http://blackfin.uclinux.org/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see the file COPYING, or write
+ * to the Free Software Foundation, Inc.,
+ * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include <linux/swap.h>
@@ -10,7 +33,6 @@
 #include <asm/bfin-global.h>
 #include <asm/pda.h>
 #include <asm/cplbinit.h>
-#include <asm/early_printk.h>
 #include "blackfin_sram.h"
 
 /*
@@ -90,8 +112,6 @@ void __init paging_init(void)
 asmlinkage void __init init_pda(void)
 {
 	unsigned int cpu = raw_smp_processor_id();
-
-	early_shadow_stamp();
 
 	/* Initialize the PDA fields holding references to other parts
 	   of the memory. The content of such memory is still

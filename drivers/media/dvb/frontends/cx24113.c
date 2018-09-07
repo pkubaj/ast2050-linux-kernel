@@ -303,7 +303,6 @@ static void cx24113_calc_pll_nf(struct cx24113_state *state, u16 *n, s32 *f)
 {
 	s32 N;
 	s64 F;
-	u64 dividend;
 	u8 R, r;
 	u8 vcodiv;
 	u8 factor;
@@ -347,10 +346,7 @@ static void cx24113_calc_pll_nf(struct cx24113_state *state, u16 *n, s32 *f)
 	F = freq_hz;
 	F *= (u64) (R * vcodiv * 262144);
 	dprintk("1 N: %d, F: %lld, R: %d\n", N, (long long)F, R);
-	/* do_div needs an u64 as first argument */
-	dividend = F;
-	do_div(dividend, state->config->xtal_khz * 1000 * factor * 2);
-	F = dividend;
+	do_div(F, state->config->xtal_khz*1000 * factor * 2);
 	dprintk("2 N: %d, F: %lld, R: %d\n", N, (long long)F, R);
 	F -= (N + 32) * 262144;
 

@@ -178,10 +178,8 @@ sensor_found:
 
 	sens_priv->settings =
 	kmalloc(sizeof(s32)*ARRAY_SIZE(s5k83a_ctrls), GFP_KERNEL);
-	if (!sens_priv->settings) {
-		kfree(sens_priv);
+	if (!sens_priv->settings)
 		return -ENOMEM;
-	}
 
 	sd->gspca_dev.cam.cam_mode = s5k83a_modes;
 	sd->gspca_dev.cam.nmodes = ARRAY_SIZE(s5k83a_modes);

@@ -52,6 +52,7 @@
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #include <linux/mm.h>
+#include <linux/utsname.h>
 #include <linux/highmem.h>
 #include <linux/vmalloc.h>
 #include <linux/module.h>
@@ -1650,13 +1651,6 @@ static int __devinit usbvision_probe(struct usb_interface *intf,
 	}
 	printk(KERN_INFO "%s: %s found\n", __func__,
 				usbvision_device_data[model].ModelString);
-
-	/*
-	 * this is a security check.
-	 * an exploit using an incorrect bInterfaceNumber is known
-	 */
-	if (ifnum >= USB_MAXINTERFACES || !dev->actconfig->interface[ifnum])
-		return -ENODEV;
 
 	if (usbvision_device_data[model].Interface >= 0) {
 		interface = &dev->actconfig->interface[usbvision_device_data[model].Interface]->altsetting[0];

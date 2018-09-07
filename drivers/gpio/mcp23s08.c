@@ -6,9 +6,11 @@
 #include <linux/device.h>
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
-#include <linux/gpio.h>
+
 #include <linux/spi/spi.h>
 #include <linux/spi/mcp23s08.h>
+
+#include <asm/gpio.h>
 
 
 /* Registers are all 8 bits wide.
@@ -431,4 +433,3 @@ static void __exit mcp23s08_exit(void)
 module_exit(mcp23s08_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("spi:mcp23s08");

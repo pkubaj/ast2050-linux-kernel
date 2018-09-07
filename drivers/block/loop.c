@@ -238,8 +238,6 @@ static int do_lo_send_aops(struct loop_device *lo, struct bio_vec *bvec,
 		if (ret)
 			goto fail;
 
-		file_update_time(file);
-
 		transfer_result = lo_do_transfer(lo, WRITE, page, offset,
 				bvec->bv_page, bv_offs, size, IV);
 		copied = size;
@@ -477,7 +475,7 @@ static int do_bio_filebacked(struct loop_device *lo, struct bio *bio)
 	pos = ((loff_t) bio->bi_sector << 9) + lo->lo_offset;
 
 	if (bio_rw(bio) == WRITE) {
-		bool barrier = bio_rw_flagged(bio, BIO_RW_BARRIER);
+		int barrier = bio_barrier(bio);
 		struct file *file = lo->lo_backing_file;
 
 		if (barrier) {
@@ -951,7 +949,7 @@ static int loop_clr_fd(struct loop_device *lo, struct block_device *bdev)
 	lo->lo_state = Lo_unbound;
 	/* This is safe: open() is still holding a reference. */
 	module_put(THIS_MODULE);
-	if (max_part > 0 && bdev)
+	if (max_part > 0)
 		ioctl_by_bdev(bdev, BLKRRPART, 0);
 	mutex_unlock(&lo->lo_ctl_mutex);
 	/*
@@ -1440,7 +1438,7 @@ out_unlocked:
 	return 0;
 }
 
-static const struct block_device_operations lo_fops = {
+static struct block_device_operations lo_fops = {
 	.owner =	THIS_MODULE,
 	.open =		lo_open,
 	.release =	lo_release,
@@ -1572,7 +1570,7 @@ static struct kobject *loop_probe(dev_t dev, int *part, void *data)
 	struct kobject *kobj;
 
 	mutex_lock(&loop_devices_mutex);
-	lo = loop_init_one(MINOR(dev) >> part_shift);
+	lo = loop_init_one(dev & MINORMASK);
 	kobj = lo ? get_disk(lo->lo_disk) : ERR_PTR(-ENOMEM);
 	mutex_unlock(&loop_devices_mutex);
 
@@ -1605,18 +1603,15 @@ static int __init loop_init(void)
 	if (max_part > 0)
 		part_shift = fls(max_part);
 
-	if ((1UL << part_shift) > DISK_MAX_PARTS)
-		return -EINVAL;
-
 	if (max_loop > 1UL << (MINORBITS - part_shift))
 		return -EINVAL;
 
 	if (max_loop) {
 		nr = max_loop;
-		range = max_loop << part_shift;
+		range = max_loop;
 	} else {
 		nr = 8;
-		range = 1UL << MINORBITS;
+		range = 1UL << (MINORBITS - part_shift);
 	}
 
 	if (register_blkdev(LOOP_MAJOR, "loop"))
@@ -1655,7 +1650,7 @@ static void __exit loop_exit(void)
 	unsigned long range;
 	struct loop_device *lo, *next;
 
-	range = max_loop ? max_loop << part_shift : 1UL << MINORBITS;
+	range = max_loop ? max_loop :  1UL << (MINORBITS - part_shift);
 
 	list_for_each_entry_safe(lo, next, &loop_devices, lo_list)
 		loop_del_one(lo);

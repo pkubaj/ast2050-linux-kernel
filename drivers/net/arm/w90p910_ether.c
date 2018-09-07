@@ -143,17 +143,16 @@ struct recv_pdesc {
 
 struct tran_pdesc {
 	struct w90p910_txbd desclist[TX_DESC_SIZE];
-	char tran_buf[TX_DESC_SIZE][MAX_TBUFF_SZ];
+	char tran_buf[RX_DESC_SIZE][MAX_TBUFF_SZ];
 };
 
 struct  w90p910_ether {
 	struct recv_pdesc *rdesc;
+	struct recv_pdesc *rdesc_phys;
 	struct tran_pdesc *tdesc;
-	dma_addr_t rdesc_phys;
-	dma_addr_t tdesc_phys;
+	struct tran_pdesc *tdesc_phys;
 	struct net_device_stats stats;
 	struct platform_device *pdev;
-	struct resource *res;
 	struct sk_buff *skb;
 	struct clk *clk;
 	struct clk *rmiiclk;
@@ -170,6 +169,7 @@ struct  w90p910_ether {
 	unsigned int start_tx_ptr;
 	unsigned int start_rx_ptr;
 	unsigned int linkflag;
+	spinlock_t lock;
 };
 
 static void update_linkspeed_register(struct net_device *dev,
@@ -275,75 +275,59 @@ static void w90p910_write_cam(struct net_device *dev,
 	__raw_writel(msw, ether->reg + REG_CAMM_BASE + x * CAM_ENTRY_SIZE);
 }
 
-static int w90p910_init_desc(struct net_device *dev)
+static void w90p910_init_desc(struct net_device *dev)
 {
 	struct w90p910_ether *ether;
-	struct w90p910_txbd  *tdesc;
-	struct w90p910_rxbd  *rdesc;
-	struct platform_device *pdev;
-	unsigned int i;
+	struct w90p910_txbd  *tdesc, *tdesc_phys;
+	struct w90p910_rxbd  *rdesc, *rdesc_phys;
+	unsigned int i, j;
 
 	ether = netdev_priv(dev);
-	pdev = ether->pdev;
 
 	ether->tdesc = (struct tran_pdesc *)
-		dma_alloc_coherent(&pdev->dev, sizeof(struct tran_pdesc),
-					&ether->tdesc_phys, GFP_KERNEL);
-
-	if (!ether->tdesc) {
-		dev_err(&pdev->dev, "Failed to allocate memory for tx desc\n");
-		return -ENOMEM;
-	}
+			dma_alloc_coherent(NULL, sizeof(struct tran_pdesc),
+				(dma_addr_t *) &ether->tdesc_phys, GFP_KERNEL);
 
 	ether->rdesc = (struct recv_pdesc *)
-		dma_alloc_coherent(&pdev->dev, sizeof(struct recv_pdesc),
-					&ether->rdesc_phys, GFP_KERNEL);
-
-	if (!ether->rdesc) {
-		dev_err(&pdev->dev, "Failed to allocate memory for rx desc\n");
-		dma_free_coherent(&pdev->dev, sizeof(struct tran_pdesc),
-					ether->tdesc, ether->tdesc_phys);
-		return -ENOMEM;
-	}
+			dma_alloc_coherent(NULL, sizeof(struct recv_pdesc),
+				(dma_addr_t *) &ether->rdesc_phys, GFP_KERNEL);
 
 	for (i = 0; i < TX_DESC_SIZE; i++) {
-		unsigned int offset;
-
 		tdesc = &(ether->tdesc->desclist[i]);
 
-		if (i == TX_DESC_SIZE - 1)
-			offset = offsetof(struct tran_pdesc, desclist[0]);
-		else
-			offset = offsetof(struct tran_pdesc, desclist[i + 1]);
+		j = ((i + 1) / TX_DESC_SIZE);
 
-		tdesc->next = ether->tdesc_phys + offset;
-		tdesc->buffer = ether->tdesc_phys +
-			offsetof(struct tran_pdesc, tran_buf[i]);
+		if (j != 0) {
+			tdesc_phys = &(ether->tdesc_phys->desclist[0]);
+			ether->start_tx_ptr = (unsigned int)tdesc_phys;
+			tdesc->next = (unsigned int)ether->start_tx_ptr;
+		} else {
+			tdesc_phys = &(ether->tdesc_phys->desclist[i+1]);
+			tdesc->next = (unsigned int)tdesc_phys;
+		}
+
+		tdesc->buffer = (unsigned int)ether->tdesc_phys->tran_buf[i];
 		tdesc->sl = 0;
 		tdesc->mode = 0;
 	}
 
-	ether->start_tx_ptr = ether->tdesc_phys;
-
 	for (i = 0; i < RX_DESC_SIZE; i++) {
-		unsigned int offset;
-
 		rdesc = &(ether->rdesc->desclist[i]);
 
-		if (i == RX_DESC_SIZE - 1)
-			offset = offsetof(struct recv_pdesc, desclist[0]);
-		else
-			offset = offsetof(struct recv_pdesc, desclist[i + 1]);
+		j = ((i + 1) / RX_DESC_SIZE);
 
-		rdesc->next = ether->rdesc_phys + offset;
+		if (j != 0) {
+			rdesc_phys = &(ether->rdesc_phys->desclist[0]);
+			ether->start_rx_ptr = (unsigned int)rdesc_phys;
+			rdesc->next = (unsigned int)ether->start_rx_ptr;
+		} else {
+			rdesc_phys = &(ether->rdesc_phys->desclist[i+1]);
+			rdesc->next = (unsigned int)rdesc_phys;
+		}
+
 		rdesc->sl = RX_OWEN_DMA;
-		rdesc->buffer = ether->rdesc_phys +
-			offsetof(struct recv_pdesc, recv_buf[i]);
+		rdesc->buffer = (unsigned int)ether->rdesc_phys->recv_buf[i];
 	  }
-
-	ether->start_rx_ptr = ether->rdesc_phys;
-
-	return 0;
 }
 
 static void w90p910_set_fifo_threshold(struct net_device *dev)
@@ -472,6 +456,8 @@ static void w90p910_reset_mac(struct net_device *dev)
 {
 	struct w90p910_ether *ether = netdev_priv(dev);
 
+	spin_lock(&ether->lock);
+
 	w90p910_enable_tx(dev, 0);
 	w90p910_enable_rx(dev, 0);
 	w90p910_set_fifo_threshold(dev);
@@ -500,6 +486,8 @@ static void w90p910_reset_mac(struct net_device *dev)
 
 	if (netif_queue_stopped(dev))
 		netif_wake_queue(dev);
+
+	spin_unlock(&ether->lock);
 }
 
 static void w90p910_mdio_write(struct net_device *dev,
@@ -553,7 +541,7 @@ static int w90p910_mdio_read(struct net_device *dev, int phy_id, int reg)
 	return data;
 }
 
-static int w90p910_set_mac_address(struct net_device *dev, void *addr)
+static int set_mac_address(struct net_device *dev, void *addr)
 {
 	struct sockaddr *address = addr;
 
@@ -569,14 +557,11 @@ static int w90p910_set_mac_address(struct net_device *dev, void *addr)
 static int w90p910_ether_close(struct net_device *dev)
 {
 	struct w90p910_ether *ether = netdev_priv(dev);
-	struct platform_device *pdev;
 
-	pdev = ether->pdev;
-
-	dma_free_coherent(&pdev->dev, sizeof(struct recv_pdesc),
-					ether->rdesc, ether->rdesc_phys);
-	dma_free_coherent(&pdev->dev, sizeof(struct tran_pdesc),
-					ether->tdesc, ether->tdesc_phys);
+	dma_free_writecombine(NULL, sizeof(struct w90p910_rxbd),
+				ether->rdesc, (dma_addr_t)ether->rdesc_phys);
+	dma_free_writecombine(NULL, sizeof(struct w90p910_txbd),
+				ether->tdesc, (dma_addr_t)ether->tdesc_phys);
 
 	netif_stop_queue(dev);
 
@@ -612,7 +597,6 @@ static int w90p910_send_frame(struct net_device *dev,
 
 	txbd = &ether->tdesc->desclist[ether->cur_tx];
 	buffer = ether->tdesc->tran_buf[ether->cur_tx];
-
 	if (length > 1514) {
 		dev_err(&pdev->dev, "send data %d bytes, check it\n", length);
 		length = 1514;
@@ -628,9 +612,7 @@ static int w90p910_send_frame(struct net_device *dev,
 
 	w90p910_trigger_tx(dev);
 
-	if (++ether->cur_tx >= TX_DESC_SIZE)
-		ether->cur_tx = 0;
-
+	ether->cur_tx = (ether->cur_tx+1) % TX_DESC_SIZE;
 	txbd = &ether->tdesc->desclist[ether->cur_tx];
 
 	dev->trans_start = jiffies;
@@ -650,7 +632,7 @@ static int w90p910_ether_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		dev_kfree_skb_irq(skb);
 		return 0;
 	}
-	return -EAGAIN;
+	return -1;
 }
 
 static irqreturn_t w90p910_tx_interrupt(int irq, void *dev_id)
@@ -658,25 +640,27 @@ static irqreturn_t w90p910_tx_interrupt(int irq, void *dev_id)
 	struct w90p910_ether *ether;
 	struct w90p910_txbd  *txbd;
 	struct platform_device *pdev;
+	struct tran_pdesc *tran_pdesc;
 	struct net_device *dev;
 	unsigned int cur_entry, entry, status;
 
-	dev = dev_id;
+	dev = (struct net_device *)dev_id;
 	ether = netdev_priv(dev);
 	pdev = ether->pdev;
+
+	spin_lock(&ether->lock);
 
 	w90p910_get_and_clear_int(dev, &status);
 
 	cur_entry = __raw_readl(ether->reg + REG_CTXDSA);
 
-	entry = ether->tdesc_phys +
-		offsetof(struct tran_pdesc, desclist[ether->finish_tx]);
+	tran_pdesc = ether->tdesc_phys;
+	entry = (unsigned int)(&tran_pdesc->desclist[ether->finish_tx]);
 
 	while (entry != cur_entry) {
 		txbd = &ether->tdesc->desclist[ether->finish_tx];
 
-		if (++ether->finish_tx >= TX_DESC_SIZE)
-			ether->finish_tx = 0;
+		ether->finish_tx = (ether->finish_tx + 1) % TX_DESC_SIZE;
 
 		if (txbd->sl & TXDS_TXCP) {
 			ether->stats.tx_packets++;
@@ -691,19 +675,20 @@ static irqreturn_t w90p910_tx_interrupt(int irq, void *dev_id)
 		if (netif_queue_stopped(dev))
 			netif_wake_queue(dev);
 
-		entry = ether->tdesc_phys +
-			offsetof(struct tran_pdesc, desclist[ether->finish_tx]);
+		entry = (unsigned int)(&tran_pdesc->desclist[ether->finish_tx]);
 	}
 
 	if (status & MISTA_EXDEF) {
 		dev_err(&pdev->dev, "emc defer exceed interrupt\n");
 	} else if (status & MISTA_TXBERR) {
-		dev_err(&pdev->dev, "emc bus error interrupt\n");
-		w90p910_reset_mac(dev);
-	} else if (status & MISTA_TDU) {
-		if (netif_queue_stopped(dev))
-			netif_wake_queue(dev);
-	}
+			dev_err(&pdev->dev, "emc bus error interrupt\n");
+			w90p910_reset_mac(dev);
+		} else if (status & MISTA_TDU) {
+				if (netif_queue_stopped(dev))
+					netif_wake_queue(dev);
+			}
+
+	spin_unlock(&ether->lock);
 
 	return IRQ_HANDLED;
 }
@@ -713,20 +698,20 @@ static void netdev_rx(struct net_device *dev)
 	struct w90p910_ether *ether;
 	struct w90p910_rxbd *rxbd;
 	struct platform_device *pdev;
+	struct recv_pdesc *rdesc_phys;
 	struct sk_buff *skb;
 	unsigned char *data;
 	unsigned int length, status, val, entry;
 
 	ether = netdev_priv(dev);
 	pdev = ether->pdev;
+	rdesc_phys = ether->rdesc_phys;
 
 	rxbd = &ether->rdesc->desclist[ether->cur_rx];
 
 	do {
 		val = __raw_readl(ether->reg + REG_CRXDSA);
-
-		entry = ether->rdesc_phys +
-			offsetof(struct recv_pdesc, desclist[ether->cur_rx]);
+		entry = (unsigned int)&rdesc_phys->desclist[ether->cur_rx];
 
 		if (val == entry)
 			break;
@@ -758,25 +743,25 @@ static void netdev_rx(struct net_device *dev)
 				dev_err(&pdev->dev, "rx runt err\n");
 				ether->stats.rx_length_errors++;
 			} else if (status & RXDS_CRCE) {
-				dev_err(&pdev->dev, "rx crc err\n");
-				ether->stats.rx_crc_errors++;
-			} else if (status & RXDS_ALIE) {
+					dev_err(&pdev->dev, "rx crc err\n");
+					ether->stats.rx_crc_errors++;
+				}
+
+			if (status & RXDS_ALIE) {
 				dev_err(&pdev->dev, "rx aligment err\n");
 				ether->stats.rx_frame_errors++;
 			} else if (status & RXDS_PTLE) {
-				dev_err(&pdev->dev, "rx longer err\n");
-				ether->stats.rx_over_errors++;
+					dev_err(&pdev->dev, "rx longer err\n");
+					ether->stats.rx_over_errors++;
+				}
 			}
-		}
 
 		rxbd->sl = RX_OWEN_DMA;
 		rxbd->reserved = 0x0;
-
-		if (++ether->cur_rx >= RX_DESC_SIZE)
-			ether->cur_rx = 0;
-
+		ether->cur_rx = (ether->cur_rx+1) % RX_DESC_SIZE;
 		rxbd = &ether->rdesc->desclist[ether->cur_rx];
 
+		dev->last_rx = jiffies;
 	} while (1);
 }
 
@@ -787,23 +772,28 @@ static irqreturn_t w90p910_rx_interrupt(int irq, void *dev_id)
 	struct platform_device *pdev;
 	unsigned int status;
 
-	dev = dev_id;
+	dev = (struct net_device *)dev_id;
 	ether = netdev_priv(dev);
 	pdev = ether->pdev;
+
+	spin_lock(&ether->lock);
 
 	w90p910_get_and_clear_int(dev, &status);
 
 	if (status & MISTA_RDU) {
 		netdev_rx(dev);
+
 		w90p910_trigger_rx(dev);
 
+		spin_unlock(&ether->lock);
 		return IRQ_HANDLED;
 	} else if (status & MISTA_RXBERR) {
-		dev_err(&pdev->dev, "emc rx bus error\n");
-		w90p910_reset_mac(dev);
-	}
+			dev_err(&pdev->dev, "emc rx bus error\n");
+			w90p910_reset_mac(dev);
+		}
 
 	netdev_rx(dev);
+	spin_unlock(&ether->lock);
 	return IRQ_HANDLED;
 }
 
@@ -836,7 +826,6 @@ static int w90p910_ether_open(struct net_device *dev)
 	if (request_irq(ether->rxirq, w90p910_rx_interrupt,
 						0x0, pdev->name, dev)) {
 		dev_err(&pdev->dev, "register irq rx failed\n");
-		free_irq(ether->txirq, dev);
 		return -EAGAIN;
 	}
 
@@ -919,7 +908,7 @@ static const struct net_device_ops w90p910_ether_netdev_ops = {
 	.ndo_start_xmit		= w90p910_ether_start_xmit,
 	.ndo_get_stats		= w90p910_ether_stats,
 	.ndo_set_multicast_list	= w90p910_ether_set_multicast_list,
-	.ndo_set_mac_address	= w90p910_set_mac_address,
+	.ndo_set_mac_address	= set_mac_address,
 	.ndo_do_ioctl		= w90p910_ether_ioctl,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_change_mtu		= eth_change_mtu,
@@ -960,6 +949,8 @@ static int w90p910_ether_setup(struct net_device *dev)
 
 	get_mac_address(dev);
 
+	spin_lock_init(&ether->lock);
+
 	ether->cur_tx = 0x0;
 	ether->cur_rx = 0x0;
 	ether->finish_tx = 0x0;
@@ -981,29 +972,30 @@ static int __devinit w90p910_ether_probe(struct platform_device *pdev)
 {
 	struct w90p910_ether *ether;
 	struct net_device *dev;
+	struct resource *res;
 	int error;
 
 	dev = alloc_etherdev(sizeof(struct w90p910_ether));
 	if (!dev)
 		return -ENOMEM;
 
-	ether = netdev_priv(dev);
-
-	ether->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (ether->res == NULL) {
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (res == NULL) {
 		dev_err(&pdev->dev, "failed to get I/O memory\n");
 		error = -ENXIO;
 		goto failed_free;
 	}
 
-	if (!request_mem_region(ether->res->start,
-				resource_size(ether->res), pdev->name)) {
+	res = request_mem_region(res->start, resource_size(res), pdev->name);
+	if (res == NULL) {
 		dev_err(&pdev->dev, "failed to request I/O memory\n");
 		error = -EBUSY;
 		goto failed_free;
 	}
 
-	ether->reg = ioremap(ether->res->start, resource_size(ether->res));
+	ether = netdev_priv(dev);
+
+	ether->reg = ioremap(res->start, resource_size(res));
 	if (ether->reg == NULL) {
 		dev_err(&pdev->dev, "failed to remap I/O memory\n");
 		error = -ENXIO;
@@ -1064,7 +1056,7 @@ failed_free_txirq:
 failed_free_io:
 	iounmap(ether->reg);
 failed_free_mem:
-	release_mem_region(ether->res->start, resource_size(ether->res));
+	release_mem_region(res->start, resource_size(res));
 failed_free:
 	free_netdev(dev);
 	return error;
@@ -1076,19 +1068,10 @@ static int __devexit w90p910_ether_remove(struct platform_device *pdev)
 	struct w90p910_ether *ether = netdev_priv(dev);
 
 	unregister_netdev(dev);
-
 	clk_put(ether->rmiiclk);
 	clk_put(ether->clk);
-
-	iounmap(ether->reg);
-	release_mem_region(ether->res->start, resource_size(ether->res));
-
-	free_irq(ether->txirq, dev);
-	free_irq(ether->rxirq, dev);
-
 	del_timer_sync(&ether->check_timer);
 	platform_set_drvdata(pdev, NULL);
-
 	free_netdev(dev);
 	return 0;
 }

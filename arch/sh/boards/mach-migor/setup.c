@@ -98,9 +98,6 @@ static struct platform_device sh_keysc_device = {
 	.dev	= {
 		.platform_data	= &sh_keysc_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_KEYSC,
-	},
 };
 
 static struct mtd_partition migor_nor_flash_partitions[] =
@@ -279,7 +276,7 @@ static struct resource migor_lcdc_resources[] = {
 	[0] = {
 		.name	= "LCDC",
 		.start	= 0xfe940000, /* P4-only space */
-		.end	= 0xfe942fff,
+		.end	= 0xfe941fff,
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
@@ -294,9 +291,6 @@ static struct platform_device migor_lcdc_device = {
 	.resource	= migor_lcdc_resources,
 	.dev	= {
 		.platform_data	= &sh_mobile_lcdc_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_LCDC,
 	},
 };
 
@@ -384,9 +378,6 @@ static struct platform_device migor_ceu_device = {
 	.resource	= migor_ceu_resources,
 	.dev	= {
 		.platform_data	= &sh_mobile_ceu_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_CEU,
 	},
 };
 

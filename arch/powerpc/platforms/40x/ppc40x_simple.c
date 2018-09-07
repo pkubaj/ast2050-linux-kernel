@@ -54,8 +54,7 @@ static char *board[] __initdata = {
 	"amcc,acadia",
 	"amcc,haleakala",
 	"amcc,kilauea",
-	"amcc,makalu",
-	"est,hotfoot"
+	"amcc,makalu"
 };
 
 static int __init ppc40x_probe(void)

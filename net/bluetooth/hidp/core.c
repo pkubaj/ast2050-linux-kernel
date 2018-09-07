@@ -379,7 +379,6 @@ static void hidp_process_hid_control(struct hidp_session *session,
 
 		/* Kill session thread */
 		atomic_inc(&session->terminate);
-		hidp_schedule(session);
 	}
 }
 
@@ -577,6 +576,11 @@ static int hidp_session(void *arg)
 	}
 
 	if (session->hid) {
+		if (session->hid->claimed & HID_CLAIMED_INPUT)
+			hidinput_disconnect(session->hid);
+		if (session->hid->claimed & HID_CLAIMED_HIDRAW)
+			hidraw_disconnect(session->hid);
+
 		hid_destroy_device(session->hid);
 		session->hid = NULL;
 	}
@@ -742,6 +746,8 @@ static void hidp_stop(struct hid_device *hid)
 	skb_queue_purge(&session->ctrl_transmit);
 	skb_queue_purge(&session->intr_transmit);
 
+	if (hid->claimed & HID_CLAIMED_INPUT)
+		hidinput_disconnect(hid);
 	hid->claimed = 0;
 }
 
@@ -778,7 +784,7 @@ static int hidp_setup_hid(struct hidp_session *session,
 	hid->version = req->version;
 	hid->country = req->country;
 
-	strncpy(hid->name, req->name, sizeof(req->name) - 1);
+	strncpy(hid->name, req->name, 128);
 	strncpy(hid->phys, batostr(&src), 64);
 	strncpy(hid->uniq, batostr(&dst), 64);
 

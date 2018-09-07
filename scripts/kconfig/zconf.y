@@ -14,6 +14,8 @@
 #define LKC_DIRECT_LINK
 #include "lkc.h"
 
+#include "zconf.hash.c"
+
 #define printd(mask, fmt...) if (cdebug & (mask)) printf(fmt)
 
 #define PRINTD		0x0001
@@ -97,11 +99,6 @@ static struct menu *current_menu, *current_entry;
 	if (current_menu == $$)
 		menu_end_menu();
 } if_entry menu_entry choice_entry
-
-%{
-/* Include zconf.hash.c here so it can see the token constants. */
-#include "zconf.hash.c"
-%}
 
 %%
 input: stmt_list;
@@ -504,7 +501,7 @@ void conf_parse(const char *name)
 	sym_set_change_count(1);
 }
 
-static const char *zconf_tokenname(int token)
+const char *zconf_tokenname(int token)
 {
 	switch (token) {
 	case T_MENU:		return "menu";
@@ -568,7 +565,7 @@ static void zconferror(const char *err)
 #endif
 }
 
-static void print_quoted_string(FILE *out, const char *str)
+void print_quoted_string(FILE *out, const char *str)
 {
 	const char *p;
 	int len;
@@ -585,7 +582,7 @@ static void print_quoted_string(FILE *out, const char *str)
 	putc('"', out);
 }
 
-static void print_symbol(FILE *out, struct menu *menu)
+void print_symbol(FILE *out, struct menu *menu)
 {
 	struct symbol *sym = menu->sym;
 	struct property *prop;

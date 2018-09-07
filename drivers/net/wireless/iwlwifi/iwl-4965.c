@@ -30,7 +30,6 @@
 #include <linux/pci.h>
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
-#include <linux/sched.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
 #include <linux/wireless.h>
@@ -47,7 +46,7 @@
 #include "iwl-sta.h"
 
 static int iwl4965_send_tx_power(struct iwl_priv *priv);
-static int iwl4965_hw_get_temperature(struct iwl_priv *priv);
+static int iwl4965_hw_get_temperature(const struct iwl_priv *priv);
 
 /* Highest firmware API version supported */
 #define IWL4965_UCODE_API_MAX 2
@@ -294,7 +293,7 @@ restart:
 	queue_work(priv->workqueue, &priv->restart);
 }
 
-static bool is_ht40_channel(__le32 rxon_flags)
+static bool is_fat_channel(__le32 rxon_flags)
 {
 	int chan_mod = le32_to_cpu(rxon_flags & RXON_FLG_CHANNEL_MODE_MSK)
 				    >> RXON_FLG_CHANNEL_MODE_POS;
@@ -715,13 +714,6 @@ static int iwl4965_alive_notify(struct iwl_priv *priv)
 
 	iwl4965_set_wr_ptrs(priv, IWL_CMD_QUEUE_NUM, 0);
 
-	/* make sure all queue are not stopped */
-	memset(&priv->queue_stopped[0], 0, sizeof(priv->queue_stopped));
-	for (i = 0; i < 4; i++)
-		atomic_set(&priv->queue_stop_count[i], 0);
-
-	/* reset to 0 to enable all the queue first */
-	priv->txq_ctx_active_msk = 0;
 	/* Map each Tx/cmd queue to its corresponding fifo */
 	for (i = 0; i < ARRAY_SIZE(default_queue_to_tx_fifo); i++) {
 		int ac = default_queue_to_tx_fifo[i];
@@ -736,7 +728,7 @@ static int iwl4965_alive_notify(struct iwl_priv *priv)
 
 static struct iwl_sensitivity_ranges iwl4965_sensitivity = {
 	.min_nrg_cck = 97,
-	.max_nrg_cck = 0, /* not used, set to 0 */
+	.max_nrg_cck = 0,
 
 	.auto_corr_min_ofdm = 85,
 	.auto_corr_min_ofdm_mrc = 170,
@@ -760,8 +752,7 @@ static struct iwl_sensitivity_ranges iwl4965_sensitivity = {
 static void iwl4965_set_ct_threshold(struct iwl_priv *priv)
 {
 	/* want Kelvin */
-	priv->hw_params.ct_kill_threshold =
-		CELSIUS_TO_KELVIN(CT_KILL_THRESHOLD_LEGACY);
+	priv->hw_params.ct_kill_threshold = CELSIUS_TO_KELVIN(CT_KILL_THRESHOLD);
 }
 
 /**
@@ -790,7 +781,7 @@ static int iwl4965_hw_set_hw_params(struct iwl_priv *priv)
 	priv->hw_params.max_data_size = IWL49_RTC_DATA_SIZE;
 	priv->hw_params.max_inst_size = IWL49_RTC_INST_SIZE;
 	priv->hw_params.max_bsm_size = BSM_SRAM_SIZE;
-	priv->hw_params.ht40_channel = BIT(IEEE80211_BAND_5GHZ);
+	priv->hw_params.fat_channel = BIT(IEEE80211_BAND_5GHZ);
 
 	priv->hw_params.rx_wrt_ptr_reg = FH_RSCSR_CHNL0_WPTR;
 
@@ -1250,7 +1241,7 @@ static const struct gain_entry gain_table[2][108] = {
 };
 
 static int iwl4965_fill_txpower_tbl(struct iwl_priv *priv, u8 band, u16 channel,
-				    u8 is_ht40, u8 ctrl_chan_high,
+				    u8 is_fat, u8 ctrl_chan_high,
 				    struct iwl4965_tx_power_db *tx_power_tbl)
 {
 	u8 saturation_power;
@@ -1282,8 +1273,8 @@ static int iwl4965_fill_txpower_tbl(struct iwl_priv *priv, u8 band, u16 channel,
 	user_target_power = 2 * priv->tx_power_user_lmt;
 
 	/* Get current (RXON) channel, band, width */
-	IWL_DEBUG_TXPOWER(priv, "chan %d band %d is_ht40 %d\n", channel, band,
-			  is_ht40);
+	IWL_DEBUG_TXPOWER(priv, "chan %d band %d is_fat %d\n", channel, band,
+			  is_fat);
 
 	ch_info = iwl_get_channel_info(priv, priv->band, channel);
 
@@ -1302,7 +1293,7 @@ static int iwl4965_fill_txpower_tbl(struct iwl_priv *priv, u8 band, u16 channel,
 	IWL_DEBUG_TXPOWER(priv, "channel %d belongs to txatten group %d\n",
 			  channel, txatten_grp);
 
-	if (is_ht40) {
+	if (is_fat) {
 		if (ctrl_chan_high)
 			channel -= 2;
 		else
@@ -1326,8 +1317,8 @@ static int iwl4965_fill_txpower_tbl(struct iwl_priv *priv, u8 band, u16 channel,
 
 	/* regulatory txpower limits ... reg_limit values are in half-dBm,
 	 *   max_power_avg values are in dBm, convert * 2 */
-	if (is_ht40)
-		reg_limit = ch_info->ht40_max_power_avg * 2;
+	if (is_fat)
+		reg_limit = ch_info->fat_max_power_avg * 2;
 	else
 		reg_limit = ch_info->max_power_avg * 2;
 
@@ -1344,7 +1335,7 @@ static int iwl4965_fill_txpower_tbl(struct iwl_priv *priv, u8 band, u16 channel,
 	iwl4965_interpolate_chan(priv, channel, &ch_eeprom_info);
 
 	/* calculate tx gain adjustment based on power supply voltage */
-	voltage = le16_to_cpu(priv->calib_info->voltage);
+	voltage = priv->calib_info->voltage;
 	init_voltage = (s32)le32_to_cpu(priv->card_alive_init.voltage);
 	voltage_compensation =
 	    iwl4965_get_voltage_compensation(voltage, init_voltage);
@@ -1493,7 +1484,7 @@ static int iwl4965_fill_txpower_tbl(struct iwl_priv *priv, u8 band, u16 channel,
 /**
  * iwl4965_send_tx_power - Configure the TXPOWER level user limit
  *
- * Uses the active RXON for channel, band, and characteristics (ht40, high)
+ * Uses the active RXON for channel, band, and characteristics (fat, high)
  * The power limit is taken from priv->tx_power_user_lmt.
  */
 static int iwl4965_send_tx_power(struct iwl_priv *priv)
@@ -1501,7 +1492,7 @@ static int iwl4965_send_tx_power(struct iwl_priv *priv)
 	struct iwl4965_txpowertable_cmd cmd = { 0 };
 	int ret;
 	u8 band = 0;
-	bool is_ht40 = false;
+	bool is_fat = false;
 	u8 ctrl_chan_high = 0;
 
 	if (test_bit(STATUS_SCANNING, &priv->status)) {
@@ -1514,9 +1505,9 @@ static int iwl4965_send_tx_power(struct iwl_priv *priv)
 
 	band = priv->band == IEEE80211_BAND_2GHZ;
 
-	is_ht40 =  is_ht40_channel(priv->active_rxon.flags);
+	is_fat =  is_fat_channel(priv->active_rxon.flags);
 
-	if (is_ht40 &&
+	if (is_fat &&
 	    (priv->active_rxon.flags & RXON_FLG_CTRL_CHANNEL_LOC_HI_MSK))
 		ctrl_chan_high = 1;
 
@@ -1525,7 +1516,7 @@ static int iwl4965_send_tx_power(struct iwl_priv *priv)
 
 	ret = iwl4965_fill_txpower_tbl(priv, band,
 				le16_to_cpu(priv->active_rxon.channel),
-				is_ht40, ctrl_chan_high, &cmd.tx_power);
+				is_fat, ctrl_chan_high, &cmd.tx_power);
 	if (ret)
 		goto out;
 
@@ -1579,7 +1570,7 @@ static int iwl4965_hw_channel_switch(struct iwl_priv *priv, u16 channel)
 {
 	int rc;
 	u8 band = 0;
-	bool is_ht40 = false;
+	bool is_fat = false;
 	u8 ctrl_chan_high = 0;
 	struct iwl4965_channel_switch_cmd cmd = { 0 };
 	const struct iwl_channel_info *ch_info;
@@ -1588,9 +1579,9 @@ static int iwl4965_hw_channel_switch(struct iwl_priv *priv, u16 channel)
 
 	ch_info = iwl_get_channel_info(priv, priv->band, channel);
 
-	is_ht40 = is_ht40_channel(priv->staging_rxon.flags);
+	is_fat = is_fat_channel(priv->staging_rxon.flags);
 
-	if (is_ht40 &&
+	if (is_fat &&
 	    (priv->active_rxon.flags & RXON_FLG_CTRL_CHANNEL_LOC_HI_MSK))
 		ctrl_chan_high = 1;
 
@@ -1605,7 +1596,7 @@ static int iwl4965_hw_channel_switch(struct iwl_priv *priv, u16 channel)
 	else
 		cmd.expect_beacon = 1;
 
-	rc = iwl4965_fill_txpower_tbl(priv, band, channel, is_ht40,
+	rc = iwl4965_fill_txpower_tbl(priv, band, channel, is_fat,
 				      ctrl_chan_high, &cmd.tx_power);
 	if (rc) {
 		IWL_DEBUG_11H(priv, "error:%d  fill txpower_tbl\n", rc);
@@ -1664,7 +1655,7 @@ static s32 sign_extend(u32 oper, int index)
  *
  * A return of <0 indicates bogus data in the statistics
  */
-static int iwl4965_hw_get_temperature(struct iwl_priv *priv)
+static int iwl4965_hw_get_temperature(const struct iwl_priv *priv)
 {
 	s32 temperature;
 	s32 vt;
@@ -1672,8 +1663,8 @@ static int iwl4965_hw_get_temperature(struct iwl_priv *priv)
 	u32 R4;
 
 	if (test_bit(STATUS_TEMPERATURE, &priv->status) &&
-		(priv->statistics.flag & STATISTICS_REPLY_FLG_HT40_MODE_MSK)) {
-		IWL_DEBUG_TEMP(priv, "Running HT40 temperature calibration\n");
+		(priv->statistics.flag & STATISTICS_REPLY_FLG_FAT_MODE_MSK)) {
+		IWL_DEBUG_TEMP(priv, "Running FAT temperature calibration\n");
 		R1 = (s32)le32_to_cpu(priv->card_alive_init.therm_r1[1]);
 		R2 = (s32)le32_to_cpu(priv->card_alive_init.therm_r2[1]);
 		R3 = (s32)le32_to_cpu(priv->card_alive_init.therm_r3[1]);
@@ -1781,7 +1772,6 @@ static void iwl4965_temperature_calib(struct iwl_priv *priv)
 	}
 
 	priv->temperature = temp;
-	iwl_tt_handler(priv);
 	set_bit(STATUS_TEMPERATURE, &priv->status);
 
 	if (!priv->disable_tx_power_cal &&
@@ -2029,12 +2019,6 @@ static int iwl4965_tx_status_reply_tx(struct iwl_priv *priv,
 					   agg->frame_count, txq_id, idx);
 
 			hdr = iwl_tx_queue_get_hdr(priv, txq_id, idx);
-			if (!hdr) {
-				IWL_ERR(priv,
-					"BUG_ON idx doesn't point to valid skb"
-					" idx=%d, txq_id=%d\n", idx, txq_id);
-				return -1;
-			}
 
 			sc = le16_to_cpu(hdr->seq_ctrl);
 			if (idx != (SEQ_TO_SN(sc) & 0xff)) {
@@ -2094,7 +2078,7 @@ static void iwl4965_rx_reply_tx(struct iwl_priv *priv,
 	struct ieee80211_tx_info *info;
 	struct iwl4965_tx_resp *tx_resp = (void *)&pkt->u.raw[0];
 	u32  status = le32_to_cpu(tx_resp->u.status);
-	int tid = MAX_TID_COUNT - 1;
+	int tid = MAX_TID_COUNT;
 	int sta_id;
 	int freed;
 	u8 *qc = NULL;
@@ -2141,9 +2125,7 @@ static void iwl4965_rx_reply_tx(struct iwl_priv *priv,
 			IWL_DEBUG_TX_REPLY(priv, "Retry scheduler reclaim scd_ssn "
 					   "%d index %d\n", scd_ssn , index);
 			freed = iwl_tx_queue_reclaim(priv, txq_id, index);
-			if (qc)
-				iwl_free_tfds_in_queue(priv, sta_id,
-						       tid, freed);
+			priv->stations[sta_id].tid[tid].tfds_in_queue -= freed;
 
 			if (priv->mac80211_registered &&
 			    (iwl_queue_space(&txq->q) > txq->q.low_mark) &&
@@ -2171,14 +2153,13 @@ static void iwl4965_rx_reply_tx(struct iwl_priv *priv,
 
 		freed = iwl_tx_queue_reclaim(priv, txq_id, index);
 		if (qc && likely(sta_id != IWL_INVALID_STATION))
-			iwl_free_tfds_in_queue(priv, sta_id, tid, freed);
-		else if (sta_id == IWL_INVALID_STATION)
-			IWL_DEBUG_TX_REPLY(priv, "Station not known\n");
+			priv->stations[sta_id].tid[tid].tfds_in_queue -= freed;
 
 		if (priv->mac80211_registered &&
 		    (iwl_queue_space(&txq->q) > txq->q.low_mark))
 			iwl_wake_queue(priv, txq_id);
 	}
+
 	if (qc && likely(sta_id != IWL_INVALID_STATION))
 		iwl_txq_check_empty(priv, sta_id, tid, txq_id);
 
@@ -2309,8 +2290,6 @@ static struct iwl_lib_ops iwl4965_lib = {
 	.alive_notify = iwl4965_alive_notify,
 	.init_alive_start = iwl4965_init_alive_start,
 	.load_ucode = iwl4965_load_bsm,
-	.dump_nic_event_log = iwl_dump_nic_event_log,
-	.dump_nic_error_log = iwl_dump_nic_error_log,
 	.apm_ops = {
 		.init = iwl4965_apm_init,
 		.reset = iwl4965_apm_reset,
@@ -2325,8 +2304,8 @@ static struct iwl_lib_ops iwl4965_lib = {
 			EEPROM_REGULATORY_BAND_3_CHANNELS,
 			EEPROM_REGULATORY_BAND_4_CHANNELS,
 			EEPROM_REGULATORY_BAND_5_CHANNELS,
-			EEPROM_4965_REGULATORY_BAND_24_HT40_CHANNELS,
-			EEPROM_4965_REGULATORY_BAND_52_HT40_CHANNELS
+			EEPROM_4965_REGULATORY_BAND_24_FAT_CHANNELS,
+			EEPROM_4965_REGULATORY_BAND_52_FAT_CHANNELS
 		},
 		.verify_signature  = iwlcore_eeprom_verify_signature,
 		.acquire_semaphore = iwlcore_eeprom_acquire_semaphore,
@@ -2363,9 +2342,7 @@ struct iwl_cfg iwl4965_agn_cfg = {
 	.eeprom_calib_ver = EEPROM_4965_TX_POWER_VERSION,
 	.ops = &iwl4965_ops,
 	.mod_params = &iwl4965_mod_params,
-	.use_isr_legacy = true,
-	.ht_greenfield_support = false,
-	.broken_powersave = true,
+	.use_isr_legacy = true
 };
 
 /* Module firmware */
@@ -2375,6 +2352,8 @@ module_param_named(antenna, iwl4965_mod_params.antenna, int, 0444);
 MODULE_PARM_DESC(antenna, "select antenna (1=Main, 2=Aux, default 0 [both])");
 module_param_named(swcrypto, iwl4965_mod_params.sw_crypto, int, 0444);
 MODULE_PARM_DESC(swcrypto, "using crypto in software (default 0 [hardware])");
+module_param_named(debug, iwl4965_mod_params.debug, uint, 0444);
+MODULE_PARM_DESC(debug, "debug output mask");
 module_param_named(
 	disable_hw_scan, iwl4965_mod_params.disable_hw_scan, int, 0444);
 MODULE_PARM_DESC(disable_hw_scan, "disable hardware scanning (default 0)");

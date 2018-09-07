@@ -312,7 +312,7 @@ static void init_fw_attribute_group(struct device *dev,
 	group->groups[0] = &group->group;
 	group->groups[1] = NULL;
 	group->group.attrs = group->attrs;
-	dev->groups = (const struct attribute_group **) group->groups;
+	dev->groups = group->groups;
 }
 
 static ssize_t modalias_show(struct device *dev,
@@ -463,7 +463,6 @@ static int read_bus_info_block(struct fw_device *device, int generation)
 		return -ENOMEM;
 
 	stack = &rom[READ_BIB_ROM_SIZE];
-	memset(rom, 0, sizeof(*rom) * READ_BIB_ROM_SIZE);
 
 	device->max_speed = SCODE_100;
 

@@ -132,9 +132,6 @@ enum fixed_addresses {
 #ifdef CONFIG_X86_32
 	FIX_WP_TEST,
 #endif
-#ifdef CONFIG_INTEL_TXT
-	FIX_TBOOT_BASE,
-#endif
 	__end_of_fixed_addresses
 };
 

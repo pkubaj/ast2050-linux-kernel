@@ -21,7 +21,7 @@
 #include <linux/module.h>
 #include <linux/highmem.h>
 
-static int is_io_mapping_possible(resource_size_t base, unsigned long size)
+int is_io_mapping_possible(resource_size_t base, unsigned long size)
 {
 #if !defined(CONFIG_X86_PAE) && defined(CONFIG_PHYS_ADDR_T_64BIT)
 	/* There is no way to map greater than 1 << 32 address without PAE */
@@ -30,30 +30,7 @@ static int is_io_mapping_possible(resource_size_t base, unsigned long size)
 #endif
 	return 1;
 }
-
-int iomap_create_wc(resource_size_t base, unsigned long size, pgprot_t *prot)
-{
-	unsigned long flag = _PAGE_CACHE_WC;
-	int ret;
-
-	if (!is_io_mapping_possible(base, size))
-		return -EINVAL;
-
-	ret = io_reserve_memtype(base, base + size, &flag);
-	if (ret)
-		return ret;
-
-	*prot = __pgprot(__PAGE_KERNEL | flag);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(iomap_create_wc);
-
-void
-iomap_free(resource_size_t base, unsigned long size)
-{
-	io_free_memtype(base, base + size);
-}
-EXPORT_SYMBOL_GPL(iomap_free);
+EXPORT_SYMBOL_GPL(is_io_mapping_possible);
 
 void *kmap_atomic_prot_pfn(unsigned long pfn, enum km_type type, pgprot_t prot)
 {

@@ -70,9 +70,10 @@ static void sgi_tioca_tlbflush(struct agp_memory *mem)
  * entry.
  */
 static unsigned long
-sgi_tioca_mask_memory(struct agp_bridge_data *bridge, dma_addr_t addr,
-		      int type)
+sgi_tioca_mask_memory(struct agp_bridge_data *bridge,
+		      struct page *page, int type)
 {
+	unsigned long addr = phys_to_gart(page_to_phys(page));
 	return tioca_physpage_to_gart(addr);
 }
 
@@ -189,8 +190,7 @@ static int sgi_tioca_insert_memory(struct agp_memory *mem, off_t pg_start,
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
 		table[j] =
-		    bridge->driver->mask_memory(bridge,
-						page_to_phys(mem->pages[i]),
+		    bridge->driver->mask_memory(bridge, mem->pages[i],
 						mem->type);
 	}
 

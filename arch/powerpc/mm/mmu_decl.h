@@ -36,37 +36,21 @@ static inline void _tlbil_pid(unsigned int pid)
 {
 	asm volatile ("sync; tlbia; isync" : : : "memory");
 }
-#define _tlbil_pid_noind(pid)	_tlbil_pid(pid)
-
 #else /* CONFIG_40x || CONFIG_8xx */
 extern void _tlbil_all(void);
 extern void _tlbil_pid(unsigned int pid);
-#ifdef CONFIG_PPC_BOOK3E
-extern void _tlbil_pid_noind(unsigned int pid);
-#else
-#define _tlbil_pid_noind(pid)	_tlbil_pid(pid)
-#endif
 #endif /* !(CONFIG_40x || CONFIG_8xx) */
 
 /*
  * On 8xx, we directly inline tlbie, on others, it's extern
  */
 #ifdef CONFIG_8xx
-static inline void _tlbil_va(unsigned long address, unsigned int pid,
-			     unsigned int tsize, unsigned int ind)
+static inline void _tlbil_va(unsigned long address, unsigned int pid)
 {
 	asm volatile ("tlbie %0; sync" : : "r" (address) : "memory");
 }
-#elif defined(CONFIG_PPC_BOOK3E)
-extern void _tlbil_va(unsigned long address, unsigned int pid,
-		      unsigned int tsize, unsigned int ind);
-#else
-extern void __tlbil_va(unsigned long address, unsigned int pid);
-static inline void _tlbil_va(unsigned long address, unsigned int pid,
-			     unsigned int tsize, unsigned int ind)
-{
-	__tlbil_va(address, pid);
-}
+#else /* CONFIG_8xx */
+extern void _tlbil_va(unsigned long address, unsigned int pid);
 #endif /* CONIFG_8xx */
 
 /*
@@ -74,16 +58,10 @@ static inline void _tlbil_va(unsigned long address, unsigned int pid,
  * implementation. When that becomes the case, this will be
  * an extern.
  */
-#ifdef CONFIG_PPC_BOOK3E
-extern void _tlbivax_bcast(unsigned long address, unsigned int pid,
-			   unsigned int tsize, unsigned int ind);
-#else
-static inline void _tlbivax_bcast(unsigned long address, unsigned int pid,
-				   unsigned int tsize, unsigned int ind)
+static inline void _tlbivax_bcast(unsigned long address, unsigned int pid)
 {
 	BUG();
 }
-#endif
 
 #else /* CONFIG_PPC_MMU_NOHASH */
 
@@ -121,12 +99,7 @@ extern unsigned int rtas_data, rtas_size;
 struct hash_pte;
 extern struct hash_pte *Hash, *Hash_end;
 extern unsigned long Hash_size, Hash_mask;
-
-#endif /* CONFIG_PPC32 */
-
-#ifdef CONFIG_PPC64
-extern int map_kernel_page(unsigned long ea, unsigned long pa, int flags);
-#endif /* CONFIG_PPC64 */
+#endif
 
 extern unsigned long ioremap_bot;
 extern unsigned long __max_low_memory;

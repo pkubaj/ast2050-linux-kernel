@@ -234,8 +234,6 @@ static void rose_remove_neigh(struct rose_neigh *rose_neigh)
 
 	if ((s = rose_neigh_list) == rose_neigh) {
 		rose_neigh_list = rose_neigh->next;
-		if (rose_neigh->ax25)
-			ax25_cb_put(rose_neigh->ax25);
 		kfree(rose_neigh->digipeat);
 		kfree(rose_neigh);
 		return;
@@ -244,8 +242,6 @@ static void rose_remove_neigh(struct rose_neigh *rose_neigh)
 	while (s != NULL && s->next != NULL) {
 		if (s->next == rose_neigh) {
 			s->next = rose_neigh->next;
-			if (rose_neigh->ax25)
-				ax25_cb_put(rose_neigh->ax25);
 			kfree(rose_neigh->digipeat);
 			kfree(rose_neigh);
 			return;
@@ -582,18 +578,18 @@ static int rose_clear_routes(void)
 
 /*
  *	Check that the device given is a valid AX.25 interface that is "up".
- * 	called whith RTNL
  */
-static struct net_device *rose_ax25_dev_find(char *devname)
+static struct net_device *rose_ax25_dev_get(char *devname)
 {
 	struct net_device *dev;
 
-	if ((dev = __dev_get_by_name(&init_net, devname)) == NULL)
+	if ((dev = dev_get_by_name(&init_net, devname)) == NULL)
 		return NULL;
 
 	if ((dev->flags & IFF_UP) && dev->type == ARPHRD_AX25)
 		return dev;
 
+	dev_put(dev);
 	return NULL;
 }
 
@@ -724,23 +720,27 @@ int rose_rt_ioctl(unsigned int cmd, void __user *arg)
 	case SIOCADDRT:
 		if (copy_from_user(&rose_route, arg, sizeof(struct rose_route_struct)))
 			return -EFAULT;
-		if ((dev = rose_ax25_dev_find(rose_route.device)) == NULL)
+		if ((dev = rose_ax25_dev_get(rose_route.device)) == NULL)
 			return -EINVAL;
-		if (rose_dev_exists(&rose_route.address)) /* Can't add routes to ourself */
+		if (rose_dev_exists(&rose_route.address)) { /* Can't add routes to ourself */
+			dev_put(dev);
 			return -EINVAL;
+		}
 		if (rose_route.mask > 10) /* Mask can't be more than 10 digits */
 			return -EINVAL;
 		if (rose_route.ndigis > AX25_MAX_DIGIS)
 			return -EINVAL;
 		err = rose_add_node(&rose_route, dev);
+		dev_put(dev);
 		return err;
 
 	case SIOCDELRT:
 		if (copy_from_user(&rose_route, arg, sizeof(struct rose_route_struct)))
 			return -EFAULT;
-		if ((dev = rose_ax25_dev_find(rose_route.device)) == NULL)
+		if ((dev = rose_ax25_dev_get(rose_route.device)) == NULL)
 			return -EINVAL;
 		err = rose_del_node(&rose_route, dev);
+		dev_put(dev);
 		return err;
 
 	case SIOCRSCLRRT:
@@ -814,7 +814,6 @@ void rose_link_failed(ax25_cb *ax25, int reason)
 
 	if (rose_neigh != NULL) {
 		rose_neigh->ax25 = NULL;
-		ax25_cb_put(ax25);
 
 		rose_del_route_by_neigh(rose_neigh);
 		rose_kill_by_neigh(rose_neigh);
@@ -852,7 +851,7 @@ int rose_route_frame(struct sk_buff *skb, ax25_cb *ax25)
 	unsigned int lci, new_lci;
 	unsigned char cause, diagnostic;
 	struct net_device *dev;
-	int res = 0;
+	int len, res = 0;
 	char buf[11];
 
 #if 0
@@ -860,17 +859,10 @@ int rose_route_frame(struct sk_buff *skb, ax25_cb *ax25)
 		return res;
 #endif
 
-	if (skb->len < ROSE_MIN_LEN)
-		return res;
 	frametype = skb->data[2];
 	lci = ((skb->data[0] << 8) & 0xF00) + ((skb->data[1] << 0) & 0x0FF);
-	if (frametype == ROSE_CALL_REQUEST &&
-	    (skb->len <= ROSE_CALL_REQ_FACILITIES_OFF ||
-	     skb->data[ROSE_CALL_REQ_ADDR_LEN_OFF] !=
-	     ROSE_CALL_REQ_ADDR_LEN_VAL))
-		return res;
-	src_addr  = (rose_address *)(skb->data + ROSE_CALL_REQ_SRC_ADDR_OFF);
-	dest_addr = (rose_address *)(skb->data + ROSE_CALL_REQ_DEST_ADDR_OFF);
+	src_addr  = (rose_address *)(skb->data + 9);
+	dest_addr = (rose_address *)(skb->data + 4);
 
 	spin_lock_bh(&rose_neigh_list_lock);
 	spin_lock_bh(&rose_route_list_lock);
@@ -1008,11 +1000,12 @@ int rose_route_frame(struct sk_buff *skb, ax25_cb *ax25)
 		goto out;
 	}
 
+	len  = (((skb->data[3] >> 4) & 0x0F) + 1) >> 1;
+	len += (((skb->data[3] >> 0) & 0x0F) + 1) >> 1;
+
 	memset(&facilities, 0x00, sizeof(struct rose_facilities_struct));
 
-	if (!rose_parse_facilities(skb->data + ROSE_CALL_REQ_FACILITIES_OFF,
-				   skb->len - ROSE_CALL_REQ_FACILITIES_OFF,
-				   &facilities)) {
+	if (!rose_parse_facilities(skb->data + len + 4, &facilities)) {
 		rose_transmit_clear_request(rose_neigh, lci, ROSE_INVALID_FACILITY, 76);
 		goto out;
 	}

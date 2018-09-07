@@ -151,7 +151,7 @@ static __devinit int rb532_pata_driver_probe(struct platform_device *pdev)
 	info->irq = irq;
 
 	info->iobase = devm_ioremap_nocache(&pdev->dev, res->start,
-				resource_size(res));
+				res->end - res->start + 1);
 	if (!info->iobase)
 		return -ENOMEM;
 

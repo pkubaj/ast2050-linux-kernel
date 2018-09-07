@@ -117,7 +117,7 @@ int cpu_check_affinity(unsigned int irq, const struct cpumask *dest)
 	int cpu_dest;
 
 	/* timer and ipi have to always be received on all CPUs */
-	if (CHECK_IRQ_PER_CPU(irq_to_desc(irq)->status)) {
+	if (CHECK_IRQ_PER_CPU(irq)) {
 		/* Bad linux design decision.  The mask has already
 		 * been set; we must reset it */
 		cpumask_setall(irq_desc[irq].affinity);
@@ -422,4 +422,9 @@ void __init init_IRQ(void)
 #endif
         set_eiem(cpu_eiem);	/* EIEM : enable all external intr */
 
+}
+
+void ack_bad_irq(unsigned int irq)
+{
+	printk(KERN_WARNING "unexpected IRQ %d\n", irq);
 }

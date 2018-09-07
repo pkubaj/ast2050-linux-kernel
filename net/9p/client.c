@@ -221,8 +221,7 @@ struct p9_req_t *p9_tag_lookup(struct p9_client *c, u16 tag)
 	 * buffer to read the data into */
 	tag++;
 
-	if(tag >= c->max_tag)
-		return NULL;
+	BUG_ON(tag >= c->max_tag);
 
 	row = tag / P9_ROW_MAXTAG;
 	col = tag % P9_ROW_MAXTAG;
@@ -583,9 +582,11 @@ static struct p9_fid *p9_fid_create(struct p9_client *clnt)
 
 	memset(&fid->qid, 0, sizeof(struct p9_qid));
 	fid->mode = -1;
+	fid->rdir_fpos = 0;
 	fid->uid = current_fsuid();
 	fid->clnt = clnt;
-	fid->rdir = NULL;
+	fid->aux = NULL;
+
 	spin_lock_irqsave(&clnt->lock, flags);
 	list_add(&fid->flist, &clnt->fidlist);
 	spin_unlock_irqrestore(&clnt->lock, flags);
@@ -608,7 +609,6 @@ static void p9_fid_destroy(struct p9_fid *fid)
 	spin_lock_irqsave(&clnt->lock, flags);
 	list_del(&fid->flist);
 	spin_unlock_irqrestore(&clnt->lock, flags);
-	kfree(fid->rdir);
 	kfree(fid);
 }
 
@@ -698,8 +698,8 @@ struct p9_client *p9_client_create(const char *dev_name, char *options)
 	if (err)
 		goto error;
 
-	if (clnt->msize > clnt->trans_mod->maxsize)
-		clnt->msize = clnt->trans_mod->maxsize;
+	if ((clnt->msize+P9_IOHDRSZ) > clnt->trans_mod->maxsize)
+		clnt->msize = clnt->trans_mod->maxsize-P9_IOHDRSZ;
 
 	err = p9_client_version(clnt);
 	if (err)
@@ -1022,11 +1022,9 @@ int p9_client_clunk(struct p9_fid *fid)
 	P9_DPRINTK(P9_DEBUG_9P, "<<< RCLUNK fid %d\n", fid->fid);
 
 	p9_free_req(clnt, req);
-error:
-	/*
-	 * Fid is not valid even after a failed clunk
-	 */
 	p9_fid_destroy(fid);
+
+error:
 	return err;
 }
 EXPORT_SYMBOL(p9_client_clunk);

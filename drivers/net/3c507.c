@@ -284,8 +284,7 @@ static unsigned short init_words[] = {
 
 static int	el16_probe1(struct net_device *dev, int ioaddr);
 static int	el16_open(struct net_device *dev);
-static netdev_tx_t el16_send_packet(struct sk_buff *skb,
-				    struct net_device *dev);
+static int	el16_send_packet(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t el16_interrupt(int irq, void *dev_id);
 static void el16_rx(struct net_device *dev);
 static int	el16_close(struct net_device *dev);
@@ -510,8 +509,7 @@ static void el16_tx_timeout (struct net_device *dev)
 }
 
 
-static netdev_tx_t el16_send_packet (struct sk_buff *skb,
-				     struct net_device *dev)
+static int el16_send_packet (struct sk_buff *skb, struct net_device *dev)
 {
 	struct net_local *lp = netdev_priv(dev);
 	int ioaddr = dev->base_addr;
@@ -539,7 +537,7 @@ static netdev_tx_t el16_send_packet (struct sk_buff *skb,
 
 	/* You might need to clean up and record Tx statistics here. */
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*	The typical workload of the driver:

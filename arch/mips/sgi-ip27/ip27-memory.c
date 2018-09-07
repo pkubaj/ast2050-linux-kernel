@@ -421,7 +421,7 @@ static void __init node_mem_init(cnodeid_t node)
 
 /*
  * A node with nothing.  We use it to avoid any special casing in
- * cpumask_of_node
+ * node_to_cpumask
  */
 static struct node_data null_node = {
 	.hub = {

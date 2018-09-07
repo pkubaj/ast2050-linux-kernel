@@ -1207,7 +1207,7 @@ xfs_mountfs(
 	 * Get and sanity-check the root inode.
 	 * Save the pointer to it in the mount structure.
 	 */
-	error = xfs_iget(mp, NULL, sbp->sb_rootino, 0, XFS_ILOCK_EXCL, &rip);
+	error = xfs_iget(mp, NULL, sbp->sb_rootino, 0, XFS_ILOCK_EXCL, &rip, 0);
 	if (error) {
 		cmn_err(CE_WARN, "XFS: failed to read root inode");
 		goto out_log_dealloc;
@@ -1471,7 +1471,7 @@ xfs_log_sbcount(
 	if (!xfs_sb_version_haslazysbcount(&mp->m_sb))
 		return 0;
 
-	tp = _xfs_trans_alloc(mp, XFS_TRANS_SB_COUNT, KM_SLEEP);
+	tp = _xfs_trans_alloc(mp, XFS_TRANS_SB_COUNT);
 	error = xfs_trans_reserve(tp, 0, mp->m_sb.sb_sectsize + 128, 0, 0,
 					XFS_DEFAULT_LOG_COUNT);
 	if (error) {
@@ -1568,7 +1568,7 @@ xfs_mod_sb(xfs_trans_t *tp, __int64_t fields)
  *
  * The m_sb_lock must be held when this routine is called.
  */
-STATIC int
+int
 xfs_mod_incore_sb_unlocked(
 	xfs_mount_t	*mp,
 	xfs_sb_field_t	field,

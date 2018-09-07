@@ -35,7 +35,7 @@
 const char * prog_name;
 
 
-static void
+void
 usage (void)
 {
     fprintf(stderr,
@@ -93,7 +93,7 @@ main (int argc, char *argv[])
     ofd = 1;
     if (i < argc) {
 	ofd = open(argv[i++], O_WRONLY | O_CREAT | O_TRUNC, 0666);
-	if (ofd == -1) {
+	if (fd == -1) {
 	    perror("open");
 	    exit(1);
 	}

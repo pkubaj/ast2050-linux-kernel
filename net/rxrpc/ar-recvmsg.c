@@ -86,7 +86,7 @@ int rxrpc_recvmsg(struct kiocb *iocb, struct socket *sock,
 		if (!skb) {
 			/* nothing remains on the queue */
 			if (copied &&
-			    (flags & MSG_PEEK || timeo == 0))
+			    (msg->msg_flags & MSG_PEEK || timeo == 0))
 				goto out;
 
 			/* wait for a message to turn up */
@@ -142,13 +142,10 @@ int rxrpc_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 		/* copy the peer address and timestamp */
 		if (!continue_call) {
-			if (msg->msg_name) {
-				size_t len =
-					sizeof(call->conn->trans->peer->srx);
+			if (msg->msg_name && msg->msg_namelen > 0)
 				memcpy(msg->msg_name,
-				       &call->conn->trans->peer->srx, len);
-				msg->msg_namelen = len;
-			}
+				       &call->conn->trans->peer->srx,
+				       sizeof(call->conn->trans->peer->srx));
 			sock_recv_timestamp(msg, &rx->sk, skb);
 		}
 

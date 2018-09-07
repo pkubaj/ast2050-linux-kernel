@@ -18,8 +18,7 @@
 	.endm
 
 	.macro  get_irqnr_preamble, base, tmp
-	ldr	\base, =avic_base
-	ldr	\base, [\base]
+	ldr	\base, =AVIC_IO_ADDRESS(AVIC_BASE_ADDR)
 #ifdef CONFIG_MXC_IRQ_PRIOR
 	ldr	r4, [\base, #AVIC_NIMASK]
 #endif

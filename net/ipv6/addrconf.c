@@ -137,8 +137,6 @@ static DEFINE_SPINLOCK(addrconf_verify_lock);
 static void addrconf_join_anycast(struct inet6_ifaddr *ifp);
 static void addrconf_leave_anycast(struct inet6_ifaddr *ifp);
 
-static void addrconf_bonding_change(struct net_device *dev,
-				    unsigned long event);
 static int addrconf_ifdown(struct net_device *dev, int how);
 
 static void addrconf_dad_start(struct inet6_ifaddr *ifp, u32 flags);
@@ -407,6 +405,9 @@ static struct inet6_dev * ipv6_add_dev(struct net_device *dev)
 	    dev->type == ARPHRD_TUNNEL6 ||
 	    dev->type == ARPHRD_SIT ||
 	    dev->type == ARPHRD_NONE) {
+		printk(KERN_INFO
+		       "%s: Disabled Privacy Extensions\n",
+		       dev->name);
 		ndev->cnf.use_tempaddr = -1;
 	} else {
 		in6_dev_hold(ndev);
@@ -501,11 +502,8 @@ static int addrconf_fixup_forwarding(struct ctl_table *table, int *p, int old)
 	if (p == &net->ipv6.devconf_dflt->forwarding)
 		return 0;
 
-	if (!rtnl_trylock()) {
-		/* Restore the original values before restarting */
-		*p = old;
+	if (!rtnl_trylock())
 		return restart_syscall();
-	}
 
 	if (p == &net->ipv6.devconf_all->forwarding) {
 		__s32 newf = net->ipv6.devconf_all->forwarding;
@@ -920,10 +918,12 @@ retry:
 	if (ifp->flags & IFA_F_OPTIMISTIC)
 		addr_flags |= IFA_F_OPTIMISTIC;
 
-	ift = ipv6_add_addr(idev, &addr, tmp_plen,
-			    ipv6_addr_type(&addr)&IPV6_ADDR_SCOPE_MASK,
-			    addr_flags);
-	if (IS_ERR(ift)) {
+	ift = !max_addresses ||
+	      ipv6_count_addresses(idev) < max_addresses ?
+		ipv6_add_addr(idev, &addr, tmp_plen,
+			      ipv6_addr_type(&addr)&IPV6_ADDR_SCOPE_MASK,
+			      addr_flags) : NULL;
+	if (!ift || IS_ERR(ift)) {
 		in6_ifa_put(ifp);
 		in6_dev_put(idev);
 		printk(KERN_INFO
@@ -1371,14 +1371,12 @@ struct inet6_ifaddr *ipv6_get_ifaddr(struct net *net, const struct in6_addr *add
 
 /* Gets referenced address, destroys ifaddr */
 
-static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
+static void addrconf_dad_stop(struct inet6_ifaddr *ifp)
 {
 	if (ifp->flags&IFA_F_PERMANENT) {
 		spin_lock_bh(&ifp->lock);
 		addrconf_del_timer(ifp);
 		ifp->flags |= IFA_F_TENTATIVE;
-		if (dad_failed)
-			ifp->flags |= IFA_F_DADFAILED;
 		spin_unlock_bh(&ifp->lock);
 		in6_ifa_put(ifp);
 #ifdef CONFIG_IPV6_PRIVACY
@@ -1405,8 +1403,8 @@ void addrconf_dad_failure(struct inet6_ifaddr *ifp)
 	struct inet6_dev *idev = ifp->idev;
 
 	if (net_ratelimit())
-		printk(KERN_INFO "%s: IPv6 duplicate address %pI6c detected!\n",
-			ifp->idev->dev->name, &ifp->addr);
+		printk(KERN_INFO "%s: IPv6 duplicate address detected!\n",
+			ifp->idev->dev->name);
 
 	if (idev->cnf.accept_dad > 1 && !idev->cnf.disable_ipv6) {
 		struct in6_addr addr;
@@ -1424,7 +1422,7 @@ void addrconf_dad_failure(struct inet6_ifaddr *ifp)
 		}
 	}
 
-	addrconf_dad_stop(ifp, 1);
+	addrconf_dad_stop(ifp);
 }
 
 /* Join to solicited addr multicast group. */
@@ -2582,10 +2580,6 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 				return notifier_from_errno(err);
 		}
 		break;
-	case NETDEV_BONDING_OLDTYPE:
-	case NETDEV_BONDING_NEWTYPE:
-		addrconf_bonding_change(dev, event);
-		break;
 	}
 
 	return NOTIFY_OK;
@@ -2598,19 +2592,6 @@ static struct notifier_block ipv6_dev_notf = {
 	.notifier_call = addrconf_notify,
 	.priority = 0
 };
-
-static void addrconf_bonding_change(struct net_device *dev, unsigned long event)
-{
-	struct inet6_dev *idev;
-	ASSERT_RTNL();
-
-	idev = __in6_dev_get(dev);
-
-	if (event == NETDEV_BONDING_NEWTYPE)
-		ipv6_mc_remap(idev);
-	else if (event == NETDEV_BONDING_OLDTYPE)
-		ipv6_mc_unmap(idev);
-}
 
 static int addrconf_ifdown(struct net_device *dev, int how)
 {
@@ -2797,7 +2778,7 @@ static void addrconf_dad_start(struct inet6_ifaddr *ifp, u32 flags)
 	    idev->cnf.accept_dad < 1 ||
 	    !(ifp->flags&IFA_F_TENTATIVE) ||
 	    ifp->flags & IFA_F_NODAD) {
-		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC|IFA_F_DADFAILED);
+		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC);
 		spin_unlock_bh(&ifp->lock);
 		read_unlock_bh(&idev->lock);
 
@@ -2814,7 +2795,7 @@ static void addrconf_dad_start(struct inet6_ifaddr *ifp, u32 flags)
 		 * - otherwise, kill it.
 		 */
 		in6_ifa_hold(ifp);
-		addrconf_dad_stop(ifp, 0);
+		addrconf_dad_stop(ifp);
 		return;
 	}
 
@@ -2848,7 +2829,7 @@ static void addrconf_dad_timer(unsigned long data)
 		 * DAD was successful
 		 */
 
-		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC|IFA_F_DADFAILED);
+		ifp->flags &= ~(IFA_F_TENTATIVE|IFA_F_OPTIMISTIC);
 		spin_unlock_bh(&ifp->lock);
 		read_unlock_bh(&idev->lock);
 
@@ -3984,20 +3965,17 @@ static void ipv6_ifa_notify(int event, struct inet6_ifaddr *ifp)
 #ifdef CONFIG_SYSCTL
 
 static
-int addrconf_sysctl_forward(ctl_table *ctl, int write,
+int addrconf_sysctl_forward(ctl_table *ctl, int write, struct file * filp,
 			   void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *valp = ctl->data;
 	int val = *valp;
-	loff_t pos = *ppos;
 	int ret;
 
-	ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
+	ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 
 	if (write)
 		ret = addrconf_fixup_forwarding(ctl, valp, val);
-	if (ret)
-		*ppos = pos;
 	return ret;
 }
 
@@ -4034,40 +4012,6 @@ static int addrconf_sysctl_forward_strategy(ctl_table *table,
 
 	*valp = new;
 	return addrconf_fixup_forwarding(table, valp, val);
-}
-
-static
-struct ctl_table *addrconf_sysctl_mtu_init(struct ctl_table *newctl,
-					   const struct ctl_table *ctl)
-{
-	struct inet6_dev *idev = ctl->extra1;
-	static int min_mtu = IPV6_MIN_MTU;
-
-	*newctl = *ctl;
-	newctl->extra1 = &min_mtu;
-	newctl->extra2 = idev ? &idev->dev->mtu : NULL;
-	return newctl;
-}
-
-static
-int addrconf_sysctl_mtu(struct ctl_table *ctl, int write,
-			void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	struct ctl_table lctl;
-
-	return proc_dointvec_minmax(addrconf_sysctl_mtu_init(&lctl, ctl),
-				    write, buffer, lenp, ppos);
-}
-
-static int addrconf_sysctl_mtu_strategy(struct ctl_table *ctl,
-					void __user *oldval,
-					size_t __user *oldlenp,
-					void __user *newval, size_t newlen)
-{
-	struct ctl_table lctl;
-
-	return sysctl_intvec(addrconf_sysctl_mtu_init(&lctl, ctl),
-			     oldval, oldlenp, newval, newlen);
 }
 
 static void dev_disable_change(struct inet6_dev *idev)
@@ -4110,11 +4054,8 @@ static int addrconf_disable_ipv6(struct ctl_table *table, int *p, int old)
 	if (p == &net->ipv6.devconf_dflt->disable_ipv6)
 		return 0;
 
-	if (!rtnl_trylock()) {
-		/* Restore the original values before restarting */
-		*p = old;
+	if (!rtnl_trylock())
 		return restart_syscall();
-	}
 
 	if (p == &net->ipv6.devconf_all->disable_ipv6) {
 		__s32 newf = net->ipv6.devconf_all->disable_ipv6;
@@ -4128,20 +4069,17 @@ static int addrconf_disable_ipv6(struct ctl_table *table, int *p, int old)
 }
 
 static
-int addrconf_sysctl_disable(ctl_table *ctl, int write,
+int addrconf_sysctl_disable(ctl_table *ctl, int write, struct file * filp,
 			    void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *valp = ctl->data;
 	int val = *valp;
-	loff_t pos = *ppos;
 	int ret;
 
-	ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
+	ret = proc_dointvec(ctl, write, filp, buffer, lenp, ppos);
 
 	if (write)
 		ret = addrconf_disable_ipv6(ctl, valp, val);
-	if (ret)
-		*ppos = pos;
 	return ret;
 }
 
@@ -4176,8 +4114,7 @@ static struct addrconf_sysctl_table
 			.data		=	&ipv6_devconf.mtu6,
 			.maxlen		=	sizeof(int),
 			.mode		=	0644,
-			.proc_handler	=	addrconf_sysctl_mtu,
-			.strategy	=	addrconf_sysctl_mtu_strategy,
+			.proc_handler	=	proc_dointvec,
 		},
 		{
 			.ctl_name	=	NET_IPV6_ACCEPT_RA,

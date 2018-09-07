@@ -37,7 +37,6 @@ static const struct hid_blacklist {
 	{ USB_VENDOR_ID_HAPP, USB_DEVICE_ID_UGCI_FIGHTING, HID_QUIRK_BADPAD | HID_QUIRK_MULTI_INPUT },
 	{ USB_VENDOR_ID_NATSU, USB_DEVICE_ID_NATSU_GAMEPAD, HID_QUIRK_BADPAD },
 	{ USB_VENDOR_ID_NEC, USB_DEVICE_ID_NEC_USB_GAME_PAD, HID_QUIRK_BADPAD },
-	{ USB_VENDOR_ID_NEXTWINDOW, USB_DEVICE_ID_NEXTWINDOW_TOUCHSCREEN, HID_QUIRK_MULTI_INPUT},
 	{ USB_VENDOR_ID_SAITEK, USB_DEVICE_ID_SAITEK_RUMBLEPAD, HID_QUIRK_BADPAD },
 	{ USB_VENDOR_ID_TOPMAX, USB_DEVICE_ID_TOPMAX_COBRAPAD, HID_QUIRK_BADPAD },
 
@@ -65,7 +64,6 @@ static const struct hid_blacklist {
 	{ USB_VENDOR_ID_WISEGROUP_LTD, USB_DEVICE_ID_SMARTJOY_DUAL_PLUS, HID_QUIRK_NOGET | HID_QUIRK_MULTI_INPUT },
 	{ USB_VENDOR_ID_WISEGROUP_LTD2, USB_DEVICE_ID_SMARTJOY_DUAL_PLUS, HID_QUIRK_NOGET | HID_QUIRK_MULTI_INPUT },
 
-	{ USB_VENDOR_ID_SIGMA_MICRO, USB_DEVICE_ID_SIGMA_MICRO_KEYBOARD, HID_QUIRK_NO_INIT_REPORTS },
 	{ 0, 0 }
 };
 
@@ -203,7 +201,7 @@ int usbhid_quirks_init(char **quirks_param)
 	u32 quirks;
 	int n = 0, m;
 
-	for (; n < MAX_USBHID_BOOT_QUIRKS && quirks_param[n]; n++) {
+	for (; quirks_param[n] && n < MAX_USBHID_BOOT_QUIRKS; n++) {
 
 		m = sscanf(quirks_param[n], "0x%hx:0x%hx:0x%x",
 				&idVendor, &idProduct, &quirks);
@@ -282,7 +280,7 @@ u32 usbhid_lookup_quirk(const u16 idVendor, const u16 idProduct)
 	if (idVendor == USB_VENDOR_ID_NCR &&
 			idProduct >= USB_DEVICE_ID_NCR_FIRST &&
 			idProduct <= USB_DEVICE_ID_NCR_LAST)
-			return HID_QUIRK_NO_INIT_REPORTS;
+			return HID_QUIRK_NOGET;
 
 	down_read(&dquirks_rwsem);
 	bl_entry = usbhid_exists_dquirk(idVendor, idProduct);

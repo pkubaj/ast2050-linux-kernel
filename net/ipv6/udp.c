@@ -198,11 +198,13 @@ int udpv6_recvmsg(struct kiocb *iocb, struct sock *sk,
 	int peeked;
 	int err;
 	int is_udplite = IS_UDPLITE(sk);
-	bool checksum_valid = false;
 	int is_udp4;
 
+	if (addr_len)
+		*addr_len=sizeof(struct sockaddr_in6);
+
 	if (flags & MSG_ERRQUEUE)
-		return ipv6_recv_error(sk, msg, len, addr_len);
+		return ipv6_recv_error(sk, msg, len);
 
 try_again:
 	skb = __skb_recv_datagram(sk, flags | (noblock ? MSG_DONTWAIT : 0),
@@ -226,12 +228,11 @@ try_again:
 	 */
 
 	if (copied < ulen || UDP_SKB_CB(skb)->partial_cov) {
-		checksum_valid = !udp_lib_checksum_complete(skb);
-		if (!checksum_valid)
+		if (udp_lib_checksum_complete(skb))
 			goto csum_copy_err;
 	}
 
-	if (checksum_valid || skb_csum_unnecessary(skb))
+	if (skb_csum_unnecessary(skb))
 		err = skb_copy_datagram_iovec(skb, sizeof(struct udphdr),
 					      msg->msg_iov, copied       );
 	else {
@@ -272,7 +273,7 @@ try_again:
 			if (ipv6_addr_type(&sin6->sin6_addr) & IPV6_ADDR_LINKLOCAL)
 				sin6->sin6_scope_id = IP6CB(skb)->iif;
 		}
-		*addr_len = sizeof(*sin6);
+
 	}
 	if (is_udp4) {
 		if (inet->cmsg_flags)
@@ -303,9 +304,8 @@ csum_copy_err:
 	}
 	release_sock(sk);
 
-	/* starting over for a new packet, but check if we need to yield */
-	cond_resched();
-	msg->msg_flags &= ~MSG_TRUNC;
+	if (flags & MSG_DONTWAIT)
+		return -EAGAIN;
 	goto try_again;
 }
 
@@ -636,47 +636,6 @@ static void udp_v6_flush_pending_frames(struct sock *sk)
 	}
 }
 
-/**
- * 	udp6_hwcsum_outgoing  -  handle outgoing HW checksumming
- * 	@sk: 	socket we are sending on
- * 	@skb: 	sk_buff containing the filled-in UDP header
- * 	        (checksum field must be zeroed out)
- */
-static void udp6_hwcsum_outgoing(struct sock *sk, struct sk_buff *skb,
-				 const struct in6_addr *saddr,
-				 const struct in6_addr *daddr, int len)
-{
-	unsigned int offset;
-	struct udphdr *uh = udp_hdr(skb);
-	__wsum csum = 0;
-
-	if (skb_queue_len(&sk->sk_write_queue) == 1) {
-		/* Only one fragment on the socket.  */
-		skb->csum_start = skb_transport_header(skb) - skb->head;
-		skb->csum_offset = offsetof(struct udphdr, check);
-		uh->check = ~csum_ipv6_magic(saddr, daddr, len, IPPROTO_UDP, 0);
-	} else {
-		/*
-		 * HW-checksum won't work as there are two or more
-		 * fragments on the socket so that all csums of sk_buffs
-		 * should be together
-		 */
-		offset = skb_transport_offset(skb);
-		skb->csum = skb_checksum(skb, offset, skb->len - offset, 0);
-
-		skb->ip_summed = CHECKSUM_NONE;
-
-		skb_queue_walk(&sk->sk_write_queue, skb) {
-			csum = csum_add(csum, skb->csum);
-		}
-
-		uh->check = csum_ipv6_magic(saddr, daddr, len, IPPROTO_UDP,
-					    csum);
-		if (uh->check == 0)
-			uh->check = CSUM_MANGLED_0;
-	}
-}
-
 /*
  *	Sending
  */
@@ -687,15 +646,10 @@ static int udp_v6_push_pending_frames(struct sock *sk)
 	struct udphdr *uh;
 	struct udp_sock  *up = udp_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
-	struct flowi *fl;
+	struct flowi *fl = &inet->cork.fl;
 	int err = 0;
 	int is_udplite = IS_UDPLITE(sk);
 	__wsum csum = 0;
-
-	if (up->pending == AF_INET)
-		return udp_push_pending_frames(sk);
-
-	fl = &inet->cork.fl;
 
 	/* Grab the skbuff where UDP header space exists. */
 	if ((skb = skb_peek(&sk->sk_write_queue)) == NULL)
@@ -712,11 +666,7 @@ static int udp_v6_push_pending_frames(struct sock *sk)
 
 	if (is_udplite)
 		csum = udplite_csum_outgoing(sk, skb);
-	else if (skb->ip_summed == CHECKSUM_PARTIAL) { /* UDP hardware csum */
-		udp6_hwcsum_outgoing(sk, skb, &fl->fl6_src, &fl->fl6_dst,
-				     up->len);
-		goto send;
-	} else
+	 else
 		csum = udp_csum_outgoing(sk, skb);
 
 	/* add protocol-dependent pseudo-header */
@@ -725,20 +675,13 @@ static int udp_v6_push_pending_frames(struct sock *sk)
 	if (uh->check == 0)
 		uh->check = CSUM_MANGLED_0;
 
-send:
 	err = ip6_push_pending_frames(sk);
-	if (err) {
-		if (err == -ENOBUFS && !inet6_sk(sk)->recverr) {
-			UDP6_INC_STATS_USER(sock_net(sk),
-					    UDP_MIB_SNDBUFERRORS, is_udplite);
-			err = 0;
-		}
-	} else
-		UDP6_INC_STATS_USER(sock_net(sk),
-				    UDP_MIB_OUTDATAGRAMS, is_udplite);
 out:
 	up->len = 0;
 	up->pending = 0;
+	if (!err)
+		UDP6_INC_STATS_USER(sock_net(sk),
+				UDP_MIB_OUTDATAGRAMS, is_udplite);
 	return err;
 }
 
@@ -955,8 +898,11 @@ do_udp_sendmsg:
 			hlimit = ip6_dst_hoplimit(dst);
 	}
 
-	if (tclass < 0)
+	if (tclass < 0) {
 		tclass = np->tclass;
+		if (tclass < 0)
+			tclass = 0;
+	}
 
 	if (msg->msg_flags&MSG_CONFIRM)
 		goto do_confirm;
@@ -1047,7 +993,7 @@ void udpv6_destroy_sock(struct sock *sk)
  *	Socket option code for UDP
  */
 int udpv6_setsockopt(struct sock *sk, int level, int optname,
-		     char __user *optval, unsigned int optlen)
+		     char __user *optval, int optlen)
 {
 	if (level == SOL_UDP  ||  level == SOL_UDPLITE)
 		return udp_lib_setsockopt(sk, level, optname, optval, optlen,
@@ -1057,7 +1003,7 @@ int udpv6_setsockopt(struct sock *sk, int level, int optname,
 
 #ifdef CONFIG_COMPAT
 int compat_udpv6_setsockopt(struct sock *sk, int level, int optname,
-			    char __user *optval, unsigned int optlen)
+			    char __user *optval, int optlen)
 {
 	if (level == SOL_UDP  ||  level == SOL_UDPLITE)
 		return udp_lib_setsockopt(sk, level, optname, optval, optlen,
@@ -1084,102 +1030,9 @@ int compat_udpv6_getsockopt(struct sock *sk, int level, int optname,
 }
 #endif
 
-static int udp6_ufo_send_check(struct sk_buff *skb)
-{
-	struct ipv6hdr *ipv6h;
-	struct udphdr *uh;
-
-	if (!pskb_may_pull(skb, sizeof(*uh)))
-		return -EINVAL;
-
-	ipv6h = ipv6_hdr(skb);
-	uh = udp_hdr(skb);
-
-	uh->check = ~csum_ipv6_magic(&ipv6h->saddr, &ipv6h->daddr, skb->len,
-				     IPPROTO_UDP, 0);
-	skb->csum_start = skb_transport_header(skb) - skb->head;
-	skb->csum_offset = offsetof(struct udphdr, check);
-	skb->ip_summed = CHECKSUM_PARTIAL;
-	return 0;
-}
-
-static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb, int features)
-{
-	struct sk_buff *segs = ERR_PTR(-EINVAL);
-	unsigned int mss;
-	unsigned int unfrag_ip6hlen, unfrag_len;
-	struct frag_hdr *fptr;
-	u8 *mac_start, *prevhdr;
-	u8 nexthdr;
-	u8 frag_hdr_sz = sizeof(struct frag_hdr);
-	int offset;
-	__wsum csum;
-
-	mss = skb_shinfo(skb)->gso_size;
-	if (unlikely(skb->len <= mss))
-		goto out;
-
-	if (skb_gso_ok(skb, features | NETIF_F_GSO_ROBUST)) {
-		/* Packet is from an untrusted source, reset gso_segs. */
-		int type = skb_shinfo(skb)->gso_type;
-
-		if (unlikely(type & ~(SKB_GSO_UDP | SKB_GSO_DODGY) ||
-			     !(type & (SKB_GSO_UDP))))
-			goto out;
-
-		skb_shinfo(skb)->gso_segs = DIV_ROUND_UP(skb->len, mss);
-
-		segs = NULL;
-		goto out;
-	}
-
-	/* Do software UFO. Complete and fill in the UDP checksum as HW cannot
-	 * do checksum of UDP packets sent as multiple IP fragments.
-	 */
-	offset = skb->csum_start - skb_headroom(skb);
-	csum = skb_checksum(skb, offset, skb->len- offset, 0);
-	offset += skb->csum_offset;
-	*(__sum16 *)(skb->data + offset) = csum_fold(csum);
-	skb->ip_summed = CHECKSUM_NONE;
-
-	/* Check if there is enough headroom to insert fragment header. */
-	if ((skb_mac_header(skb) < skb->head + frag_hdr_sz) &&
-	    pskb_expand_head(skb, frag_hdr_sz, 0, GFP_ATOMIC))
-		goto out;
-
-	/* Find the unfragmentable header and shift it left by frag_hdr_sz
-	 * bytes to insert fragment header.
-	 */
-	unfrag_ip6hlen = ip6_find_1stfragopt(skb, &prevhdr);
-	nexthdr = *prevhdr;
-	*prevhdr = NEXTHDR_FRAGMENT;
-	unfrag_len = skb_network_header(skb) - skb_mac_header(skb) +
-		     unfrag_ip6hlen;
-	mac_start = skb_mac_header(skb);
-	memmove(mac_start-frag_hdr_sz, mac_start, unfrag_len);
-
-	skb->mac_header -= frag_hdr_sz;
-	skb->network_header -= frag_hdr_sz;
-
-	fptr = (struct frag_hdr *)(skb_network_header(skb) + unfrag_ip6hlen);
-	fptr->nexthdr = nexthdr;
-	fptr->reserved = 0;
-	ipv6_select_ident(fptr, (struct rt6_info *)skb_dst(skb));
-
-	/* Fragment the skb. ipv6 header and the remaining fields of the
-	 * fragment header are updated in ipv6_gso_segment()
-	 */
-	segs = skb_segment(skb, features);
-
-out:
-	return segs;
-}
-
-static const struct inet6_protocol udpv6_protocol = {
+static struct inet6_protocol udpv6_protocol = {
 	.handler	=	udpv6_rcv,
 	.err_handler	=	udpv6_err,
-	.gso_send_check =	udp6_ufo_send_check,
-	.gso_segment	=	udp6_ufo_fragment,
 	.flags		=	INET6_PROTO_NOPOLICY|INET6_PROTO_FINAL,
 };
 

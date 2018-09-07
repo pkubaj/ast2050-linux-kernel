@@ -411,8 +411,7 @@ static void catc_tx_done(struct urb *urb)
 	spin_unlock_irqrestore(&catc->tx_lock, flags);
 }
 
-static netdev_tx_t catc_start_xmit(struct sk_buff *skb,
-					 struct net_device *netdev)
+static int catc_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct catc *catc = netdev_priv(netdev);
 	unsigned long flags;
@@ -449,7 +448,7 @@ static netdev_tx_t catc_start_xmit(struct sk_buff *skb,
 
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void catc_tx_timeout(struct net_device *netdev)
@@ -698,7 +697,7 @@ static int catc_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 	return 0;
 }
 
-static const struct ethtool_ops ops = {
+static struct ethtool_ops ops = {
 	.get_drvinfo = catc_get_drvinfo,
 	.get_settings = catc_get_settings,
 	.get_link = ethtool_op_get_link

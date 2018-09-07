@@ -304,7 +304,7 @@ enum e1e_registers {
 #define E1000_KMRNCTRLSTA_DIAG_OFFSET	0x3    /* Kumeran Diagnostic */
 #define E1000_KMRNCTRLSTA_DIAG_NELPBK	0x1000 /* Nearend Loopback mode */
 #define E1000_KMRNCTRLSTA_K1_CONFIG	0x7
-#define E1000_KMRNCTRLSTA_K1_ENABLE	0x0002
+#define E1000_KMRNCTRLSTA_K1_ENABLE	0x140E
 #define E1000_KMRNCTRLSTA_K1_DISABLE	0x1400
 
 #define IFE_PHY_EXTENDED_STATUS_CONTROL	0x10
@@ -356,7 +356,6 @@ enum e1e_registers {
 #define E1000_DEV_ID_80003ES2LAN_COPPER_SPT	0x10BA
 #define E1000_DEV_ID_80003ES2LAN_SERDES_SPT	0x10BB
 
-#define E1000_DEV_ID_ICH8_82567V_3		0x1501
 #define E1000_DEV_ID_ICH8_IGP_M_AMT		0x1049
 #define E1000_DEV_ID_ICH8_IGP_AMT		0x104A
 #define E1000_DEV_ID_ICH8_IGP_C			0x104B
@@ -765,13 +764,11 @@ struct e1000_phy_operations {
 	s32  (*get_cable_length)(struct e1000_hw *);
 	s32  (*get_phy_info)(struct e1000_hw *);
 	s32  (*read_phy_reg)(struct e1000_hw *, u32, u16 *);
-	s32  (*read_phy_reg_locked)(struct e1000_hw *, u32, u16 *);
 	void (*release_phy)(struct e1000_hw *);
 	s32  (*reset_phy)(struct e1000_hw *);
 	s32  (*set_d0_lplu_state)(struct e1000_hw *, bool);
 	s32  (*set_d3_lplu_state)(struct e1000_hw *, bool);
 	s32  (*write_phy_reg)(struct e1000_hw *, u32, u16);
-	s32  (*write_phy_reg_locked)(struct e1000_hw *, u32, u16);
 	s32  (*cfg_on_link_up)(struct e1000_hw *);
 };
 
@@ -904,7 +901,6 @@ struct e1000_shadow_ram {
 struct e1000_dev_spec_ich8lan {
 	bool kmrn_lock_loss_workaround_enabled;
 	struct e1000_shadow_ram shadow_ram[E1000_ICH8_SHADOW_RAM_WORDS];
-	bool nvm_k1_enabled;
 };
 
 struct e1000_hw {

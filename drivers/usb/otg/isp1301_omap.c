@@ -117,7 +117,24 @@ static void enable_vbus_draw(struct isp1301 *isp, unsigned mA)
 		pr_debug("  VBUS %d mA error %d\n", mA, status);
 }
 
-#else
+static void enable_vbus_source(struct isp1301 *isp)
+{
+	/* this board won't supply more than 8mA vbus power.
+	 * some boards can switch a 100ma "unit load" (or more).
+	 */
+}
+
+
+/* products will deliver OTG messages with LEDs, GUI, etc */
+static inline void notresponding(struct isp1301 *isp)
+{
+	printk(KERN_NOTICE "OTG device not responding.\n");
+}
+
+
+#endif
+
+#if defined(CONFIG_MACH_OMAP_H4)
 
 static void enable_vbus_draw(struct isp1301 *isp, unsigned mA)
 {
@@ -126,8 +143,6 @@ static void enable_vbus_draw(struct isp1301 *isp, unsigned mA)
 	 * unless the OTG port is used only in B-peripheral mode.
 	 */
 }
-
-#endif
 
 static void enable_vbus_source(struct isp1301 *isp)
 {
@@ -143,6 +158,8 @@ static inline void notresponding(struct isp1301 *isp)
 	printk(KERN_NOTICE "OTG device not responding.\n");
 }
 
+
+#endif
 
 /*-------------------------------------------------------------------------*/
 

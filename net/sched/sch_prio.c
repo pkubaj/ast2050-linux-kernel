@@ -262,6 +262,9 @@ static int prio_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
 	struct prio_sched_data *q = qdisc_priv(sch);
 	unsigned long band = arg - 1;
 
+	if (band >= q->bands)
+		return -EINVAL;
+
 	if (new == NULL)
 		new = &noop_qdisc;
 
@@ -280,6 +283,9 @@ prio_leaf(struct Qdisc *sch, unsigned long arg)
 {
 	struct prio_sched_data *q = qdisc_priv(sch);
 	unsigned long band = arg - 1;
+
+	if (band >= q->bands)
+		return NULL;
 
 	return q->queues[band];
 }
@@ -305,13 +311,35 @@ static void prio_put(struct Qdisc *q, unsigned long cl)
 	return;
 }
 
+static int prio_change(struct Qdisc *sch, u32 handle, u32 parent, struct nlattr **tca, unsigned long *arg)
+{
+	unsigned long cl = *arg;
+	struct prio_sched_data *q = qdisc_priv(sch);
+
+	if (cl - 1 > q->bands)
+		return -ENOENT;
+	return 0;
+}
+
+static int prio_delete(struct Qdisc *sch, unsigned long cl)
+{
+	struct prio_sched_data *q = qdisc_priv(sch);
+	if (cl - 1 > q->bands)
+		return -ENOENT;
+	return 0;
+}
+
+
 static int prio_dump_class(struct Qdisc *sch, unsigned long cl, struct sk_buff *skb,
 			   struct tcmsg *tcm)
 {
 	struct prio_sched_data *q = qdisc_priv(sch);
 
+	if (cl - 1 > q->bands)
+		return -ENOENT;
 	tcm->tcm_handle |= TC_H_MIN(cl);
-	tcm->tcm_info = q->queues[cl-1]->handle;
+	if (q->queues[cl-1])
+		tcm->tcm_info = q->queues[cl-1]->handle;
 	return 0;
 }
 
@@ -322,7 +350,6 @@ static int prio_dump_class_stats(struct Qdisc *sch, unsigned long cl,
 	struct Qdisc *cl_q;
 
 	cl_q = q->queues[cl - 1];
-	cl_q->qstats.qlen = cl_q->q.qlen;
 	if (gnet_stats_copy_basic(d, &cl_q->bstats) < 0 ||
 	    gnet_stats_copy_queue(d, &cl_q->qstats) < 0)
 		return -1;
@@ -365,6 +392,8 @@ static const struct Qdisc_class_ops prio_class_ops = {
 	.leaf		=	prio_leaf,
 	.get		=	prio_get,
 	.put		=	prio_put,
+	.change		=	prio_change,
+	.delete		=	prio_delete,
 	.walk		=	prio_walk,
 	.tcf_chain	=	prio_find_tcf,
 	.bind_tcf	=	prio_bind,

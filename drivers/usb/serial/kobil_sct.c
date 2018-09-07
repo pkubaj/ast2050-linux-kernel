@@ -70,7 +70,8 @@ static int debug;
 /* Function prototypes */
 static int  kobil_startup(struct usb_serial *serial);
 static void kobil_release(struct usb_serial *serial);
-static int  kobil_open(struct tty_struct *tty, struct usb_serial_port *port);
+static int  kobil_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp);
 static void kobil_close(struct usb_serial_port *port);
 static int  kobil_write(struct tty_struct *tty, struct usb_serial_port *port,
 			 const unsigned char *buf, int count);
@@ -220,7 +221,8 @@ static void kobil_init_termios(struct tty_struct *tty)
 	tty->termios->c_oflag &= ~ONLCR;
 }
 
-static int kobil_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int kobil_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	int result = 0;
 	struct kobil_private *priv;
@@ -345,8 +347,7 @@ static void kobil_close(struct usb_serial_port *port)
 
 	/* FIXME: Add rts/dtr methods */
 	if (port->write_urb) {
-		usb_poison_urb(port->write_urb);
-		kfree(port->write_urb->transfer_buffer);
+		usb_kill_urb(port->write_urb);
 		usb_free_urb(port->write_urb);
 		port->write_urb = NULL;
 	}
@@ -372,7 +373,7 @@ static void kobil_read_int_callback(struct urb *urb)
 	}
 
 	tty = tty_port_tty_get(&port->port);
-	if (tty && urb->actual_length) {
+	if (urb->actual_length) {
 
 		/* BEGIN DEBUG */
 		/*
@@ -464,7 +465,7 @@ static int kobil_write(struct tty_struct *tty, struct usb_serial_port *port,
 			);
 
 			priv->cur_pos = priv->cur_pos + length;
-			result = usb_submit_urb(port->write_urb, GFP_ATOMIC);
+			result = usb_submit_urb(port->write_urb, GFP_NOIO);
 			dbg("%s - port %d Send write URB returns: %i",
 					__func__, port->number, result);
 			todo = priv->filled - priv->cur_pos;
@@ -488,7 +489,7 @@ static int kobil_write(struct tty_struct *tty, struct usb_serial_port *port,
 			port->interrupt_in_urb->dev = port->serial->dev;
 
 			result = usb_submit_urb(port->interrupt_in_urb,
-								GFP_ATOMIC);
+								GFP_NOIO);
 			dbg("%s - port %d Send read URB returns: %i",
 					__func__, port->number, result);
 		}

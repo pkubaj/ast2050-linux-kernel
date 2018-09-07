@@ -60,7 +60,6 @@
 #include <net/timewait_sock.h>
 #include <net/netdma.h>
 #include <net/inet_common.h>
-#include <net/secure_seq.h>
 
 #include <asm/uaccess.h>
 
@@ -76,11 +75,11 @@ static void	tcp_v6_reqsk_send_ack(struct sock *sk, struct sk_buff *skb,
 
 static int	tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb);
 
-static const struct inet_connection_sock_af_ops ipv6_mapped;
-static const struct inet_connection_sock_af_ops ipv6_specific;
+static struct inet_connection_sock_af_ops ipv6_mapped;
+static struct inet_connection_sock_af_ops ipv6_specific;
 #ifdef CONFIG_TCP_MD5SIG
-static const struct tcp_sock_af_ops tcp_sock_ipv6_specific;
-static const struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific;
+static struct tcp_sock_af_ops tcp_sock_ipv6_specific;
+static struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific;
 #else
 static struct tcp_md5sig_key *tcp_v6_md5_do_lookup(struct sock *sk,
 						   struct in6_addr *addr)
@@ -592,7 +591,7 @@ static int tcp_v6_md5_do_add(struct sock *sk, struct in6_addr *peer,
 			}
 			sk->sk_route_caps &= ~NETIF_F_GSO_MASK;
 		}
-		if (tcp_alloc_md5sig_pool(sk) == NULL) {
+		if (tcp_alloc_md5sig_pool() == NULL) {
 			kfree(newkey);
 			return -ENOMEM;
 		}
@@ -895,7 +894,7 @@ struct request_sock_ops tcp6_request_sock_ops __read_mostly = {
 };
 
 #ifdef CONFIG_TCP_MD5SIG
-static const struct tcp_request_sock_ops tcp_request_sock_ipv6_ops = {
+static struct tcp_request_sock_ops tcp_request_sock_ipv6_ops = {
 	.md5_lookup	=	tcp_v6_reqsk_md5_lookup,
 	.calc_md5_hash	=	tcp_v6_md5_hash_skb,
 };
@@ -1004,7 +1003,6 @@ static void tcp_v6_send_response(struct sk_buff *skb, u32 seq, u32 ack, u32 win,
 	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr) + tot_len);
 
 	t1 = (struct tcphdr *) skb_push(buff, tot_len);
-	skb_reset_transport_header(skb);
 
 	/* Swap the send and the receive. */
 	memset(t1, 0, sizeof(*t1));
@@ -1391,7 +1389,7 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 
 	   First: no IPv4 options.
 	 */
-	newinet->inet_opt = NULL;
+	newinet->opt = NULL;
 	newnp->ipv6_fl_list = NULL;
 
 	/* Clone RX bits */
@@ -1762,7 +1760,7 @@ static int tcp_v6_remember_stamp(struct sock *sk)
 	return 0;
 }
 
-static const struct inet_connection_sock_af_ops ipv6_specific = {
+static struct inet_connection_sock_af_ops ipv6_specific = {
 	.queue_xmit	   = inet6_csk_xmit,
 	.send_check	   = tcp_v6_send_check,
 	.rebuild_header	   = inet6_sk_rebuild_header,
@@ -1782,7 +1780,7 @@ static const struct inet_connection_sock_af_ops ipv6_specific = {
 };
 
 #ifdef CONFIG_TCP_MD5SIG
-static const struct tcp_sock_af_ops tcp_sock_ipv6_specific = {
+static struct tcp_sock_af_ops tcp_sock_ipv6_specific = {
 	.md5_lookup	=	tcp_v6_md5_lookup,
 	.calc_md5_hash	=	tcp_v6_md5_hash_skb,
 	.md5_add	=	tcp_v6_md5_add_func,
@@ -1794,7 +1792,7 @@ static const struct tcp_sock_af_ops tcp_sock_ipv6_specific = {
  *	TCP over IPv4 via INET6 API
  */
 
-static const struct inet_connection_sock_af_ops ipv6_mapped = {
+static struct inet_connection_sock_af_ops ipv6_mapped = {
 	.queue_xmit	   = ip_queue_xmit,
 	.send_check	   = tcp_v4_send_check,
 	.rebuild_header	   = inet_sk_rebuild_header,
@@ -1814,7 +1812,7 @@ static const struct inet_connection_sock_af_ops ipv6_mapped = {
 };
 
 #ifdef CONFIG_TCP_MD5SIG
-static const struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific = {
+static struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific = {
 	.md5_lookup	=	tcp_v4_md5_lookup,
 	.calc_md5_hash	=	tcp_v4_md5_hash_skb,
 	.md5_add	=	tcp_v6_md5_add_func,
@@ -1847,7 +1845,7 @@ static int tcp_v6_init_sock(struct sock *sk)
 	/* See draft-stevens-tcpca-spec-01 for discussion of the
 	 * initialization of these values.
 	 */
-	tp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
+	tp->snd_ssthresh = 0x7fffffff;
 	tp->snd_cwnd_clamp = ~0;
 	tp->mss_cache = 536;
 
@@ -1970,8 +1968,7 @@ static void get_tcp6_sock(struct seq_file *seq, struct sock *sp, int i)
 		   jiffies_to_clock_t(icsk->icsk_rto),
 		   jiffies_to_clock_t(icsk->icsk_ack.ato),
 		   (icsk->icsk_ack.quick << 1 ) | icsk->icsk_ack.pingpong,
-		   tp->snd_cwnd,
-		   tcp_in_initial_slowstart(tp) ? -1 : tp->snd_ssthresh
+		   tp->snd_cwnd, tp->snd_ssthresh>=0xFFFF?-1:tp->snd_ssthresh
 		   );
 }
 
@@ -2095,7 +2092,7 @@ struct proto tcpv6_prot = {
 #endif
 };
 
-static const struct inet6_protocol tcpv6_protocol = {
+static struct inet6_protocol tcpv6_protocol = {
 	.handler	=	tcp_v6_rcv,
 	.err_handler	=	tcp_v6_err,
 	.gso_send_check	=	tcp_v6_gso_send_check,

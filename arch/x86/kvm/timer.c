@@ -9,16 +9,12 @@ static int __kvm_timer_fn(struct kvm_vcpu *vcpu, struct kvm_timer *ktimer)
 	int restart_timer = 0;
 	wait_queue_head_t *q = &vcpu->wq;
 
-	/*
-	 * There is a race window between reading and incrementing, but we do
-	 * not care about potentially loosing timer events in the !reinject
-	 * case anyway.
-	 */
-	if (ktimer->reinject || !atomic_read(&ktimer->pending)) {
-		atomic_inc(&ktimer->pending);
-		/* FIXME: this code should not know anything about vcpus */
+	/* FIXME: this code should not know anything about vcpus */
+	if (!atomic_inc_and_test(&ktimer->pending))
 		set_bit(KVM_REQ_PENDING_TIMER, &vcpu->requests);
-	}
+
+	if (!ktimer->reinject)
+		atomic_set(&ktimer->pending, 1);
 
 	if (waitqueue_active(q))
 		wake_up_interruptible(q);
@@ -37,7 +33,7 @@ enum hrtimer_restart kvm_timer_fn(struct hrtimer *data)
 	struct kvm_vcpu *vcpu;
 	struct kvm_timer *ktimer = container_of(data, struct kvm_timer, timer);
 
-	vcpu = ktimer->vcpu;
+	vcpu = ktimer->kvm->vcpus[ktimer->vcpu_id];
 	if (!vcpu)
 		return HRTIMER_NORESTART;
 

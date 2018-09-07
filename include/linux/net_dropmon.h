@@ -3,6 +3,7 @@
 
 #include <linux/types.h>
 #include <linux/netlink.h>
+#include <linux/types.h>
 
 struct net_dm_drop_point {
 	__u8 pc[8];

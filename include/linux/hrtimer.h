@@ -91,6 +91,7 @@ enum hrtimer_restart {
  * @function:	timer expiry callback function
  * @base:	pointer to the timer base (per cpu and per clock)
  * @state:	state information (See bit values above)
+ * @cb_entry:	list head to enqueue an expired timer into the callback list
  * @start_site:	timer statistics field to store the site where the timer
  *		was started
  * @start_comm: timer statistics field to store the name of the process which
@@ -107,6 +108,7 @@ struct hrtimer {
 	enum hrtimer_restart		(*function)(struct hrtimer *);
 	struct hrtimer_clock_base	*base;
 	unsigned long			state;
+	struct list_head		cb_entry;
 #ifdef CONFIG_TIMER_STATS
 	int				start_pid;
 	void				*start_site;
@@ -159,28 +161,21 @@ struct hrtimer_clock_base {
  *			and timers
  * @clock_base:		array of clock bases for this cpu
  * @curr_timer:		the timer which is executing a callback right now
- * @clock_was_set:	Indicates that clock was set from irq context.
  * @expires_next:	absolute time of the next event which was scheduled
  *			via clock_set_next_event()
  * @hres_active:	State of high resolution mode
- * @hang_detected:	The last hrtimer interrupt detected a hang
- * @nr_events:		Total number of hrtimer interrupt events
- * @nr_retries:		Total number of hrtimer interrupt retries
- * @nr_hangs:		Total number of hrtimer interrupt hangs
- * @max_hang_time:	Maximum time spent in hrtimer_interrupt
+ * @check_clocks:	Indictator, when set evaluate time source and clock
+ *			event devices whether high resolution mode can be
+ *			activated.
+ * @nr_events:		Total number of timer interrupt events
  */
 struct hrtimer_cpu_base {
 	spinlock_t			lock;
 	struct hrtimer_clock_base	clock_base[HRTIMER_MAX_CLOCK_BASES];
-	unsigned int			clock_was_set;
 #ifdef CONFIG_HIGH_RES_TIMERS
 	ktime_t				expires_next;
 	int				hres_active;
-	int				hang_detected;
 	unsigned long			nr_events;
-	unsigned long			nr_retries;
-	unsigned long			nr_hangs;
-	ktime_t				max_hang_time;
 #endif
 };
 
@@ -282,8 +277,6 @@ extern void hrtimer_peek_ahead_timers(void);
 # define MONOTONIC_RES_NSEC	HIGH_RES_NSEC
 # define KTIME_MONOTONIC_RES	KTIME_HIGH_RES
 
-extern void clock_was_set_delayed(void);
-
 #else
 
 # define MONOTONIC_RES_NSEC	LOW_RES_NSEC
@@ -312,14 +305,11 @@ static inline int hrtimer_is_hres_active(struct hrtimer *timer)
 {
 	return 0;
 }
-
-static inline void clock_was_set_delayed(void) { }
-
 #endif
 
 extern ktime_t ktime_get(void);
 extern ktime_t ktime_get_real(void);
-extern ktime_t ktime_get_update_offsets(ktime_t *offs_real);
+
 
 DECLARE_PER_CPU(struct tick_device, tick_cpu_device);
 

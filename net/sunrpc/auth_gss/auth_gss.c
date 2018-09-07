@@ -89,8 +89,8 @@ static struct rpc_wait_queue pipe_version_rpc_waitqueue;
 static DECLARE_WAIT_QUEUE_HEAD(pipe_version_waitqueue);
 
 static void gss_free_ctx(struct gss_cl_ctx *);
-static const struct rpc_pipe_ops gss_upcall_ops_v0;
-static const struct rpc_pipe_ops gss_upcall_ops_v1;
+static struct rpc_pipe_ops gss_upcall_ops_v0;
+static struct rpc_pipe_ops gss_upcall_ops_v1;
 
 static inline struct gss_cl_ctx *
 gss_get_ctx(struct gss_cl_ctx *ctx)
@@ -548,13 +548,13 @@ retry:
 	}
 	inode = &gss_msg->inode->vfs_inode;
 	for (;;) {
-		prepare_to_wait(&gss_msg->waitqueue, &wait, TASK_KILLABLE);
+		prepare_to_wait(&gss_msg->waitqueue, &wait, TASK_INTERRUPTIBLE);
 		spin_lock(&inode->i_lock);
 		if (gss_msg->ctx != NULL || gss_msg->msg.errno < 0) {
 			break;
 		}
 		spin_unlock(&inode->i_lock);
-		if (fatal_signal_pending(current)) {
+		if (signalled()) {
 			err = -ERESTARTSYS;
 			goto out_intr;
 		}
@@ -644,22 +644,7 @@ gss_pipe_downcall(struct file *filp, const char __user *src, size_t mlen)
 	p = gss_fill_context(p, end, ctx, gss_msg->auth->mech);
 	if (IS_ERR(p)) {
 		err = PTR_ERR(p);
-		switch (err) {
-		case -EACCES:
-			gss_msg->msg.errno = err;
-			err = mlen;
-			break;
-		case -EFAULT:
-		case -ENOMEM:
-		case -EINVAL:
-		case -ENOSYS:
-			gss_msg->msg.errno = -EAGAIN;
-			break;
-		default:
-			printk(KERN_CRIT "%s: bad return from "
-				"gss_fill_context: %ld\n", __func__, err);
-			BUG();
-		}
+		gss_msg->msg.errno = (err == -EAGAIN) ? -EAGAIN : -EACCES;
 		goto err_release_msg;
 	}
 	gss_msg->ctx = gss_get_ctx(ctx);
@@ -717,18 +702,17 @@ gss_pipe_release(struct inode *inode)
 	struct rpc_inode *rpci = RPC_I(inode);
 	struct gss_upcall_msg *gss_msg;
 
-restart:
 	spin_lock(&inode->i_lock);
-	list_for_each_entry(gss_msg, &rpci->in_downcall, list) {
+	while (!list_empty(&rpci->in_downcall)) {
 
-		if (!list_empty(&gss_msg->msg.list))
-			continue;
+		gss_msg = list_entry(rpci->in_downcall.next,
+				struct gss_upcall_msg, list);
 		gss_msg->msg.errno = -EPIPE;
 		atomic_inc(&gss_msg->count);
 		__gss_unhash_msg(gss_msg);
 		spin_unlock(&inode->i_lock);
 		gss_release_msg(gss_msg);
-		goto restart;
+		spin_lock(&inode->i_lock);
 	}
 	spin_unlock(&inode->i_lock);
 
@@ -793,7 +777,7 @@ gss_create(struct rpc_clnt *clnt, rpc_authflavor_t flavor)
 	 * that we supported only the old pipe.  So we instead create
 	 * the new pipe first.
 	 */
-	gss_auth->dentry[1] = rpc_mkpipe(clnt->cl_path.dentry,
+	gss_auth->dentry[1] = rpc_mkpipe(clnt->cl_dentry,
 					 "gssd",
 					 clnt, &gss_upcall_ops_v1,
 					 RPC_PIPE_WAIT_FOR_OPEN);
@@ -802,7 +786,7 @@ gss_create(struct rpc_clnt *clnt, rpc_authflavor_t flavor)
 		goto err_put_mech;
 	}
 
-	gss_auth->dentry[0] = rpc_mkpipe(clnt->cl_path.dentry,
+	gss_auth->dentry[0] = rpc_mkpipe(clnt->cl_dentry,
 					 gss_auth->mech->gm_name,
 					 clnt, &gss_upcall_ops_v0,
 					 RPC_PIPE_WAIT_FOR_OPEN);
@@ -1274,8 +1258,9 @@ alloc_enc_pages(struct rpc_rqst *rqstp)
 	rqstp->rq_release_snd_buf = priv_release_snd_buf;
 	return 0;
 out_free:
-	rqstp->rq_enc_pages_num = i;
-	priv_release_snd_buf(rqstp);
+	for (i--; i >= 0; i--) {
+		__free_page(rqstp->rq_enc_pages[i]);
+	}
 out:
 	return -EAGAIN;
 }
@@ -1522,7 +1507,7 @@ static const struct rpc_credops gss_nullops = {
 	.crunwrap_resp	= gss_unwrap_resp,
 };
 
-static const struct rpc_pipe_ops gss_upcall_ops_v0 = {
+static struct rpc_pipe_ops gss_upcall_ops_v0 = {
 	.upcall		= gss_pipe_upcall,
 	.downcall	= gss_pipe_downcall,
 	.destroy_msg	= gss_pipe_destroy_msg,
@@ -1530,7 +1515,7 @@ static const struct rpc_pipe_ops gss_upcall_ops_v0 = {
 	.release_pipe	= gss_pipe_release,
 };
 
-static const struct rpc_pipe_ops gss_upcall_ops_v1 = {
+static struct rpc_pipe_ops gss_upcall_ops_v1 = {
 	.upcall		= gss_pipe_upcall,
 	.downcall	= gss_pipe_downcall,
 	.destroy_msg	= gss_pipe_destroy_msg,

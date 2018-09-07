@@ -154,7 +154,6 @@ int qe_get_snum(void);
 void qe_put_snum(u8 snum);
 unsigned int qe_get_num_of_risc(void);
 unsigned int qe_get_num_of_snums(void);
-int qe_alive_during_sleep(void);
 
 /* we actually use cpm_muram implementation, define this for convenience */
 #define qe_muram_init cpm_muram_init

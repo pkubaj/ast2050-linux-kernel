@@ -834,7 +834,7 @@ static void handle_topology_map(struct fw_card *card, struct fw_request *request
 }
 
 static struct fw_address_handler topology_map = {
-	.length			= 0x400,
+	.length			= 0x200,
 	.address_callback	= handle_topology_map,
 };
 

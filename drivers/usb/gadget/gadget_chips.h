@@ -173,10 +173,11 @@
 // CONFIG_USB_GADGET_AU1X00
 // ...
 
-#ifdef CONFIG_USB_GADGET_R8A66597
-#define	gadget_is_r8a66597(g)	!strcmp("r8a66597_udc", (g)->name)
+/* ASPEED BMC Support */
+#ifdef CONFIG_USB_GADGET_ASPEED_AST
+#define gadget_is_aspeed(g)	!strcmp("aspeed_udc", (g)->name)
 #else
-#define	gadget_is_r8a66597(g)	0
+#define gadget_is_aspeed(g)	0
 #endif
 
 
@@ -245,8 +246,9 @@ static inline int usb_gadget_controller_number(struct usb_gadget *gadget)
 		return 0x23;
 	else if (gadget_is_langwell(gadget))
 		return 0x24;
-	else if (gadget_is_r8a66597(gadget))
-		return 0x25;
+	else if (gadget_is_aspeed(gadget))
+		return 0x24;
+
 	return -ENOENT;
 }
 

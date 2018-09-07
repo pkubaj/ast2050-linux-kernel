@@ -262,7 +262,7 @@ int run_hook(const char *index_file, const char *name, ...)
 {
 	struct child_process hook;
 	const char **argv = NULL, *env[2];
-	char idx[PATH_MAX];
+	char index[PATH_MAX];
 	va_list args;
 	int ret;
 	size_t i = 0, alloc = 0;
@@ -284,8 +284,8 @@ int run_hook(const char *index_file, const char *name, ...)
 	hook.no_stdin = 1;
 	hook.stdout_to_stderr = 1;
 	if (index_file) {
-		snprintf(idx, sizeof(idx), "PERF_INDEX_FILE=%s", index_file);
-		env[0] = idx;
+		snprintf(index, sizeof(index), "PERF_INDEX_FILE=%s", index_file);
+		env[0] = index;
 		env[1] = NULL;
 		hook.env = env;
 	}

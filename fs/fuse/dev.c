@@ -250,7 +250,7 @@ static void queue_request(struct fuse_conn *fc, struct fuse_req *req)
 
 static void flush_bg_queue(struct fuse_conn *fc)
 {
-	while (fc->active_background < fc->max_background &&
+	while (fc->active_background < FUSE_MAX_BACKGROUND &&
 	       !list_empty(&fc->bg_queue)) {
 		struct fuse_req *req;
 
@@ -280,11 +280,11 @@ __releases(&fc->lock)
 	list_del(&req->intr_entry);
 	req->state = FUSE_REQ_FINISHED;
 	if (req->background) {
-		if (fc->num_background == fc->max_background) {
+		if (fc->num_background == FUSE_MAX_BACKGROUND) {
 			fc->blocked = 0;
 			wake_up_all(&fc->blocked_waitq);
 		}
-		if (fc->num_background == fc->congestion_threshold &&
+		if (fc->num_background == FUSE_CONGESTION_THRESHOLD &&
 		    fc->connected && fc->bdi_initialized) {
 			clear_bdi_congested(&fc->bdi, BLK_RW_SYNC);
 			clear_bdi_congested(&fc->bdi, BLK_RW_ASYNC);
@@ -410,9 +410,9 @@ static void fuse_request_send_nowait_locked(struct fuse_conn *fc,
 {
 	req->background = 1;
 	fc->num_background++;
-	if (fc->num_background == fc->max_background)
+	if (fc->num_background == FUSE_MAX_BACKGROUND)
 		fc->blocked = 1;
-	if (fc->num_background == fc->congestion_threshold &&
+	if (fc->num_background == FUSE_CONGESTION_THRESHOLD &&
 	    fc->bdi_initialized) {
 		set_bdi_congested(&fc->bdi, BLK_RW_SYNC);
 		set_bdi_congested(&fc->bdi, BLK_RW_ASYNC);
@@ -899,10 +899,6 @@ static int fuse_notify_inval_entry(struct fuse_conn *fc, unsigned int size,
 	if (outarg.namelen > FUSE_NAME_MAX)
 		goto err;
 
-	err = -EINVAL;
-	if (size != sizeof(outarg) + outarg.namelen + 1)
-		goto err;
-
 	name.name = buf;
 	name.len = outarg.namelen;
 	err = fuse_copy_one(cs, buf, outarg.namelen + 1);
@@ -1162,14 +1158,6 @@ __acquires(&fc->lock)
 	}
 }
 
-static void end_queued_requests(struct fuse_conn *fc)
-{
-	fc->max_background = UINT_MAX;
-	flush_bg_queue(fc);
-	end_requests(fc, &fc->pending);
-	end_requests(fc, &fc->processing);
-}
-
 /*
  * Abort all requests.
  *
@@ -1196,7 +1184,8 @@ void fuse_abort_conn(struct fuse_conn *fc)
 		fc->connected = 0;
 		fc->blocked = 0;
 		end_io_requests(fc);
-		end_queued_requests(fc);
+		end_requests(fc, &fc->pending);
+		end_requests(fc, &fc->processing);
 		wake_up_all(&fc->waitq);
 		wake_up_all(&fc->blocked_waitq);
 		kill_fasync(&fc->fasync, SIGIO, POLL_IN);
@@ -1211,9 +1200,8 @@ int fuse_dev_release(struct inode *inode, struct file *file)
 	if (fc) {
 		spin_lock(&fc->lock);
 		fc->connected = 0;
-		fc->blocked = 0;
-		end_queued_requests(fc);
-		wake_up_all(&fc->blocked_waitq);
+		end_requests(fc, &fc->pending);
+		end_requests(fc, &fc->processing);
 		spin_unlock(&fc->lock);
 		fuse_conn_put(fc);
 	}

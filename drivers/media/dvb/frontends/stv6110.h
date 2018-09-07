@@ -41,7 +41,7 @@
 struct stv6110_config {
 	u8 i2c_address;
 	u32 mclk;
-	u8 clk_div;	/* divisor value for the output clock */
+	int iq_wiring;
 };
 
 #if defined(CONFIG_DVB_STV6110) || (defined(CONFIG_DVB_STV6110_MODULE) \

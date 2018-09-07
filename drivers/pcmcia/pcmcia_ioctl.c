@@ -27,7 +27,6 @@
 #include <linux/proc_fs.h>
 #include <linux/poll.h>
 #include <linux/pci.h>
-#include <linux/seq_file.h>
 #include <linux/smp_lock.h>
 #include <linux/workqueue.h>
 
@@ -106,40 +105,37 @@ static struct pcmcia_driver *get_pcmcia_driver(dev_info_t *dev_info)
 #ifdef CONFIG_PROC_FS
 static struct proc_dir_entry *proc_pccard = NULL;
 
-static int proc_read_drivers_callback(struct device_driver *driver, void *_m)
+static int proc_read_drivers_callback(struct device_driver *driver, void *d)
 {
-	struct seq_file *m = _m;
+	char **p = d;
 	struct pcmcia_driver *p_drv = container_of(driver,
 						   struct pcmcia_driver, drv);
 
-	seq_printf(m, "%-24.24s 1 %d\n", p_drv->drv.name,
+	*p += sprintf(*p, "%-24.24s 1 %d\n", p_drv->drv.name,
 #ifdef CONFIG_MODULE_UNLOAD
 		      (p_drv->owner) ? module_refcount(p_drv->owner) : 1
 #else
 		      1
 #endif
 	);
+	d = (void *) p;
+
 	return 0;
 }
 
-static int pccard_drivers_proc_show(struct seq_file *m, void *v)
+static int proc_read_drivers(char *buf, char **start, off_t pos,
+			     int count, int *eof, void *data)
 {
-	return bus_for_each_drv(&pcmcia_bus_type, NULL,
-				m, proc_read_drivers_callback);
-}
+	char *p = buf;
+	int rc;
 
-static int pccard_drivers_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, pccard_drivers_proc_show, NULL);
-}
+	rc = bus_for_each_drv(&pcmcia_bus_type, NULL,
+			      (void *) &p, proc_read_drivers_callback);
+	if (rc < 0)
+		return rc;
 
-static const struct file_operations pccard_drivers_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= pccard_drivers_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+	return (p - buf);
+}
 #endif
 
 
@@ -290,7 +286,7 @@ static int pccard_get_status(struct pcmcia_socket *s,
 	return 0;
 } /* pccard_get_status */
 
-static int pccard_get_configuration_info(struct pcmcia_socket *s,
+int pccard_get_configuration_info(struct pcmcia_socket *s,
 				  struct pcmcia_device *p_dev,
 				  config_info_t *config)
 {
@@ -881,7 +877,7 @@ static int ds_ioctl(struct inode * inode, struct file * file,
 	mutex_lock(&s->skt_mutex);
 	pcmcia_validate_mem(s);
 	mutex_unlock(&s->skt_mutex);
-	ret = pccard_validate_cis(s, &buf->cisinfo.Chains);
+	ret = pccard_validate_cis(s, BIND_FN_ALL, &buf->cisinfo.Chains);
 	break;
     case DS_SUSPEND_CARD:
 	ret = pcmcia_suspend_card(s);
@@ -1015,7 +1011,7 @@ void __init pcmcia_setup_ioctl(void) {
 #ifdef CONFIG_PROC_FS
 	proc_pccard = proc_mkdir("bus/pccard", NULL);
 	if (proc_pccard)
-		proc_create("drivers", 0, proc_pccard, &pccard_drivers_proc_fops);
+		create_proc_read_entry("drivers",0,proc_pccard,proc_read_drivers,NULL);
 #endif
 }
 

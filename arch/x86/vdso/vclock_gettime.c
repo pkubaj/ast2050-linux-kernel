@@ -86,47 +86,14 @@ notrace static noinline int do_monotonic(struct timespec *ts)
 	return 0;
 }
 
-notrace static noinline int do_realtime_coarse(struct timespec *ts)
-{
-	unsigned long seq;
-	do {
-		seq = read_seqbegin(&gtod->lock);
-		ts->tv_sec = gtod->wall_time_coarse.tv_sec;
-		ts->tv_nsec = gtod->wall_time_coarse.tv_nsec;
-	} while (unlikely(read_seqretry(&gtod->lock, seq)));
-	return 0;
-}
-
-notrace static noinline int do_monotonic_coarse(struct timespec *ts)
-{
-	unsigned long seq, ns, secs;
-	do {
-		seq = read_seqbegin(&gtod->lock);
-		secs = gtod->wall_time_coarse.tv_sec;
-		ns = gtod->wall_time_coarse.tv_nsec;
-		secs += gtod->wall_to_monotonic.tv_sec;
-		ns += gtod->wall_to_monotonic.tv_nsec;
-	} while (unlikely(read_seqretry(&gtod->lock, seq)));
-	vset_normalized_timespec(ts, secs, ns);
-	return 0;
-}
-
 notrace int __vdso_clock_gettime(clockid_t clock, struct timespec *ts)
 {
-	if (likely(gtod->sysctl_enabled))
+	if (likely(gtod->sysctl_enabled && gtod->clock.vread))
 		switch (clock) {
 		case CLOCK_REALTIME:
-			if (likely(gtod->clock.vread))
-				return do_realtime(ts);
-			break;
+			return do_realtime(ts);
 		case CLOCK_MONOTONIC:
-			if (likely(gtod->clock.vread))
-				return do_monotonic(ts);
-			break;
-		case CLOCK_REALTIME_COARSE:
-			return do_realtime_coarse(ts);
-		case CLOCK_MONOTONIC_COARSE:
-			return do_monotonic_coarse(ts);
+			return do_monotonic(ts);
 		}
 	return vdso_fallback_gettime(clock, ts);
 }

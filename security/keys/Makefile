@@ -3,7 +3,6 @@
 #
 
 obj-y := \
-	gc.o \
 	key.o \
 	keyring.o \
 	keyctl.o \

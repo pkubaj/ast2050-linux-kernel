@@ -367,7 +367,7 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	spin_unlock_irqrestore(&fep->hw_lock, flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void
@@ -427,7 +427,7 @@ fec_enet_tx(struct net_device *dev)
 	struct	sk_buff	*skb;
 
 	fep = netdev_priv(dev);
-	spin_lock(&fep->hw_lock);
+	spin_lock_irq(&fep->hw_lock);
 	bdp = fep->dirty_tx;
 
 	while (((status = bdp->cbd_sc) & BD_ENET_TX_READY) == 0) {
@@ -486,7 +486,7 @@ fec_enet_tx(struct net_device *dev)
 		}
 	}
 	fep->dirty_tx = bdp;
-	spin_unlock(&fep->hw_lock);
+	spin_unlock_irq(&fep->hw_lock);
 }
 
 
@@ -509,7 +509,7 @@ fec_enet_rx(struct net_device *dev)
 	flush_cache_all();
 #endif
 
-	spin_lock(&fep->hw_lock);
+	spin_lock_irq(&fep->hw_lock);
 
 	/* First, grab all of the stats for the incoming packet.
 	 * These get messed up if we get called due to a busy condition.
@@ -604,7 +604,7 @@ rx_processing_done:
 	}
 	fep->cur_rx = bdp;
 
-	spin_unlock(&fep->hw_lock);
+	spin_unlock_irq(&fep->hw_lock);
 }
 
 /* called from interrupt context */
@@ -615,7 +615,7 @@ fec_enet_mii(struct net_device *dev)
 	mii_list_t	*mip;
 
 	fep = netdev_priv(dev);
-	spin_lock(&fep->mii_lock);
+	spin_lock_irq(&fep->mii_lock);
 
 	if ((mip = mii_head) == NULL) {
 		printk("MII and no head!\n");
@@ -633,19 +633,20 @@ fec_enet_mii(struct net_device *dev)
 		writel(mip->mii_regval, fep->hwp + FEC_MII_DATA);
 
 unlock:
-	spin_unlock(&fep->mii_lock);
+	spin_unlock_irq(&fep->mii_lock);
 }
 
 static int
-mii_queue_unlocked(struct net_device *dev, int regval,
-		void (*func)(uint, struct net_device *))
+mii_queue(struct net_device *dev, int regval, void (*func)(uint, struct net_device *))
 {
 	struct fec_enet_private *fep;
+	unsigned long	flags;
 	mii_list_t	*mip;
 	int		retval;
 
 	/* Add PHY address to register command */
 	fep = netdev_priv(dev);
+	spin_lock_irqsave(&fep->mii_lock, flags);
 
 	regval |= fep->phy_addr << 23;
 	retval = 0;
@@ -666,19 +667,6 @@ mii_queue_unlocked(struct net_device *dev, int regval,
 		retval = 1;
 	}
 
-	return retval;
-}
-
-static int
-mii_queue(struct net_device *dev, int regval,
-		void (*func)(uint, struct net_device *))
-{
-	struct fec_enet_private *fep;
-	unsigned long   flags;
-	int             retval;
-	fep = netdev_priv(dev);
-	spin_lock_irqsave(&fep->mii_lock, flags);
-	retval = mii_queue_unlocked(dev, regval, func);
 	spin_unlock_irqrestore(&fep->mii_lock, flags);
 	return retval;
 }
@@ -1154,9 +1142,19 @@ static void __inline__ fec_request_mii_intr(struct net_device *dev)
 		printk("FEC: Could not allocate fec(MII) IRQ(66)!\n");
 }
 
-static void __inline__ fec_disable_phy_intr(struct net_device *dev)
+static void __inline__ fec_disable_phy_intr(void)
 {
-	free_irq(66, dev);
+	volatile unsigned long *icrp;
+	icrp = (volatile unsigned long *) (MCF_MBAR + MCFSIM_ICR1);
+	*icrp = 0x08000000;
+}
+
+static void __inline__ fec_phy_ack_intr(void)
+{
+	volatile unsigned long *icrp;
+	/* Acknowledge the interrupt */
+	icrp = (volatile unsigned long *) (MCF_MBAR + MCFSIM_ICR1);
+	*icrp = 0x0d000000;
 }
 #endif
 
@@ -1375,11 +1373,11 @@ mii_discover_phy(uint mii_reg, struct net_device *dev)
 
 			/* Got first part of ID, now get remainder */
 			fep->phy_id = phytype << 16;
-			mii_queue_unlocked(dev, mk_mii_read(MII_REG_PHYIR2),
+			mii_queue(dev, mk_mii_read(MII_REG_PHYIR2),
 							mii_discover_phy3);
 		} else {
 			fep->phy_addr++;
-			mii_queue_unlocked(dev, mk_mii_read(MII_REG_PHYIR1),
+			mii_queue(dev, mk_mii_read(MII_REG_PHYIR1),
 							mii_discover_phy);
 		}
 	} else {
@@ -1388,7 +1386,7 @@ mii_discover_phy(uint mii_reg, struct net_device *dev)
 		writel(0, fep->hwp + FEC_MII_SPEED);
 		fep->phy_speed = 0;
 #ifdef HAVE_mii_link_interrupt
-		fec_disable_phy_intr(dev);
+		fec_disable_phy_intr();
 #endif
 	}
 }
@@ -1400,6 +1398,8 @@ mii_link_interrupt(int irq, void * dev_id)
 {
 	struct	net_device *dev = dev_id;
 	struct fec_enet_private *fep = netdev_priv(dev);
+
+	fec_phy_ack_intr();
 
 	mii_do_cmd(dev, fep->phy->ack_int);
 	mii_do_cmd(dev, phy_cmd_relink);  /* restart and display status */
@@ -1654,7 +1654,7 @@ static const struct net_device_ops fec_netdev_ops = {
   *
   * index is only used in legacy code
   */
-static int fec_enet_init(struct net_device *dev, int index)
+int __init fec_enet_init(struct net_device *dev, int index)
 {
 	struct fec_enet_private *fep = netdev_priv(dev);
 	struct bufdesc *cbd_base;

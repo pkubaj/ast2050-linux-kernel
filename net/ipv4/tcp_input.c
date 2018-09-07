@@ -685,7 +685,7 @@ static inline void tcp_set_rto(struct sock *sk)
 	 *    is invisible. Actually, Linux-2.4 also generates erratic
 	 *    ACKs in some circumstances.
 	 */
-	inet_csk(sk)->icsk_rto = __tcp_set_rto(tp);
+	inet_csk(sk)->icsk_rto = (tp->srtt >> 3) + tp->rttvar;
 
 	/* 2. Fixups made earlier cannot be right.
 	 *    If we do not estimate RTO correctly without them,
@@ -696,7 +696,8 @@ static inline void tcp_set_rto(struct sock *sk)
 	/* NOTE: clamping at TCP_RTO_MIN is not required, current algo
 	 * guarantees that rto is higher.
 	 */
-	tcp_bound_rto(sk);
+	if (inet_csk(sk)->icsk_rto > TCP_RTO_MAX)
+		inet_csk(sk)->icsk_rto = TCP_RTO_MAX;
 }
 
 /* Save metrics learned by this TCP session.
@@ -761,7 +762,7 @@ void tcp_update_metrics(struct sock *sk)
 			set_dst_metric_rtt(dst, RTAX_RTTVAR, var);
 		}
 
-		if (tcp_in_initial_slowstart(tp)) {
+		if (tp->snd_ssthresh >= 0xFFFF) {
 			/* Slow start still did not finish. */
 			if (dst_metric(dst, RTAX_SSTHRESH) &&
 			    !dst_metric_locked(dst, RTAX_SSTHRESH) &&
@@ -1280,7 +1281,7 @@ static int tcp_match_skb_to_sack(struct sock *sk, struct sk_buff *skb,
 			unsigned int new_len = (pkt_len / mss) * mss;
 			if (!in_sack && new_len < pkt_len) {
 				new_len += mss;
-				if (new_len >= skb->len)
+				if (new_len > skb->len)
 					return 0;
 			}
 			pkt_len = new_len;
@@ -3969,8 +3970,6 @@ static void tcp_reset(struct sock *sk)
 	default:
 		sk->sk_err = ECONNRESET;
 	}
-	/* This barrier is coupled with smp_rmb() in tcp_poll() */
-	smp_wmb();
 
 	if (!sock_flag(sk, SOCK_DEAD))
 		sk->sk_error_report(sk);
@@ -5239,9 +5238,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			if (tp->copied_seq == tp->rcv_nxt &&
 			    len - tcp_header_len <= tp->ucopy.len) {
 #ifdef CONFIG_NET_DMA
-				if (tp->ucopy.task == current &&
-				    sock_owned_by_user(sk) &&
-				    tcp_dma_try_early_copy(sk, skb, tcp_header_len)) {
+				if (tcp_dma_try_early_copy(sk, skb, tcp_header_len)) {
 					copied_early = 1;
 					eaten = 1;
 				}
@@ -5559,7 +5556,6 @@ discard:
 		}
 
 		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
-		tp->copied_seq = tp->rcv_nxt;
 		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
 
 		/* RFC1323: The window in SYN & SYN/ACK segments is
@@ -5635,8 +5631,6 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 			goto discard;
 
 		if (th->syn) {
-			if (th->fin)
-				goto discard;
 			if (icsk->icsk_af_ops->conn_request(sk, skb) < 0)
 				return 1;
 
@@ -5706,9 +5700,11 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 
 				/* tcp_ack considers this ACK as duplicate
 				 * and does not calculate rtt.
-				 * Force it here.
+				 * Fix it at least with timestamps.
 				 */
-				tcp_ack_update_rtt(sk, 0, 0);
+				if (tp->rx_opt.saw_tstamp &&
+				    tp->rx_opt.rcv_tsecr && !tp->srtt)
+					tcp_ack_saw_tstamp(sk, 0);
 
 				if (tp->rx_opt.tstamp_ok)
 					tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;

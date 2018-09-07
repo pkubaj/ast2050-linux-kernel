@@ -51,7 +51,7 @@
 #include "export.h"
 #include "compression.h"
 
-static const struct super_operations btrfs_super_ops;
+static struct super_operations btrfs_super_ops;
 
 static void btrfs_put_super(struct super_block *sb)
 {
@@ -66,8 +66,7 @@ enum {
 	Opt_degraded, Opt_subvol, Opt_device, Opt_nodatasum, Opt_nodatacow,
 	Opt_max_extent, Opt_max_inline, Opt_alloc_start, Opt_nobarrier,
 	Opt_ssd, Opt_nossd, Opt_ssd_spread, Opt_thread_pool, Opt_noacl,
-	Opt_compress, Opt_notreelog, Opt_ratio, Opt_flushoncommit,
-	Opt_discard, Opt_err,
+	Opt_compress, Opt_notreelog, Opt_ratio, Opt_flushoncommit, Opt_err,
 };
 
 static match_table_t tokens = {
@@ -89,7 +88,6 @@ static match_table_t tokens = {
 	{Opt_notreelog, "notreelog"},
 	{Opt_flushoncommit, "flushoncommit"},
 	{Opt_ratio, "metadata_ratio=%d"},
-	{Opt_discard, "discard"},
 	{Opt_err, NULL},
 };
 
@@ -126,9 +124,8 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
 {
 	struct btrfs_fs_info *info = root->fs_info;
 	substring_t args[MAX_OPT_ARGS];
-	char *p, *num, *orig;
+	char *p, *num;
 	int intarg;
-	int ret = 0;
 
 	if (!options)
 		return 0;
@@ -141,7 +138,6 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
 	if (!options)
 		return -ENOMEM;
 
-	orig = options;
 
 	while ((p = strsep(&options, ",")) != NULL) {
 		int token;
@@ -261,21 +257,12 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
 				       info->metadata_ratio);
 			}
 			break;
-		case Opt_discard:
-			btrfs_set_opt(info->mount_opt, DISCARD);
-			break;
-		case Opt_err:
-			printk(KERN_INFO "btrfs: unrecognized mount option "
-			       "'%s'\n", p);
-			ret = -EINVAL;
-			goto out;
 		default:
 			break;
 		}
 	}
-out:
-	kfree(orig);
-	return ret;
+	kfree(options);
+	return 0;
 }
 
 /*
@@ -357,9 +344,7 @@ static int btrfs_fill_super(struct super_block *sb,
 	sb->s_export_op = &btrfs_export_ops;
 	sb->s_xattr = btrfs_xattr_handlers;
 	sb->s_time_gran = 1;
-#ifdef CONFIG_BTRFS_FS_POSIX_ACL
 	sb->s_flags |= MS_POSIXACL;
-#endif
 
 	tree_root = open_ctree(sb, fs_devices, (char *)data);
 
@@ -413,8 +398,8 @@ int btrfs_sync_fs(struct super_block *sb, int wait)
 		return 0;
 	}
 
-	btrfs_start_delalloc_inodes(root, 0);
-	btrfs_wait_ordered_extents(root, 0, 0);
+	btrfs_start_delalloc_inodes(root);
+	btrfs_wait_ordered_extents(root, 0);
 
 	trans = btrfs_start_transaction(root, 1);
 	ret = btrfs_commit_transaction(trans, root);
@@ -458,8 +443,6 @@ static int btrfs_show_options(struct seq_file *seq, struct vfsmount *vfs)
 		seq_puts(seq, ",notreelog");
 	if (btrfs_test_opt(root, FLUSHONCOMMIT))
 		seq_puts(seq, ",flushoncommit");
-	if (btrfs_test_opt(root, DISCARD))
-		seq_puts(seq, ",discard");
 	if (!(root->fs_info->sb->s_flags & MS_POSIXACL))
 		seq_puts(seq, ",noacl");
 	return 0;
@@ -692,8 +675,7 @@ static int btrfs_unfreeze(struct super_block *sb)
 	return 0;
 }
 
-static const struct super_operations btrfs_super_ops = {
-	.drop_inode	= btrfs_drop_inode,
+static struct super_operations btrfs_super_ops = {
 	.delete_inode	= btrfs_delete_inode,
 	.put_super	= btrfs_put_super,
 	.sync_fs	= btrfs_sync_fs,

@@ -291,13 +291,9 @@ gen_ndis_query_resp (int configNr, u32 OID, u8 *buf, unsigned buf_len,
 	/* mandatory */
 	case OID_GEN_VENDOR_DESCRIPTION:
 		pr_debug("%s: OID_GEN_VENDOR_DESCRIPTION\n", __func__);
-		if ( rndis_per_dev_params [configNr].vendorDescr ) {
-			length = strlen (rndis_per_dev_params [configNr].vendorDescr);
-			memcpy (outbuf,
-				rndis_per_dev_params [configNr].vendorDescr, length);
-		} else {
-			outbuf[0] = 0;
-		}
+		length = strlen (rndis_per_dev_params [configNr].vendorDescr);
+		memcpy (outbuf,
+			rndis_per_dev_params [configNr].vendorDescr, length);
 		retval = 0;
 		break;
 
@@ -1026,29 +1022,22 @@ static rndis_resp_t *rndis_add_response (int configNr, u32 length)
 	return r;
 }
 
-int rndis_rm_hdr(struct gether *port,
-			struct sk_buff *skb,
-			struct sk_buff_head *list)
+int rndis_rm_hdr(struct sk_buff *skb)
 {
 	/* tmp points to a struct rndis_packet_msg_type */
 	__le32		*tmp = (void *) skb->data;
 
 	/* MessageType, MessageLength */
 	if (cpu_to_le32(REMOTE_NDIS_PACKET_MSG)
-			!= get_unaligned(tmp++)) {
-		dev_kfree_skb_any(skb);
+			!= get_unaligned(tmp++))
 		return -EINVAL;
-	}
 	tmp++;
 
 	/* DataOffset, DataLength */
-	if (!skb_pull(skb, get_unaligned_le32(tmp++) + 8)) {
-		dev_kfree_skb_any(skb);
+	if (!skb_pull(skb, get_unaligned_le32(tmp++) + 8))
 		return -EOVERFLOW;
-	}
 	skb_trim(skb, get_unaligned_le32(tmp++));
 
-	skb_queue_tail(list, skb);
 	return 0;
 }
 

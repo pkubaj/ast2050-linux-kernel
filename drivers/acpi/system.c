@@ -31,8 +31,6 @@
 
 #include <acpi/acpi_drivers.h>
 
-#define PREFIX "ACPI: "
-
 #define _COMPONENT		ACPI_SYSTEM_COMPONENT
 ACPI_MODULE_NAME("system");
 

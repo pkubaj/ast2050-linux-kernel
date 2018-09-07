@@ -87,6 +87,8 @@
 
 extern int mips_revision_sconid;
 
+extern void mips_reboot_setup(void);
+
 #ifdef CONFIG_PCI
 extern void mips_pcibios_init(void);
 #else

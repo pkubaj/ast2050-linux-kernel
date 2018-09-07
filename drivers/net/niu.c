@@ -3545,7 +3545,7 @@ static int niu_process_rx_pkt(struct napi_struct *napi, struct niu *np,
 	rp->rcr_index = index;
 
 	skb_reserve(skb, NET_IP_ALIGN);
-	__pskb_pull_tail(skb, min(len, VLAN_ETH_HLEN));
+	__pskb_pull_tail(skb, min(len, NIU_RXPULL_MAX));
 
 	rp->rx_packets++;
 	rp->rx_bytes += skb->len;
@@ -4015,7 +4015,7 @@ static void niu_xmac_interrupt(struct niu *np)
 		mp->rx_hist_cnt6 += RXMAC_HIST_CNT6_COUNT;
 	if (val & XRXMAC_STATUS_RXHIST7_CNT_EXP)
 		mp->rx_hist_cnt7 += RXMAC_HIST_CNT7_COUNT;
-	if (val & XRXMAC_STATUS_RXOCTET_CNT_EXP)
+	if (val & XRXMAC_STAT_MSK_RXOCTET_CNT_EXP)
 		mp->rx_octets += RXMAC_BT_CNT_COUNT;
 	if (val & XRXMAC_STATUS_CVIOLERR_CNT_EXP)
 		mp->rx_code_violations += RXMAC_CD_VIO_CNT_COUNT;
@@ -5615,7 +5615,7 @@ static void niu_init_tx_mac(struct niu *np)
 	/* The XMAC_MIN register only accepts values for TX min which
 	 * have the low 3 bits cleared.
 	 */
-	BUG_ON(min & 0x7);
+	BUILD_BUG_ON(min & 0x7);
 
 	if (np->flags & NIU_FLAGS_XMAC)
 		niu_init_tx_xmac(np, min, max);
@@ -6657,8 +6657,7 @@ static u64 niu_compute_tx_flags(struct sk_buff *skb, struct ethhdr *ehdr,
 	return ret;
 }
 
-static netdev_tx_t niu_start_xmit(struct sk_buff *skb,
-				  struct net_device *dev)
+static int niu_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct niu *np = netdev_priv(dev);
 	unsigned long align, headroom;
@@ -7315,28 +7314,33 @@ static int niu_get_ethtool_tcam_all(struct niu *np,
 	struct niu_parent *parent = np->parent;
 	struct niu_tcam_entry *tp;
 	int i, idx, cnt;
+	u16 n_entries;
 	unsigned long flags;
-	int ret = 0;
+
 
 	/* put the tcam size here */
 	nfc->data = tcam_get_size(np);
 
 	niu_lock_parent(np, flags);
+	n_entries = nfc->rule_cnt;
 	for (cnt = 0, i = 0; i < nfc->data; i++) {
 		idx = tcam_get_index(np, i);
 		tp = &parent->tcam[idx];
 		if (!tp->valid)
 			continue;
-		if (cnt == nfc->rule_cnt) {
-			ret = -EMSGSIZE;
-			break;
-		}
 		rule_locs[cnt] = i;
 		cnt++;
 	}
 	niu_unlock_parent(np, flags);
 
-	return ret;
+	if (n_entries != cnt) {
+		/* print warning, this should not happen */
+		pr_info(PFX "niu%d: %s In niu_get_ethtool_tcam_all, "
+			"n_entries[%d] != cnt[%d]!!!\n\n",
+			np->parent->index, np->dev->name, n_entries, cnt);
+	}
+
+	return 0;
 }
 
 static int niu_get_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
@@ -10140,6 +10144,11 @@ static const struct niu_ops niu_phys_ops = {
 	.unmap_single	= niu_phys_unmap_single,
 };
 
+static unsigned long res_size(struct resource *r)
+{
+	return r->end - r->start + 1UL;
+}
+
 static int __devinit niu_of_probe(struct of_device *op,
 				  const struct of_device_id *match)
 {
@@ -10179,7 +10188,7 @@ static int __devinit niu_of_probe(struct of_device *op,
 	dev->features |= (NETIF_F_SG | NETIF_F_HW_CSUM);
 
 	np->regs = of_ioremap(&op->resource[1], 0,
-			      resource_size(&op->resource[1]),
+			      res_size(&op->resource[1]),
 			      "niu regs");
 	if (!np->regs) {
 		dev_err(&op->dev, PFX "Cannot map device registers, "
@@ -10189,7 +10198,7 @@ static int __devinit niu_of_probe(struct of_device *op,
 	}
 
 	np->vir_regs_1 = of_ioremap(&op->resource[2], 0,
-				    resource_size(&op->resource[2]),
+				    res_size(&op->resource[2]),
 				    "niu vregs-1");
 	if (!np->vir_regs_1) {
 		dev_err(&op->dev, PFX "Cannot map device vir registers 1, "
@@ -10199,7 +10208,7 @@ static int __devinit niu_of_probe(struct of_device *op,
 	}
 
 	np->vir_regs_2 = of_ioremap(&op->resource[3], 0,
-				    resource_size(&op->resource[3]),
+				    res_size(&op->resource[3]),
 				    "niu vregs-2");
 	if (!np->vir_regs_2) {
 		dev_err(&op->dev, PFX "Cannot map device vir registers 2, "
@@ -10234,19 +10243,19 @@ static int __devinit niu_of_probe(struct of_device *op,
 err_out_iounmap:
 	if (np->vir_regs_1) {
 		of_iounmap(&op->resource[2], np->vir_regs_1,
-			   resource_size(&op->resource[2]));
+			   res_size(&op->resource[2]));
 		np->vir_regs_1 = NULL;
 	}
 
 	if (np->vir_regs_2) {
 		of_iounmap(&op->resource[3], np->vir_regs_2,
-			   resource_size(&op->resource[3]));
+			   res_size(&op->resource[3]));
 		np->vir_regs_2 = NULL;
 	}
 
 	if (np->regs) {
 		of_iounmap(&op->resource[1], np->regs,
-			   resource_size(&op->resource[1]));
+			   res_size(&op->resource[1]));
 		np->regs = NULL;
 	}
 
@@ -10271,19 +10280,19 @@ static int __devexit niu_of_remove(struct of_device *op)
 
 		if (np->vir_regs_1) {
 			of_iounmap(&op->resource[2], np->vir_regs_1,
-				   resource_size(&op->resource[2]));
+				   res_size(&op->resource[2]));
 			np->vir_regs_1 = NULL;
 		}
 
 		if (np->vir_regs_2) {
 			of_iounmap(&op->resource[3], np->vir_regs_2,
-				   resource_size(&op->resource[3]));
+				   res_size(&op->resource[3]));
 			np->vir_regs_2 = NULL;
 		}
 
 		if (np->regs) {
 			of_iounmap(&op->resource[1], np->regs,
-				   resource_size(&op->resource[1]));
+				   res_size(&op->resource[1]));
 			np->regs = NULL;
 		}
 

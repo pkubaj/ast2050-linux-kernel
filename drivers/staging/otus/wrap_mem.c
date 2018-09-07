@@ -27,7 +27,10 @@
 #include "usbdrv.h"
 
 #include <linux/netlink.h>
+
+#if WIRELESS_EXT > 12
 #include <net/iw_handler.h>
+#endif
 
 /* Memory management */
 /* Called to allocate uncached memory, allocated memory must    */

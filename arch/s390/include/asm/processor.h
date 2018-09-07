@@ -14,7 +14,7 @@
 #define __ASM_S390_PROCESSOR_H
 
 #include <linux/linkage.h>
-#include <asm/cpu.h>
+#include <asm/cpuid.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
 #include <asm/setup.h>
@@ -26,7 +26,7 @@
  */
 #define current_text_addr() ({ void *pc; asm("basr %0,0" : "=a" (pc)); pc; })
 
-static inline void get_cpu_id(struct cpuid *ptr)
+static inline void get_cpu_id(cpuid_t *ptr)
 {
 	asm volatile("stidp 0(%1)" : "=m" (*ptr) : "a" (ptr));
 }
@@ -149,6 +149,11 @@ extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
  * Return saved PC of a blocked thread.
  */
 extern unsigned long thread_saved_pc(struct task_struct *t);
+
+/*
+ * Print register of task into buffer. Used in fs/proc/array.c.
+ */
+extern void task_show_regs(struct seq_file *m, struct task_struct *task);
 
 extern void show_code(struct pt_regs *regs);
 
@@ -290,7 +295,7 @@ static inline void ATTRIB_NORET disabled_wait(unsigned long code)
 		"	oi	0x384(1),0x10\n"/* fake protection bit */
 		"	lpswe	0(%1)"
 		: "=m" (ctl_buf)
-		: "a" (&dw_psw), "a" (&ctl_buf), "m" (dw_psw) : "cc", "0", "1");
+		: "a" (&dw_psw), "a" (&ctl_buf), "m" (dw_psw) : "cc", "0");
 #endif /* __s390x__ */
 	while (1);
 }

@@ -32,7 +32,6 @@
 #define _TTM_MODULE_H_
 
 #include <linux/kernel.h>
-struct kobject;
 
 #define TTM_PFX "[TTM] "
 
@@ -55,6 +54,5 @@ extern void ttm_global_init(void);
 extern void ttm_global_release(void);
 extern int ttm_global_item_ref(struct ttm_global_reference *ref);
 extern void ttm_global_item_unref(struct ttm_global_reference *ref);
-extern struct kobject *ttm_get_kobj(void);
 
 #endif /* _TTM_MODULE_H_ */

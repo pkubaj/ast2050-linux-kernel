@@ -70,32 +70,30 @@ struct ni_670x_board {
 
 static const struct ni_670x_board ni_670x_boards[] = {
 	{
-	 .dev_id = 0x2c90,
-	 .name = "PCI-6703",
-	 .ao_chans = 16,
-	 .ao_bits = 16,
-	 },
+	.dev_id = 0x2c90,
+	.name = "PCI-6703",
+	.ao_chans = 16,
+	.ao_bits = 16,
+		},
 	{
-	 .dev_id = 0x1920,
-	 .name = "PXI-6704",
-	 .ao_chans = 32,
-	 .ao_bits = 16,
-	 },
+	.dev_id = 0x1920,
+	.name = "PXI-6704",
+	.ao_chans = 32,
+	.ao_bits = 16,
+		},
 	{
-	 .dev_id = 0x1290,
-	 .name = "PCI-6704",
-	 .ao_chans = 32,
-	 .ao_bits = 16,
-	 },
+	.dev_id = 0x1290,
+	.name = "PCI-6704",
+	.ao_chans = 32,
+	.ao_bits = 16,
+		},
 };
 
 static DEFINE_PCI_DEVICE_TABLE(ni_670x_pci_table) = {
-	{
-	PCI_VENDOR_ID_NATINST, 0x2c90, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0}, {
-	PCI_VENDOR_ID_NATINST, 0x1920, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	    /* { PCI_VENDOR_ID_NATINST, 0x0000, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 }, */
-	{
-	0}
+	{PCI_VENDOR_ID_NATINST, 0x2c90, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{PCI_VENDOR_ID_NATINST, 0x1920, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	/* { PCI_VENDOR_ID_NATINST, 0x0000, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 }, */
+	{0}
 };
 
 MODULE_DEVICE_TABLE(pci, ni_670x_pci_table);
@@ -110,11 +108,11 @@ struct ni_670x_private {
 	unsigned int ao_readback[32];
 };
 
-#define devpriv ((struct ni_670x_private *)dev->private)
-#define n_ni_670x_boards ARRAY_SIZE(ni_670x_boards)
 
-static int ni_670x_attach(struct comedi_device *dev,
-			  struct comedi_devconfig *it);
+#define devpriv ((struct ni_670x_private *)dev->private)
+#define n_ni_670x_boards (sizeof(ni_670x_boards)/sizeof(ni_670x_boards[0]))
+
+static int ni_670x_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int ni_670x_detach(struct comedi_device *dev);
 
 static struct comedi_driver driver_ni_670x = {
@@ -130,22 +128,16 @@ static struct comedi_lrange range_0_20mA = { 1, {RANGE_mA(0, 20)} };
 
 static int ni_670x_find_device(struct comedi_device *dev, int bus, int slot);
 
-static int ni_670x_ao_winsn(struct comedi_device *dev,
-			    struct comedi_subdevice *s,
-			    struct comedi_insn *insn, unsigned int *data);
-static int ni_670x_ao_rinsn(struct comedi_device *dev,
-			    struct comedi_subdevice *s,
-			    struct comedi_insn *insn, unsigned int *data);
-static int ni_670x_dio_insn_bits(struct comedi_device *dev,
-				 struct comedi_subdevice *s,
-				 struct comedi_insn *insn, unsigned int *data);
-static int ni_670x_dio_insn_config(struct comedi_device *dev,
-				   struct comedi_subdevice *s,
-				   struct comedi_insn *insn,
-				   unsigned int *data);
+static int ni_670x_ao_winsn(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
+static int ni_670x_ao_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
+static int ni_670x_dio_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
+static int ni_670x_dio_insn_config(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data);
 
-static int ni_670x_attach(struct comedi_device *dev,
-			  struct comedi_devconfig *it)
+static int ni_670x_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct comedi_subdevice *s;
 	int ret;
@@ -183,7 +175,7 @@ static int ni_670x_attach(struct comedi_device *dev,
 		const struct comedi_lrange **range_table_list;
 
 		range_table_list = kmalloc(sizeof(struct comedi_lrange *) * 32,
-					   GFP_KERNEL);
+			GFP_KERNEL);
 		if (!range_table_list)
 			return -ENOMEM;
 		s->range_table_list = range_table_list;
@@ -231,9 +223,8 @@ static int ni_670x_detach(struct comedi_device *dev)
 	return 0;
 }
 
-static int ni_670x_ao_winsn(struct comedi_device *dev,
-			    struct comedi_subdevice *s,
-			    struct comedi_insn *insn, unsigned int *data)
+static int ni_670x_ao_winsn(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -258,9 +249,8 @@ static int ni_670x_ao_winsn(struct comedi_device *dev,
 	return i;
 }
 
-static int ni_670x_ao_rinsn(struct comedi_device *dev,
-			    struct comedi_subdevice *s,
-			    struct comedi_insn *insn, unsigned int *data)
+static int ni_670x_ao_rinsn(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -271,9 +261,8 @@ static int ni_670x_ao_rinsn(struct comedi_device *dev,
 	return i;
 }
 
-static int ni_670x_dio_insn_bits(struct comedi_device *dev,
-				 struct comedi_subdevice *s,
-				 struct comedi_insn *insn, unsigned int *data)
+static int ni_670x_dio_insn_bits(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	if (insn->n != 2)
 		return -EINVAL;
@@ -284,7 +273,7 @@ static int ni_670x_dio_insn_bits(struct comedi_device *dev,
 		s->state &= ~data[0];
 		s->state |= data[0] & data[1];
 		writel(s->state,
-		       devpriv->mite->daq_io_addr + DIO_PORT0_DATA_OFFSET);
+			devpriv->mite->daq_io_addr + DIO_PORT0_DATA_OFFSET);
 	}
 
 	/* on return, data[1] contains the value of the digital
@@ -294,9 +283,8 @@ static int ni_670x_dio_insn_bits(struct comedi_device *dev,
 	return 2;
 }
 
-static int ni_670x_dio_insn_config(struct comedi_device *dev,
-				   struct comedi_subdevice *s,
-				   struct comedi_insn *insn, unsigned int *data)
+static int ni_670x_dio_insn_config(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int chan = CR_CHAN(insn->chanspec);
 
@@ -309,7 +297,8 @@ static int ni_670x_dio_insn_config(struct comedi_device *dev,
 		break;
 	case INSN_CONFIG_DIO_QUERY:
 		data[1] =
-		    (s->io_bits & (1 << chan)) ? COMEDI_OUTPUT : COMEDI_INPUT;
+			(s->
+			io_bits & (1 << chan)) ? COMEDI_OUTPUT : COMEDI_INPUT;
 		return insn->n;
 		break;
 	default:
@@ -331,7 +320,7 @@ static int ni_670x_find_device(struct comedi_device *dev, int bus, int slot)
 			continue;
 		if (bus || slot) {
 			if (bus != mite->pcidev->bus->number
-			    || slot != PCI_SLOT(mite->pcidev->devfn))
+				|| slot != PCI_SLOT(mite->pcidev->devfn))
 				continue;
 		}
 

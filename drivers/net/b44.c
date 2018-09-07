@@ -847,22 +847,23 @@ static int b44_poll(struct napi_struct *napi, int budget)
 {
 	struct b44 *bp = container_of(napi, struct b44, napi);
 	int work_done;
-	unsigned long flags;
 
-	spin_lock_irqsave(&bp->lock, flags);
+	spin_lock_irq(&bp->lock);
 
 	if (bp->istat & (ISTAT_TX | ISTAT_TO)) {
 		/* spin_lock(&bp->tx_lock); */
 		b44_tx(bp);
 		/* spin_unlock(&bp->tx_lock); */
 	}
-	spin_unlock_irqrestore(&bp->lock, flags);
+	spin_unlock_irq(&bp->lock);
 
 	work_done = 0;
 	if (bp->istat & ISTAT_RX)
 		work_done += b44_rx(bp, budget);
 
 	if (bp->istat & ISTAT_ERRORS) {
+		unsigned long flags;
+
 		spin_lock_irqsave(&bp->lock, flags);
 		b44_halt(bp);
 		b44_init_rings(bp);
@@ -942,7 +943,7 @@ static void b44_tx_timeout(struct net_device *dev)
 	netif_wake_queue(dev);
 }
 
-static netdev_tx_t b44_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int b44_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct b44 *bp = netdev_priv(dev);
 	int rc = NETDEV_TX_OK;
@@ -1294,17 +1295,13 @@ static void b44_chip_reset(struct b44 *bp, int reset_kind)
 	switch (sdev->bus->bustype) {
 	case SSB_BUSTYPE_SSB:
 		bw32(bp, B44_MDIO_CTRL, (MDIO_CTRL_PREAMBLE |
-		     (DIV_ROUND_CLOSEST(ssb_clockspeed(sdev->bus),
-					B44_MDC_RATIO)
+		     (((ssb_clockspeed(sdev->bus) + (B44_MDC_RATIO / 2)) / B44_MDC_RATIO)
 		     & MDIO_CTRL_MAXF_MASK)));
 		break;
 	case SSB_BUSTYPE_PCI:
+	case SSB_BUSTYPE_PCMCIA:
 		bw32(bp, B44_MDIO_CTRL, (MDIO_CTRL_PREAMBLE |
 		     (0x0d & MDIO_CTRL_MAXF_MASK)));
-		break;
-	case SSB_BUSTYPE_PCMCIA:
-	case SSB_BUSTYPE_SDIO:
-		WARN_ON(1); /* A device with this bus does not exist. */
 		break;
 	}
 
@@ -1756,18 +1753,15 @@ static void b44_get_drvinfo (struct net_device *dev, struct ethtool_drvinfo *inf
 	struct b44 *bp = netdev_priv(dev);
 	struct ssb_bus *bus = bp->sdev->bus;
 
-	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
+	strncpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
+	strncpy(info->version, DRV_MODULE_VERSION, sizeof(info->driver));
 	switch (bus->bustype) {
 	case SSB_BUSTYPE_PCI:
-		strlcpy(info->bus_info, pci_name(bus->host_pci), sizeof(info->bus_info));
-		break;
-	case SSB_BUSTYPE_SSB:
-		strlcpy(info->bus_info, "SSB", sizeof(info->bus_info));
+		strncpy(info->bus_info, pci_name(bus->host_pci), sizeof(info->bus_info));
 		break;
 	case SSB_BUSTYPE_PCMCIA:
-	case SSB_BUSTYPE_SDIO:
-		WARN_ON(1); /* A device with this bus does not exist. */
+	case SSB_BUSTYPE_SSB:
+		strncpy(info->bus_info, "SSB", sizeof(info->bus_info));
 		break;
 	}
 }
@@ -2175,6 +2169,8 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
 	dev->irq = sdev->irq;
 	SET_ETHTOOL_OPS(dev, &b44_ethtool_ops);
 
+	netif_carrier_off(dev);
+
 	err = ssb_bus_powerup(sdev->bus, 0);
 	if (err) {
 		dev_err(sdev->dev,
@@ -2213,8 +2209,6 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
 		dev_err(sdev->dev, "Cannot register net device, aborting.\n");
 		goto err_out_powerdown;
 	}
-
-	netif_carrier_off(dev);
 
 	ssb_set_drvdata(sdev, dev);
 

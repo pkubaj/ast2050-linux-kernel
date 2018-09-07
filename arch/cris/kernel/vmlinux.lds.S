@@ -51,7 +51,10 @@ SECTIONS
 	_etext = . ;			/* End of text section. */
 	__etext = .;
 
-	EXCEPTION_TABLE(4)
+	. = ALIGN(4);			/* Exception table. */
+	__start___ex_table = .;
+	__ex_table : { *(__ex_table) }
+	__stop___ex_table = .;
 
 	RODATA
 
@@ -64,24 +67,36 @@ SECTIONS
 	__edata = . ;			/* End of data section. */
 	_edata = . ;
 
-	INIT_TASK_DATA_SECTION(PAGE_SIZE)
+	. = ALIGN(PAGE_SIZE);	/* init_task and stack, must be aligned. */
+	.data.init_task : { *(.data.init_task) }
 
 	. = ALIGN(PAGE_SIZE);		/* Init code and data. */
 	__init_begin = .;
-	INIT_TEXT_SECTION(PAGE_SIZE)
+	.init.text : {
+		   _sinittext = .;
+		   INIT_TEXT
+		   _einittext = .;
+	}
 	.init.data : { INIT_DATA }
-	.init.setup : { INIT_SETUP(16) }
+	. = ALIGN(16);
+	__setup_start = .;
+	.init.setup : { *(.init.setup) }
+	__setup_end = .;
 #ifdef CONFIG_ETRAX_ARCH_V32
 	__start___param = .;
 	__param : { *(__param) }
 	__stop___param = .;
 #endif
 	.initcall.init : {
-		INIT_CALLS
+		__initcall_start = .;
+		INITCALLS
+		__initcall_end = .;
 	}
 
 	.con_initcall.init : {
-		CON_INITCALL
+		__con_initcall_start = .;
+		*(.con_initcall.init)
+		__con_initcall_end = .;
 	}
 	SECURITY_INIT
 
@@ -99,7 +114,9 @@ SECTIONS
 	PERCPU(PAGE_SIZE)
 
 	.init.ramfs : {
-		INIT_RAM_FS
+		__initramfs_start = .;
+		*(.init.ramfs)
+		__initramfs_end = .;
 	}
 #endif
 
@@ -113,13 +130,22 @@ SECTIONS
 	__init_end = .;
 
 	__data_end = . ;		/* Move to _edata ? */
-	BSS_SECTION(0, 0, 0)
+	__bss_start = .;		/* BSS. */
+	.bss : {
+		*(COMMON)
+		*(.bss)
+	}
 
 	. =  ALIGN (0x20);
 	_end = .;
 	__end = .;
 
-	dram_end = dram_start + (CONFIG_ETRAX_DRAM_SIZE - __CONFIG_ETRAX_VMEM_SIZE)*1024*1024;
+	/* Sections to be discarded */
+	/DISCARD/ : {
+		EXIT_TEXT
+		EXIT_DATA
+		*(.exitcall.exit)
+        }
 
-	DISCARDS
+	dram_end = dram_start + (CONFIG_ETRAX_DRAM_SIZE - __CONFIG_ETRAX_VMEM_SIZE)*1024*1024;
 }

@@ -63,7 +63,7 @@ int sysctl_rose_window_size             = ROSE_DEFAULT_WINDOW_SIZE;
 static HLIST_HEAD(rose_list);
 static DEFINE_SPINLOCK(rose_list_lock);
 
-static const struct proto_ops rose_proto_ops;
+static struct proto_ops rose_proto_ops;
 
 ax25_address rose_callsign;
 
@@ -194,8 +194,7 @@ static void rose_kill_by_device(struct net_device *dev)
 
 		if (rose->device == dev) {
 			rose_disconnect(s, ENETUNREACH, ROSE_OUT_OF_ORDER, 0);
-			if (rose->neighbour)
-				rose->neighbour->use--;
+			rose->neighbour->use--;
 			rose->device = NULL;
 		}
 	}
@@ -371,7 +370,7 @@ void rose_destroy_socket(struct sock *sk)
  */
 
 static int rose_setsockopt(struct socket *sock, int level, int optname,
-	char __user *optval, unsigned int optlen)
+	char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
 	struct rose_sock *rose = rose_sk(sk);
@@ -678,7 +677,7 @@ static int rose_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	if (addr_len == sizeof(struct sockaddr_rose) && addr->srose_ndigis > 1)
 		return -EINVAL;
 
-	if ((unsigned int) addr->srose_ndigis > ROSE_MAX_DIGIS)
+	if (addr->srose_ndigis > ROSE_MAX_DIGIS)
 		return -EINVAL;
 
 	if ((dev = rose_dev_get(&addr->srose_addr)) == NULL) {
@@ -738,7 +737,7 @@ static int rose_connect(struct socket *sock, struct sockaddr *uaddr, int addr_le
 	if (addr_len == sizeof(struct sockaddr_rose) && addr->srose_ndigis > 1)
 		return -EINVAL;
 
-	if ((unsigned int) addr->srose_ndigis > ROSE_MAX_DIGIS)
+	if (addr->srose_ndigis > ROSE_MAX_DIGIS)
 		return -EINVAL;
 
 	/* Source + Destination digis should not exceed ROSE_MAX_DIGIS */
@@ -984,7 +983,7 @@ int rose_rx_call_request(struct sk_buff *skb, struct net_device *dev, struct ros
 	struct sock *make;
 	struct rose_sock *make_rose;
 	struct rose_facilities_struct facilities;
-	int n;
+	int n, len;
 
 	skb->sk = NULL;		/* Initially we don't know who it's for */
 
@@ -993,9 +992,9 @@ int rose_rx_call_request(struct sk_buff *skb, struct net_device *dev, struct ros
 	 */
 	memset(&facilities, 0x00, sizeof(struct rose_facilities_struct));
 
-	if (!rose_parse_facilities(skb->data + ROSE_CALL_REQ_FACILITIES_OFF,
-				   skb->len - ROSE_CALL_REQ_FACILITIES_OFF,
-				   &facilities)) {
+	len  = (((skb->data[3] >> 4) & 0x0F) + 1) >> 1;
+	len += (((skb->data[3] >> 0) & 0x0F) + 1) >> 1;
+	if (!rose_parse_facilities(skb->data + len + 4, &facilities)) {
 		rose_transmit_clear_request(neigh, lci, ROSE_INVALID_FACILITY, 76);
 		return 0;
 	}
@@ -1239,6 +1238,7 @@ static int rose_recvmsg(struct kiocb *iocb, struct socket *sock,
 {
 	struct sock *sk = sock->sk;
 	struct rose_sock *rose = rose_sk(sk);
+	struct sockaddr_rose *srose = (struct sockaddr_rose *)msg->msg_name;
 	size_t copied;
 	unsigned char *asmptr;
 	struct sk_buff *skb;
@@ -1274,19 +1274,23 @@ static int rose_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 	skb_copy_datagram_iovec(skb, 0, msg->msg_iov, copied);
 
-	if (msg->msg_name) {
-		struct sockaddr_rose *srose;
-		struct full_sockaddr_rose *full_srose = msg->msg_name;
-
-		memset(msg->msg_name, 0, sizeof(struct full_sockaddr_rose));
-		srose = msg->msg_name;
+	if (srose != NULL) {
 		srose->srose_family = AF_ROSE;
 		srose->srose_addr   = rose->dest_addr;
 		srose->srose_call   = rose->dest_call;
 		srose->srose_ndigis = rose->dest_ndigis;
-		for (n = 0 ; n < rose->dest_ndigis ; n++)
-			full_srose->srose_digis[n] = rose->dest_digis[n];
-		msg->msg_namelen = sizeof(struct full_sockaddr_rose);
+		if (msg->msg_namelen >= sizeof(struct full_sockaddr_rose)) {
+			struct full_sockaddr_rose *full_srose = (struct full_sockaddr_rose *)msg->msg_name;
+			for (n = 0 ; n < rose->dest_ndigis ; n++)
+				full_srose->srose_digis[n] = rose->dest_digis[n];
+			msg->msg_namelen = sizeof(struct full_sockaddr_rose);
+		} else {
+			if (rose->dest_ndigis >= 1) {
+				srose->srose_ndigis = 1;
+				srose->srose_digi = rose->dest_digis[0];
+			}
+			msg->msg_namelen = sizeof(struct sockaddr_rose);
+		}
 	}
 
 	skb_free_datagram(sk, skb);
@@ -1511,7 +1515,7 @@ static struct net_proto_family rose_family_ops = {
 	.owner		=	THIS_MODULE,
 };
 
-static const struct proto_ops rose_proto_ops = {
+static struct proto_ops rose_proto_ops = {
 	.family		=	PF_ROSE,
 	.owner		=	THIS_MODULE,
 	.release	=	rose_release,

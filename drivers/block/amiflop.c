@@ -1632,7 +1632,7 @@ static int amiga_floppy_change(struct gendisk *disk)
 	return 0;
 }
 
-static const struct block_device_operations floppy_fops = {
+static struct block_device_operations floppy_fops = {
 	.owner		= THIS_MODULE,
 	.open		= floppy_open,
 	.release	= floppy_release,

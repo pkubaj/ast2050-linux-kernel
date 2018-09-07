@@ -44,7 +44,6 @@
 #include <linux/rtnetlink.h>
 #include <linux/firmware.h>
 #include <linux/log2.h>
-#include <linux/stringify.h>
 #include <asm/uaccess.h>
 
 #include "common.h"
@@ -173,23 +172,6 @@ static void link_report(struct net_device *dev)
 	}
 }
 
-static void enable_tx_fifo_drain(struct adapter *adapter,
-				 struct port_info *pi)
-{
-	t3_set_reg_field(adapter, A_XGM_TXFIFO_CFG + pi->mac.offset, 0,
-			 F_ENDROPPKT);
-	t3_write_reg(adapter, A_XGM_RX_CTRL + pi->mac.offset, 0);
-	t3_write_reg(adapter, A_XGM_TX_CTRL + pi->mac.offset, F_TXEN);
-	t3_write_reg(adapter, A_XGM_RX_CTRL + pi->mac.offset, F_RXEN);
-}
-
-static void disable_tx_fifo_drain(struct adapter *adapter,
-				  struct port_info *pi)
-{
-	t3_set_reg_field(adapter, A_XGM_TXFIFO_CFG + pi->mac.offset,
-			 F_ENDROPPKT, 0);
-}
-
 void t3_os_link_fault(struct adapter *adap, int port_id, int state)
 {
 	struct net_device *dev = adap->port[port_id];
@@ -202,8 +184,6 @@ void t3_os_link_fault(struct adapter *adap, int port_id, int state)
 		struct cmac *mac = &pi->mac;
 
 		netif_carrier_on(dev);
-
-		disable_tx_fifo_drain(adap, pi);
 
 		/* Clear local faults */
 		t3_xgm_intr_disable(adap, pi->port_id);
@@ -220,12 +200,9 @@ void t3_os_link_fault(struct adapter *adap, int port_id, int state)
 		t3_xgm_intr_enable(adap, pi->port_id);
 
 		t3_mac_enable(mac, MAC_DIRECTION_TX);
-	} else {
+	} else
 		netif_carrier_off(dev);
 
-		/* Flush TX FIFO */
-		enable_tx_fifo_drain(adap, pi);
-	}
 	link_report(dev);
 }
 
@@ -255,8 +232,6 @@ void t3_os_link_changed(struct adapter *adapter, int port_id, int link_stat,
 
 	if (link_stat != netif_carrier_ok(dev)) {
 		if (link_stat) {
-			disable_tx_fifo_drain(adapter, pi);
-
 			t3_mac_enable(mac, MAC_DIRECTION_RX);
 
 			/* Clear local faults */
@@ -288,9 +263,6 @@ void t3_os_link_changed(struct adapter *adapter, int port_id, int link_stat,
 			t3_read_reg(adapter, A_XGM_INT_STATUS + pi->mac.offset);
 			t3_mac_disable(mac, MAC_DIRECTION_RX);
 			t3_link_start(&pi->phy, mac, &pi->link_config);
-
-			/* Flush TX FIFO */
-			enable_tx_fifo_drain(adapter, pi);
 		}
 
 		link_report(dev);
@@ -471,7 +443,6 @@ static int init_tp_parity(struct adapter *adap)
 		memset(req, 0, sizeof(*req));
 		req->wr.wr_hi = htonl(V_WR_OP(FW_WROPCODE_FORWARD));
 		OPCODE_TID(req) = htonl(MK_OPCODE_TID(CPL_SMT_WRITE_REQ, i));
-		req->mtu_idx = NMTUS - 1;
 		req->iff = i;
 		t3_mgmt_tx(adap, skb);
 		if (skb == adap->nofail_skb) {
@@ -990,98 +961,22 @@ static int bind_qsets(struct adapter *adap)
 	return err;
 }
 
-#define FW_VERSION __stringify(FW_VERSION_MAJOR) "."			\
-	__stringify(FW_VERSION_MINOR) "." __stringify(FW_VERSION_MICRO)
-#define FW_FNAME "cxgb3/t3fw-" FW_VERSION ".bin"
-#define TPSRAM_VERSION __stringify(TP_VERSION_MAJOR) "."		\
-	__stringify(TP_VERSION_MINOR) "." __stringify(TP_VERSION_MICRO)
-#define TPSRAM_NAME "cxgb3/t3%c_psram-" TPSRAM_VERSION ".bin"
-#define AEL2005_OPT_EDC_NAME "cxgb3/ael2005_opt_edc.bin"
-#define AEL2005_TWX_EDC_NAME "cxgb3/ael2005_twx_edc.bin"
-#define AEL2020_TWX_EDC_NAME "cxgb3/ael2020_twx_edc.bin"
-MODULE_FIRMWARE(FW_FNAME);
-MODULE_FIRMWARE("cxgb3/t3b_psram-" TPSRAM_VERSION ".bin");
-MODULE_FIRMWARE("cxgb3/t3c_psram-" TPSRAM_VERSION ".bin");
-MODULE_FIRMWARE(AEL2005_OPT_EDC_NAME);
-MODULE_FIRMWARE(AEL2005_TWX_EDC_NAME);
-MODULE_FIRMWARE(AEL2020_TWX_EDC_NAME);
-
-static inline const char *get_edc_fw_name(int edc_idx)
-{
-	const char *fw_name = NULL;
-
-	switch (edc_idx) {
-	case EDC_OPT_AEL2005:
-		fw_name = AEL2005_OPT_EDC_NAME;
-		break;
-	case EDC_TWX_AEL2005:
-		fw_name = AEL2005_TWX_EDC_NAME;
-		break;
-	case EDC_TWX_AEL2020:
-		fw_name = AEL2020_TWX_EDC_NAME;
-		break;
-	}
-	return fw_name;
-}
-
-int t3_get_edc_fw(struct cphy *phy, int edc_idx, int size)
-{
-	struct adapter *adapter = phy->adapter;
-	const struct firmware *fw;
-	char buf[64];
-	u32 csum;
-	const __be32 *p;
-	u16 *cache = phy->phy_cache;
-	int i, ret;
-
-	snprintf(buf, sizeof(buf), get_edc_fw_name(edc_idx));
-
-	ret = request_firmware(&fw, buf, &adapter->pdev->dev);
-	if (ret < 0) {
-		dev_err(&adapter->pdev->dev,
-			"could not upgrade firmware: unable to load %s\n",
-			buf);
-		return ret;
-	}
-
-	/* check size, take checksum in account */
-	if (fw->size > size + 4) {
-		CH_ERR(adapter, "firmware image too large %u, expected %d\n",
-		       (unsigned int)fw->size, size + 4);
-		ret = -EINVAL;
-	}
-
-	/* compute checksum */
-	p = (const __be32 *)fw->data;
-	for (csum = 0, i = 0; i < fw->size / sizeof(csum); i++)
-		csum += ntohl(p[i]);
-
-	if (csum != 0xffffffff) {
-		CH_ERR(adapter, "corrupted firmware image, checksum %u\n",
-		       csum);
-		ret = -EINVAL;
-	}
-
-	for (i = 0; i < size / 4 ; i++) {
-		*cache++ = (be32_to_cpu(p[i]) & 0xffff0000) >> 16;
-		*cache++ = be32_to_cpu(p[i]) & 0xffff;
-	}
-
-	release_firmware(fw);
-
-	return ret;
-}
+#define FW_FNAME "cxgb3/t3fw-%d.%d.%d.bin"
+#define TPSRAM_NAME "cxgb3/t3%c_psram-%d.%d.%d.bin"
 
 static int upgrade_fw(struct adapter *adap)
 {
 	int ret;
+	char buf[64];
 	const struct firmware *fw;
 	struct device *dev = &adap->pdev->dev;
 
-	ret = request_firmware(&fw, FW_FNAME, dev);
+	snprintf(buf, sizeof(buf), FW_FNAME, FW_VERSION_MAJOR,
+		 FW_VERSION_MINOR, FW_VERSION_MICRO);
+	ret = request_firmware(&fw, buf, dev);
 	if (ret < 0) {
 		dev_err(dev, "could not upgrade firmware: unable to load %s\n",
-			FW_FNAME);
+			buf);
 		return ret;
 	}
 	ret = t3_load_fw(adap, fw->data, fw->size);
@@ -1125,7 +1020,8 @@ static int update_tpsram(struct adapter *adap)
 	if (!rev)
 		return 0;
 
-	snprintf(buf, sizeof(buf), TPSRAM_NAME, rev);
+	snprintf(buf, sizeof(buf), TPSRAM_NAME, rev,
+		 TP_VERSION_MAJOR, TP_VERSION_MINOR, TP_VERSION_MICRO);
 
 	ret = request_firmware(&tpsram, buf, dev);
 	if (ret < 0) {
@@ -1281,7 +1177,6 @@ static void cxgb_down(struct adapter *adapter)
 
 	free_irq_resources(adapter);
 	quiesce_rx(adapter);
-	t3_sge_stop(adapter);
 	flush_workqueue(cxgb3_wq);	/* wait for external IRQ handler */
 }
 
@@ -1391,7 +1286,6 @@ static int cxgb_open(struct net_device *dev)
 	if (!other_ports)
 		schedule_chk_task(adapter);
 
-	cxgb3_event_notify(&adapter->tdev, OFFLOAD_PORT_UP, pi->port_id);
 	return 0;
 }
 
@@ -1424,7 +1318,6 @@ static int cxgb_close(struct net_device *dev)
 	if (!adapter->open_device_map)
 		cxgb_down(adapter);
 
-	cxgb3_event_notify(&adapter->tdev, OFFLOAD_PORT_DOWN, pi->port_id);
 	return 0;
 }
 
@@ -2282,8 +2175,6 @@ static int cxgb_extension_ioctl(struct net_device *dev, void __user *useraddr)
 	case CHELSIO_GET_QSET_NUM:{
 		struct ch_reg edata;
 
-		memset(&edata, 0, sizeof(struct ch_reg));
-
 		edata.cmd = CHELSIO_GET_QSET_NUM;
 		edata.val = pi->nqsets;
 		if (copy_to_user(useraddr, &edata, sizeof(edata)))
@@ -2826,7 +2717,7 @@ static int t3_adapter_error(struct adapter *adapter, int reset)
 
 	if (is_offload(adapter) &&
 	    test_bit(OFFLOAD_DEVMAP_BIT, &adapter->open_device_map)) {
-		cxgb3_event_notify(&adapter->tdev, OFFLOAD_STATUS_DOWN, 0);
+		cxgb3_err_notify(&adapter->tdev, OFFLOAD_STATUS_DOWN, 0);
 		offload_close(&adapter->tdev);
 	}
 
@@ -2891,7 +2782,7 @@ static void t3_resume_ports(struct adapter *adapter)
 	}
 
 	if (is_offload(adapter) && !ofld_disable)
-		cxgb3_event_notify(&adapter->tdev, OFFLOAD_STATUS_UP, 0);
+		cxgb3_err_notify(&adapter->tdev, OFFLOAD_STATUS_UP, 0);
 }
 
 /*

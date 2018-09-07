@@ -458,7 +458,7 @@ static void nlmclnt_locks_release_private(struct file_lock *fl)
 	nlm_put_lockowner(fl->fl_u.nfs_fl.owner);
 }
 
-static const struct file_lock_operations nlmclnt_lock_ops = {
+static struct file_lock_operations nlmclnt_lock_ops = {
 	.fl_copy_lock = nlmclnt_locks_copy_lock,
 	.fl_release_private = nlmclnt_locks_release_private,
 };
@@ -709,13 +709,7 @@ static void nlmclnt_unlock_callback(struct rpc_task *task, void *data)
 
 	if (task->tk_status < 0) {
 		dprintk("lockd: unlock failed (err = %d)\n", -task->tk_status);
-		switch (task->tk_status) {
-		case -EACCES:
-		case -EIO:
-			goto die;
-		default:
-			goto retry_rebind;
-		}
+		goto retry_rebind;
 	}
 	if (status == NLM_LCK_DENIED_GRACE_PERIOD) {
 		rpc_delay(task, NLMCLNT_GRACE_WAIT);

@@ -314,7 +314,7 @@ static struct attribute_group sd_std_attr_group = {
 	.attrs = sd_std_attrs,
 };
 
-static const struct attribute_group *sd_attr_groups[] = {
+static struct attribute_group *sd_attr_groups[] = {
 	&sd_std_attr_group,
 	NULL,
 };
@@ -561,10 +561,12 @@ static void mmc_sd_detect(struct mmc_host *host)
 	}
 }
 
+#ifdef CONFIG_MMC_UNSAFE_RESUME
+
 /*
  * Suspend callback from host.
  */
-static int mmc_sd_suspend(struct mmc_host *host)
+static void mmc_sd_suspend(struct mmc_host *host)
 {
 	BUG_ON(!host);
 	BUG_ON(!host->card);
@@ -574,8 +576,6 @@ static int mmc_sd_suspend(struct mmc_host *host)
 		mmc_deselect_cards(host);
 	host->card->state &= ~MMC_STATE_HIGHSPEED;
 	mmc_release_host(host);
-
-	return 0;
 }
 
 /*
@@ -584,7 +584,7 @@ static int mmc_sd_suspend(struct mmc_host *host)
  * This function tries to determine if the same card is still present
  * and, if so, restore all state to it.
  */
-static int mmc_sd_resume(struct mmc_host *host)
+static void mmc_sd_resume(struct mmc_host *host)
 {
 	int err;
 
@@ -595,62 +595,29 @@ static int mmc_sd_resume(struct mmc_host *host)
 	err = mmc_sd_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
 
-	return err;
-}
+	if (err) {
+		mmc_sd_remove(host);
 
-static void mmc_sd_power_restore(struct mmc_host *host)
-{
-	host->card->state &= ~MMC_STATE_HIGHSPEED;
-	mmc_claim_host(host);
-	mmc_sd_init_card(host, host->ocr, host->card);
-	mmc_release_host(host);
-}
+		mmc_claim_host(host);
+		mmc_detach_bus(host);
+		mmc_release_host(host);
+	}
 
-#ifdef CONFIG_MMC_UNSAFE_RESUME
-
-static const struct mmc_bus_ops mmc_sd_ops = {
-	.remove = mmc_sd_remove,
-	.detect = mmc_sd_detect,
-	.suspend = mmc_sd_suspend,
-	.resume = mmc_sd_resume,
-	.power_restore = mmc_sd_power_restore,
-};
-
-static void mmc_sd_attach_bus_ops(struct mmc_host *host)
-{
-	mmc_attach_bus(host, &mmc_sd_ops);
 }
 
 #else
 
-static const struct mmc_bus_ops mmc_sd_ops = {
-	.remove = mmc_sd_remove,
-	.detect = mmc_sd_detect,
-	.suspend = NULL,
-	.resume = NULL,
-	.power_restore = mmc_sd_power_restore,
-};
+#define mmc_sd_suspend NULL
+#define mmc_sd_resume NULL
 
-static const struct mmc_bus_ops mmc_sd_ops_unsafe = {
+#endif
+
+static const struct mmc_bus_ops mmc_sd_ops = {
 	.remove = mmc_sd_remove,
 	.detect = mmc_sd_detect,
 	.suspend = mmc_sd_suspend,
 	.resume = mmc_sd_resume,
-	.power_restore = mmc_sd_power_restore,
 };
-
-static void mmc_sd_attach_bus_ops(struct mmc_host *host)
-{
-	const struct mmc_bus_ops *bus_ops;
-
-	if (host->caps & MMC_CAP_NONREMOVABLE)
-		bus_ops = &mmc_sd_ops_unsafe;
-	else
-		bus_ops = &mmc_sd_ops;
-	mmc_attach_bus(host, bus_ops);
-}
-
-#endif
 
 /*
  * Starting point for SD card init.
@@ -662,7 +629,7 @@ int mmc_attach_sd(struct mmc_host *host, u32 ocr)
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
 
-	mmc_sd_attach_bus_ops(host);
+	mmc_attach_bus(host, &mmc_sd_ops);
 
 	/*
 	 * We need to get OCR a different way for SPI.

@@ -17,7 +17,6 @@
 #include <linux/etherdevice.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <linux/gpio.h>
 
 #include <net/irda/irda.h>
 #include <net/irda/irmod.h>
@@ -164,22 +163,6 @@ inline static void pxa_irda_fir_dma_tx_start(struct pxa_irda *si)
 }
 
 /*
- * Set the IrDA communications mode.
- */
-static void pxa_irda_set_mode(struct pxa_irda *si, int mode)
-{
-	if (si->pdata->transceiver_mode)
-		si->pdata->transceiver_mode(si->dev, mode);
-	else {
-		if (gpio_is_valid(si->pdata->gpio_pwdown))
-			gpio_set_value(si->pdata->gpio_pwdown,
-					!(mode & IR_OFF) ^
-					!si->pdata->gpio_pwdown_inverted);
-		pxa2xx_transceiver_mode(si->dev, mode);
-	}
-}
-
-/*
  * Set the IrDA communications speed.
  */
 static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
@@ -205,7 +188,7 @@ static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
 			pxa_irda_disable_clk(si);
 
 			/* set board transceiver to SIR mode */
-			pxa_irda_set_mode(si, IR_SIRMODE);
+			si->pdata->transceiver_mode(si->dev, IR_SIRMODE);
 
 			/* enable the STUART clock */
 			pxa_irda_enable_sirclk(si);
@@ -239,7 +222,7 @@ static int pxa_irda_set_speed(struct pxa_irda *si, int speed)
 		ICCR0 = 0;
 
 		/* set board transceiver to FIR mode */
-		pxa_irda_set_mode(si, IR_FIRMODE);
+		si->pdata->transceiver_mode(si->dev, IR_FIRMODE);
 
 		/* enable the FICP clock */
 		pxa_irda_enable_firclk(si);
@@ -521,7 +504,7 @@ static int pxa_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 			pxa_irda_set_speed(si, speed);
 		}
 		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	netif_stop_queue(dev);
@@ -556,7 +539,7 @@ static int pxa_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_kfree_skb(skb);
 	dev->trans_start = jiffies;
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static int pxa_irda_ioctl(struct net_device *dev, struct ifreq *ifreq, int cmd)
@@ -658,7 +641,7 @@ static void pxa_irda_shutdown(struct pxa_irda *si)
 	local_irq_restore(flags);
 
 	/* power off board transceiver */
-	pxa_irda_set_mode(si, IR_OFF);
+	si->pdata->transceiver_mode(si->dev, IR_OFF);
 
 	printk(KERN_DEBUG "pxa_ir: irda shutdown\n");
 }
@@ -866,26 +849,10 @@ static int pxa_irda_probe(struct platform_device *pdev)
 	if (err)
 		goto err_mem_5;
 
-	if (gpio_is_valid(si->pdata->gpio_pwdown)) {
-		err = gpio_request(si->pdata->gpio_pwdown, "IrDA switch");
-		if (err)
-			goto err_startup;
-		err = gpio_direction_output(si->pdata->gpio_pwdown,
-					!si->pdata->gpio_pwdown_inverted);
-		if (err) {
-			gpio_free(si->pdata->gpio_pwdown);
-			goto err_startup;
-		}
-	}
-
-	if (si->pdata->startup) {
+	if (si->pdata->startup)
 		err = si->pdata->startup(si->dev);
-		if (err)
-			goto err_startup;
-	}
-
-	if (gpio_is_valid(si->pdata->gpio_pwdown) && si->pdata->startup)
-		dev_warn(si->dev, "gpio_pwdown and startup() both defined!\n");
+	if (err)
+		goto err_startup;
 
 	dev->netdev_ops = &pxa_irda_netdev_ops;
 
@@ -936,8 +903,6 @@ static int pxa_irda_remove(struct platform_device *_dev)
 	if (dev) {
 		struct pxa_irda *si = netdev_priv(dev);
 		unregister_netdev(dev);
-		if (gpio_is_valid(si->pdata->gpio_pwdown))
-			gpio_free(si->pdata->gpio_pwdown);
 		if (si->pdata->shutdown)
 			si->pdata->shutdown(si->dev);
 		kfree(si->tx_buff.head);

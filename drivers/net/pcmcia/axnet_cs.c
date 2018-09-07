@@ -37,7 +37,6 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/crc32.h>
-#include <linux/mii.h>
 #include "../8390.h"
 
 #include <pcmcia/cs_types.h>
@@ -93,8 +92,7 @@ static void axnet_release(struct pcmcia_device *link);
 static int axnet_open(struct net_device *dev);
 static int axnet_close(struct net_device *dev);
 static int axnet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
-static netdev_tx_t axnet_start_xmit(struct sk_buff *skb,
-					  struct net_device *dev);
+static int axnet_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static struct net_device_stats *get_stats(struct net_device *dev);
 static void set_multicast_list(struct net_device *dev);
 static void axnet_tx_timeout(struct net_device *dev);
@@ -698,16 +696,18 @@ static const struct ethtool_ops netdev_ethtool_ops = {
 static int axnet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
     axnet_dev_t *info = PRIV(dev);
-    struct mii_ioctl_data *data = if_mii(rq);
+    u16 *data = (u16 *)&rq->ifr_ifru;
     unsigned int mii_addr = dev->base_addr + AXNET_MII_EEP;
     switch (cmd) {
     case SIOCGMIIPHY:
-	data->phy_id = info->phy_id;
+	data[0] = info->phy_id;
     case SIOCGMIIREG:		/* Read MII PHY register. */
-	data->val_out = mdio_read(mii_addr, data->phy_id, data->reg_num & 0x1f);
+	data[3] = mdio_read(mii_addr, data[0], data[1] & 0x1f);
 	return 0;
     case SIOCSMIIREG:		/* Write MII PHY register. */
-	mdio_write(mii_addr, data->phy_id, data->reg_num & 0x1f, data->val_in);
+	if (!capable(CAP_NET_ADMIN))
+	    return -EPERM;
+	mdio_write(mii_addr, data[0], data[1] & 0x1f, data[2]);
 	return 0;
     }
     return -EOPNOTSUPP;
@@ -893,6 +893,8 @@ static const char version_8390[] = KERN_INFO \
 #include <linux/in.h>
 #include <linux/interrupt.h>
 
+#include <linux/etherdevice.h>
+
 #define BUG_83C690
 
 /* These are the operational function interfaces to board-specific
@@ -1063,8 +1065,7 @@ static void axnet_tx_timeout(struct net_device *dev)
  * Sends a packet to an 8390 network device.
  */
  
-static netdev_tx_t axnet_start_xmit(struct sk_buff *skb,
-					  struct net_device *dev)
+static int axnet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	long e8390_base = dev->base_addr;
 	struct ei_device *ei_local = (struct ei_device *) netdev_priv(dev);
@@ -1178,7 +1179,7 @@ static netdev_tx_t axnet_start_xmit(struct sk_buff *skb,
 	dev_kfree_skb (skb);
 	dev->stats.tx_bytes += send_length;
     
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /**

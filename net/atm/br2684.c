@@ -69,7 +69,7 @@ struct br2684_vcc {
 	struct net_device *device;
 	/* keep old push, pop functions for chaining */
 	void (*old_push) (struct atm_vcc * vcc, struct sk_buff * skb);
-	void (*old_pop)(struct atm_vcc *vcc, struct sk_buff *skb);
+	/* void (*old_pop)(struct atm_vcc *vcc, struct sk_buff *skb); */
 	enum br2684_encaps encaps;
 	struct list_head brvccs;
 #ifdef CONFIG_ATM_BR2684_IPFILTER
@@ -142,22 +142,6 @@ static struct net_device *br2684_find_dev(const struct br2684_if_spec *s)
 	return NULL;
 }
 
-/* chained vcc->pop function.  Check if we should wake the netif_queue */
-static void br2684_pop(struct atm_vcc *vcc, struct sk_buff *skb)
-{
-	struct br2684_vcc *brvcc = BR2684_VCC(vcc);
-	struct net_device *net_dev = skb->dev;
-
-	pr_debug("br2684_pop(vcc %p ; net_dev %p )\n", vcc, net_dev);
-	brvcc->old_pop(vcc, skb);
-
-	if (!net_dev)
-		return;
-
-	if (atm_may_send(vcc, 0))
-		netif_wake_queue(net_dev);
-
-}
 /*
  * Send a packet out a particular vcc.  Not to useful right now, but paves
  * the way for multiple vcc's per itf.  Returns true if we can send,
@@ -208,25 +192,28 @@ static int br2684_xmit_vcc(struct sk_buff *skb, struct net_device *dev,
 		if (brdev->payload == p_bridged) {
 			skb_push(skb, 2);
 			memset(skb->data, 0, 2);
+		} else { /* p_routed */
+			skb_pull(skb, ETH_HLEN);
 		}
 	}
 	skb_debug(skb);
 
 	ATM_SKB(skb)->vcc = atmvcc = brvcc->atmvcc;
 	pr_debug("atm_skb(%p)->vcc(%p)->dev(%p)\n", skb, atmvcc, atmvcc->dev);
+	if (!atm_may_send(atmvcc, skb->truesize)) {
+		/*
+		 * We free this here for now, because we cannot know in a higher
+		 * layer whether the skb pointer it supplied wasn't freed yet.
+		 * Now, it always is.
+		 */
+		dev_kfree_skb(skb);
+		return 0;
+	}
 	atomic_add(skb->truesize, &sk_atm(atmvcc)->sk_wmem_alloc);
 	ATM_SKB(skb)->atm_options = atmvcc->atm_options;
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += skb->len;
 	atmvcc->send(atmvcc, skb);
-
-	if (!atm_may_send(atmvcc, 0)) {
-		netif_stop_queue(brvcc->device);
-		/*check for race with br2684_pop*/
-		if (atm_may_send(atmvcc, 0))
-			netif_start_queue(brvcc->device);
-	}
-
 	return 1;
 }
 
@@ -236,8 +223,7 @@ static inline struct br2684_vcc *pick_outgoing_vcc(const struct sk_buff *skb,
 	return list_empty(&brdev->brvccs) ? NULL : list_entry_brvcc(brdev->brvccs.next);	/* 1 vcc/dev right now */
 }
 
-static netdev_tx_t br2684_start_xmit(struct sk_buff *skb,
-				     struct net_device *dev)
+static int br2684_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct br2684_dev *brdev = BRPRIV(dev);
 	struct br2684_vcc *brvcc;
@@ -252,7 +238,7 @@ static netdev_tx_t br2684_start_xmit(struct sk_buff *skb,
 		/* netif_stop_queue(dev); */
 		dev_kfree_skb(skb);
 		read_unlock(&devs_lock);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	if (!br2684_xmit_vcc(skb, dev, brvcc)) {
 		/*
@@ -266,7 +252,7 @@ static netdev_tx_t br2684_start_xmit(struct sk_buff *skb,
 		dev->stats.tx_fifo_errors++;
 	}
 	read_unlock(&devs_lock);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*
@@ -517,10 +503,8 @@ static int br2684_regvcc(struct atm_vcc *atmvcc, void __user * arg)
 	atmvcc->user_back = brvcc;
 	brvcc->encaps = (enum br2684_encaps)be.encaps;
 	brvcc->old_push = atmvcc->push;
-	brvcc->old_pop = atmvcc->pop;
 	barrier();
 	atmvcc->push = br2684_push;
-	atmvcc->pop = br2684_pop;
 
 	__skb_queue_head_init(&queue);
 	rq = &sk_atm(atmvcc)->sk_receive_queue;
@@ -530,13 +514,12 @@ static int br2684_regvcc(struct atm_vcc *atmvcc, void __user * arg)
 	spin_unlock_irqrestore(&rq->lock, flags);
 
 	skb_queue_walk_safe(&queue, skb, tmp) {
-		struct net_device *dev;
-
-		br2684_push(atmvcc, skb);
-		dev = skb->dev;
+		struct net_device *dev = skb->dev;
 
 		dev->stats.rx_bytes -= skb->len;
 		dev->stats.rx_packets--;
+
+		br2684_push(atmvcc, skb);
 	}
 	__module_get(THIS_MODULE);
 	return 0;
@@ -551,12 +534,6 @@ static const struct net_device_ops br2684_netdev_ops = {
 	.ndo_set_mac_address	= br2684_mac_addr,
 	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
-};
-
-static const struct net_device_ops br2684_netdev_ops_routed = {
-	.ndo_start_xmit 	= br2684_start_xmit,
-	.ndo_set_mac_address	= br2684_mac_addr,
-	.ndo_change_mtu		= eth_change_mtu
 };
 
 static void br2684_setup(struct net_device *netdev)
@@ -574,10 +551,11 @@ static void br2684_setup(struct net_device *netdev)
 static void br2684_setup_routed(struct net_device *netdev)
 {
 	struct br2684_dev *brdev = BRPRIV(netdev);
-
 	brdev->net_dev = netdev;
+
 	netdev->hard_header_len = 0;
-	netdev->netdev_ops = &br2684_netdev_ops_routed;
+
+	netdev->netdev_ops = &br2684_netdev_ops;
 	netdev->addr_len = 0;
 	netdev->mtu = 1500;
 	netdev->type = ARPHRD_PPP;

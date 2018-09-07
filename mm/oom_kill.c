@@ -34,23 +34,6 @@ int sysctl_oom_dump_tasks;
 static DEFINE_SPINLOCK(zone_scan_lock);
 /* #define DEBUG */
 
-/*
- * Is all threads of the target process nodes overlap ours?
- */
-static int has_intersects_mems_allowed(struct task_struct *tsk)
-{
-	struct task_struct *t;
-
-	t = tsk;
-	do {
-		if (cpuset_mems_allowed_intersects(current, t))
-			return 1;
-		t = next_thread(t);
-	} while (t != tsk);
-
-	return 0;
-}
-
 /**
  * badness - calculate a numeric value for how bad this task has been
  * @p: task struct of which task we should calculate
@@ -75,13 +58,6 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
 	unsigned long points, cpu_time, run_time;
 	struct mm_struct *mm;
 	struct task_struct *child;
-	int oom_adj = p->signal->oom_adj;
-	struct task_cputime task_time;
-	unsigned long utime;
-	unsigned long stime;
-
-	if (oom_adj == OOM_DISABLE)
-		return 0;
 
 	task_lock(p);
 	mm = p->mm;
@@ -103,7 +79,7 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
 	/*
 	 * swapoff can easily use up all memory, so kill those first.
 	 */
-	if (p->flags & PF_OOM_ORIGIN)
+	if (p->flags & PF_SWAPOFF)
 		return ULONG_MAX;
 
 	/*
@@ -126,11 +102,8 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
          * of seconds. There is no particular reason for this other than
          * that it turned out to work very well in practice.
 	 */
-	thread_group_cputime(p, &task_time);
-	utime = cputime_to_jiffies(task_time.utime);
-	stime = cputime_to_jiffies(task_time.stime);
-	cpu_time = (utime + stime) >> (SHIFT_HZ + 3);
-
+	cpu_time = (cputime_to_jiffies(p->utime) + cputime_to_jiffies(p->stime))
+		>> (SHIFT_HZ + 3);
 
 	if (uptime >= p->start_time.tv_sec)
 		run_time = (uptime - p->start_time.tv_sec) >> 10;
@@ -171,19 +144,19 @@ unsigned long badness(struct task_struct *p, unsigned long uptime)
 	 * because p may have allocated or otherwise mapped memory on
 	 * this node before. However it will be less likely.
 	 */
-	if (!has_intersects_mems_allowed(p))
+	if (!cpuset_mems_allowed_intersects(current, p))
 		points /= 8;
 
 	/*
-	 * Adjust the score by oom_adj.
+	 * Adjust the score by oomkilladj.
 	 */
-	if (oom_adj) {
-		if (oom_adj > 0) {
+	if (p->oomkilladj) {
+		if (p->oomkilladj > 0) {
 			if (!points)
 				points = 1;
-			points <<= oom_adj;
+			points <<= p->oomkilladj;
 		} else
-			points >>= -(oom_adj);
+			points >>= -(p->oomkilladj);
 	}
 
 #ifdef DEBUG
@@ -227,13 +200,13 @@ static inline enum oom_constraint constrained_alloc(struct zonelist *zonelist,
 static struct task_struct *select_bad_process(unsigned long *ppoints,
 						struct mem_cgroup *mem)
 {
-	struct task_struct *p;
+	struct task_struct *g, *p;
 	struct task_struct *chosen = NULL;
 	struct timespec uptime;
 	*ppoints = 0;
 
 	do_posix_clock_monotonic_gettime(&uptime);
-	for_each_process(p) {
+	do_each_thread(g, p) {
 		unsigned long points;
 
 		/*
@@ -278,7 +251,7 @@ static struct task_struct *select_bad_process(unsigned long *ppoints,
 			*ppoints = ULONG_MAX;
 		}
 
-		if (p->signal->oom_adj == OOM_DISABLE)
+		if (p->oomkilladj == OOM_DISABLE)
 			continue;
 
 		points = badness(p, uptime.tv_sec);
@@ -286,7 +259,7 @@ static struct task_struct *select_bad_process(unsigned long *ppoints,
 			chosen = p;
 			*ppoints = points;
 		}
-	}
+	} while_each_thread(g, p);
 
 	return chosen;
 }
@@ -331,7 +304,7 @@ static void dump_tasks(const struct mem_cgroup *mem)
 		}
 		printk(KERN_INFO "[%5d] %5d %5d %8lu %8lu %3d     %3d %s\n",
 		       p->pid, __task_cred(p)->uid, p->tgid, mm->total_vm,
-		       get_mm_rss(mm), (int)task_cpu(p), p->signal->oom_adj,
+		       get_mm_rss(mm), (int)task_cpu(p), p->oomkilladj,
 		       p->comm);
 		task_unlock(p);
 	} while_each_thread(g, p);
@@ -373,6 +346,11 @@ static void __oom_kill_task(struct task_struct *p, int verbose)
 
 static int oom_kill_task(struct task_struct *p)
 {
+	struct mm_struct *mm;
+	struct task_struct *g, *q;
+
+	mm = p->mm;
+
 	/* WARNING: mm may not be dereferenced since we did not obtain its
 	 * value from get_task_mm(p).  This is OK since all we need to do is
 	 * compare mm to q->mm below.
@@ -381,10 +359,29 @@ static int oom_kill_task(struct task_struct *p)
 	 * change to NULL at any time since we do not hold task_lock(p).
 	 * However, this is of no concern to us.
 	 */
-	if (!p->mm || p->signal->oom_adj == OOM_DISABLE)
+
+	if (mm == NULL)
 		return 1;
 
+	/*
+	 * Don't kill the process if any threads are set to OOM_DISABLE
+	 */
+	do_each_thread(g, q) {
+		if (q->mm == mm && q->oomkilladj == OOM_DISABLE)
+			return 1;
+	} while_each_thread(g, q);
+
 	__oom_kill_task(p, 1);
+
+	/*
+	 * kill all processes that share the ->mm (i.e. all threads),
+	 * but are in a different thread group. Don't let them have access
+	 * to memory reserves though, otherwise we might deplete all memory.
+	 */
+	do_each_thread(g, q) {
+		if (q->mm == mm && !same_thread_group(q, p))
+			force_sig(SIGKILL, q);
+	} while_each_thread(g, q);
 
 	return 0;
 }
@@ -397,9 +394,8 @@ static int oom_kill_process(struct task_struct *p, gfp_t gfp_mask, int order,
 
 	if (printk_ratelimit()) {
 		printk(KERN_WARNING "%s invoked oom-killer: "
-			"gfp_mask=0x%x, order=%d, oom_adj=%d\n",
-			current->comm, gfp_mask, order,
-			current->signal->oom_adj);
+			"gfp_mask=0x%x, order=%d, oomkilladj=%d\n",
+			current->comm, gfp_mask, order, current->oomkilladj);
 		task_lock(current);
 		cpuset_print_task_mems_allowed(current);
 		task_unlock(current);
@@ -425,8 +421,6 @@ static int oom_kill_process(struct task_struct *p, gfp_t gfp_mask, int order,
 	/* Try to kill a child first */
 	list_for_each_entry(c, &p->children, sibling) {
 		if (c->mm == p->mm)
-			continue;
-		if (mem && !task_in_mem_cgroup(c, mem))
 			continue;
 		if (!oom_kill_task(c))
 			return 0;

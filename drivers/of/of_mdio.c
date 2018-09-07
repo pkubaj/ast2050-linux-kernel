@@ -97,12 +97,6 @@ int of_mdiobus_register(struct mii_bus *mdio, struct device_node *np)
 }
 EXPORT_SYMBOL(of_mdiobus_register);
 
-/* Helper function for of_phy_find_device */
-static int of_phy_match(struct device *dev, void *phy_np)
-{
-	return dev_archdata_get_node(&dev->archdata) == phy_np;
-}
-
 /**
  * of_phy_find_device - Give a PHY node, find the phy_device
  * @phy_np: Pointer to the phy's device tree node
@@ -112,10 +106,15 @@ static int of_phy_match(struct device *dev, void *phy_np)
 struct phy_device *of_phy_find_device(struct device_node *phy_np)
 {
 	struct device *d;
+	int match(struct device *dev, void *phy_np)
+	{
+		return dev_archdata_get_node(&dev->archdata) == phy_np;
+	}
+
 	if (!phy_np)
 		return NULL;
 
-	d = bus_find_device(&mdio_bus_type, NULL, phy_np, of_phy_match);
+	d = bus_find_device(&mdio_bus_type, NULL, phy_np, match);
 	return d ? to_phy_device(d) : NULL;
 }
 EXPORT_SYMBOL(of_phy_find_device);

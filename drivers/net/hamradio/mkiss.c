@@ -258,7 +258,7 @@ static void ax_bump(struct mkiss *ax)
 			}
 			if (ax->crcmode != CRC_MODE_SMACK && ax->crcauto) {
 				printk(KERN_INFO
-				       "mkiss: %s: Switching to crc-smack\n",
+				       "mkiss: %s: Switchting to crc-smack\n",
 				       ax->dev->name);
 				ax->crcmode = CRC_MODE_SMACK;
 			}
@@ -272,7 +272,7 @@ static void ax_bump(struct mkiss *ax)
 			}
 			if (ax->crcmode != CRC_MODE_FLEX && ax->crcauto) {
 				printk(KERN_INFO
-				       "mkiss: %s: Switching to crc-flexnet\n",
+				       "mkiss: %s: Switchting to crc-flexnet\n",
 				       ax->dev->name);
 				ax->crcmode = CRC_MODE_FLEX;
 			}
@@ -525,7 +525,7 @@ static void ax_encaps(struct net_device *dev, unsigned char *icp, int len)
 }
 
 /* Encapsulate an AX.25 packet and kick it into a TTY queue. */
-static netdev_tx_t ax_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ax_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct mkiss *ax = netdev_priv(dev);
 
@@ -560,7 +560,7 @@ static netdev_tx_t ax_xmit(struct sk_buff *skb, struct net_device *dev)
 		kfree_skb(skb);
 	}
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static int ax_open_dev(struct net_device *dev)
@@ -811,10 +811,10 @@ static void mkiss_close(struct tty_struct *tty)
 {
 	struct mkiss *ax;
 
-	write_lock_bh(&disc_data_lock);
+	write_lock(&disc_data_lock);
 	ax = tty->disc_data;
 	tty->disc_data = NULL;
-	write_unlock_bh(&disc_data_lock);
+	write_unlock(&disc_data_lock);
 
 	if (!ax)
 		return;

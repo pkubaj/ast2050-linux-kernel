@@ -69,13 +69,12 @@ static unsigned long read_rtc_mmss(void)
 	if ((year += 1900) < 1970)
 		year += 100;
 
-	return  mktime(year, mon, day, hour, min, sec);
+	return  mktime(year, mon, day, hour, min, sec);;
 }
 
-void read_persistent_clock(struct timespec *ts)
+unsigned long read_persistent_clock(void)
 {
-	ts->tv_sec = read_rtc_mmss();
-	ts->tv_nsec = 0;
+	return read_rtc_mmss();
 }
 
 int update_persistent_clock(struct timespec now)

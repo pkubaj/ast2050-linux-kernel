@@ -63,6 +63,7 @@ struct kvm_kpic_state {
 
 struct kvm_pic {
 	spinlock_t lock;
+	bool wakeup_needed;
 	unsigned pending_acks;
 	struct kvm *kvm;
 	struct kvm_kpic_state pics[2]; /* 0 is master pic, 1 is slave pic */
@@ -85,11 +86,7 @@ static inline struct kvm_pic *pic_irqchip(struct kvm *kvm)
 
 static inline int irqchip_in_kernel(struct kvm *kvm)
 {
-	int ret;
-
-	ret = (pic_irqchip(kvm) != NULL);
-	smp_rmb();
-	return ret;
+	return pic_irqchip(kvm) != NULL;
 }
 
 void kvm_pic_reset(struct kvm_kpic_state *s);

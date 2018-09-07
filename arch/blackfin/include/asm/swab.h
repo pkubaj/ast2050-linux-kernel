@@ -1,9 +1,3 @@
-/*
- * Copyright 2009 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
- */
-
 #ifndef _BLACKFIN_SWAB_H
 #define _BLACKFIN_SWAB_H
 

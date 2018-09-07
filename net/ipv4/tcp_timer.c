@@ -65,18 +65,18 @@ static void tcp_write_err(struct sock *sk)
 static int tcp_out_of_resources(struct sock *sk, int do_reset)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	int shift = 0;
+	int orphans = percpu_counter_read_positive(&tcp_orphan_count);
 
 	/* If peer does not open window for long time, or did not transmit
 	 * anything for long time, penalize it. */
 	if ((s32)(tcp_time_stamp - tp->lsndtime) > 2*TCP_RTO_MAX || !do_reset)
-		shift++;
+		orphans <<= 1;
 
 	/* If some dubious ICMP arrived, penalize even more. */
 	if (sk->sk_err_soft)
-		shift++;
+		orphans <<= 1;
 
-	if (tcp_too_many_orphans(sk, shift)) {
+	if (tcp_too_many_orphans(sk, orphans)) {
 		if (net_ratelimit())
 			printk(KERN_INFO "Out of socket memory\n");
 
@@ -137,14 +137,13 @@ static int tcp_write_timeout(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int retry_until;
-	bool do_reset;
 
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
 		if (icsk->icsk_retransmits)
 			dst_negative_advice(&sk->sk_dst_cache);
 		retry_until = icsk->icsk_syn_retries ? : sysctl_tcp_syn_retries;
 	} else {
-		if (retransmits_timed_out(sk, sysctl_tcp_retries1)) {
+		if (icsk->icsk_retransmits >= sysctl_tcp_retries1) {
 			/* Black hole detection */
 			tcp_mtu_probing(icsk, sk);
 
@@ -156,15 +155,13 @@ static int tcp_write_timeout(struct sock *sk)
 			const int alive = (icsk->icsk_rto < TCP_RTO_MAX);
 
 			retry_until = tcp_orphan_retries(sk, alive);
-			do_reset = alive ||
-				   !retransmits_timed_out(sk, retry_until);
 
-			if (tcp_out_of_resources(sk, do_reset))
+			if (tcp_out_of_resources(sk, alive || icsk->icsk_retransmits < retry_until))
 				return 1;
 		}
 	}
 
-	if (retransmits_timed_out(sk, retry_until)) {
+	if (icsk->icsk_retransmits >= retry_until) {
 		/* Has it gone just too far? */
 		tcp_write_err(sk);
 		return 1;
@@ -282,7 +279,7 @@ static void tcp_probe_timer(struct sock *sk)
  *	The TCP retransmit timer.
  */
 
-void tcp_retransmit_timer(struct sock *sk)
+static void tcp_retransmit_timer(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
@@ -388,7 +385,7 @@ void tcp_retransmit_timer(struct sock *sk)
 out_reset_timer:
 	icsk->icsk_rto = min(icsk->icsk_rto << 1, TCP_RTO_MAX);
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, icsk->icsk_rto, TCP_RTO_MAX);
-	if (retransmits_timed_out(sk, sysctl_tcp_retries1 + 1))
+	if (icsk->icsk_retransmits > sysctl_tcp_retries1)
 		__sk_dst_reset(sk);
 
 out:;
@@ -502,7 +499,8 @@ static void tcp_keepalive_timer (unsigned long data)
 	elapsed = tcp_time_stamp - tp->rcv_tstamp;
 
 	if (elapsed >= keepalive_time_when(tp)) {
-		if (icsk->icsk_probes_out >= keepalive_probes(tp)) {
+		if ((!tp->keepalive_probes && icsk->icsk_probes_out >= sysctl_tcp_keepalive_probes) ||
+		     (tp->keepalive_probes && icsk->icsk_probes_out >= tp->keepalive_probes)) {
 			tcp_send_active_reset(sk, GFP_ATOMIC);
 			tcp_write_err(sk);
 			goto out;

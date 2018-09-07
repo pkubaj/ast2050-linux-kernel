@@ -74,8 +74,7 @@ extern void nfs_fscache_get_client_cookie(struct nfs_client *);
 extern void nfs_fscache_release_client_cookie(struct nfs_client *);
 
 extern void nfs_fscache_get_super_cookie(struct super_block *,
-					 const char *,
-					 struct nfs_clone_mount *);
+					 struct nfs_parsed_mount_data *);
 extern void nfs_fscache_release_super_cookie(struct super_block *);
 
 extern void nfs_fscache_init_inode_cookie(struct inode *);
@@ -174,8 +173,7 @@ static inline void nfs_fscache_release_client_cookie(struct nfs_client *clp) {}
 
 static inline void nfs_fscache_get_super_cookie(
 	struct super_block *sb,
-	const char *uniq,
-	struct nfs_clone_mount *mntdata)
+	struct nfs_parsed_mount_data *data)
 {
 }
 static inline void nfs_fscache_release_super_cookie(struct super_block *sb) {}

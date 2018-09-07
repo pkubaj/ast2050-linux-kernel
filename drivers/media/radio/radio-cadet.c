@@ -38,7 +38,6 @@
 #include <linux/videodev2.h>	/* V4L2 API defs		*/
 #include <linux/param.h>
 #include <linux/pnp.h>
-#include <linux/sched.h>
 #include <linux/io.h>		/* outb, outb_p			*/
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
@@ -360,8 +359,7 @@ static int vidioc_querycap(struct file *file, void *priv,
 	strlcpy(v->card, "ADS Cadet", sizeof(v->card));
 	strlcpy(v->bus_info, "ISA", sizeof(v->bus_info));
 	v->version = CADET_VERSION;
-	v->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO |
-			  V4L2_CAP_READWRITE | V4L2_CAP_RDS_CAPTURE;
+	v->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO | V4L2_CAP_READWRITE;
 	return 0;
 }
 
@@ -374,7 +372,7 @@ static int vidioc_g_tuner(struct file *file, void *priv,
 	switch (v->index) {
 	case 0:
 		strlcpy(v->name, "FM", sizeof(v->name));
-		v->capability = V4L2_TUNER_CAP_STEREO | V4L2_TUNER_CAP_RDS;
+		v->capability = V4L2_TUNER_CAP_STEREO;
 		v->rangelow = 1400;     /* 87.5 MHz */
 		v->rangehigh = 1728;    /* 108.0 MHz */
 		v->rxsubchans = cadet_getstereo(dev);
@@ -388,7 +386,6 @@ static int vidioc_g_tuner(struct file *file, void *priv,
 		default:
 			break;
 		}
-		v->rxsubchans |= V4L2_TUNER_SUB_RDS;
 		break;
 	case 1:
 		strlcpy(v->name, "AM", sizeof(v->name));

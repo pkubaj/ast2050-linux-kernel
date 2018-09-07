@@ -5,7 +5,7 @@
  * Copyright IBM Corp. 1999, 2009
  */
 
-#define KMSG_COMPONENT "dasd-fba"
+#define KMSG_COMPONENT "dasd"
 
 #include <linux/stddef.h>
 #include <linux/kernel.h>
@@ -141,8 +141,9 @@ dasd_fba_check_characteristics(struct dasd_device *device)
 	}
 	block = dasd_alloc_block();
 	if (IS_ERR(block)) {
-		DBF_EVENT_DEVID(DBF_WARNING, cdev, "%s", "could not allocate "
-				"dasd block structure");
+		DBF_EVENT(DBF_WARNING, "could not allocate dasd block "
+			  "structure for device: %s",
+			  dev_name(&device->cdev->dev));
 		device->private = NULL;
 		kfree(private);
 		return PTR_ERR(block);
@@ -151,11 +152,12 @@ dasd_fba_check_characteristics(struct dasd_device *device)
 	block->base = device;
 
 	/* Read Device Characteristics */
-	rc = dasd_generic_read_dev_chars(device, DASD_FBA_MAGIC,
-					 &private->rdc_data, 32);
+	rc = dasd_generic_read_dev_chars(device, "FBA ", &private->rdc_data,
+					 32);
 	if (rc) {
-		DBF_EVENT_DEVID(DBF_WARNING, cdev, "Read device "
-				"characteristics returned error %d", rc);
+		DBF_EVENT(DBF_WARNING, "Read device characteristics returned "
+			  "error %d for device: %s",
+			  rc, dev_name(&device->cdev->dev));
 		device->block = NULL;
 		dasd_free_block(block);
 		device->private = NULL;
@@ -303,7 +305,8 @@ static struct dasd_ccw_req *dasd_fba_build_cp(struct dasd_device * memdev,
 		datasize += (count - 1)*sizeof(struct LO_fba_data);
 	}
 	/* Allocate the ccw request. */
-	cqr = dasd_smalloc_request(DASD_FBA_MAGIC, cplength, datasize, memdev);
+	cqr = dasd_smalloc_request(dasd_fba_discipline.name,
+				   cplength, datasize, memdev);
 	if (IS_ERR(cqr))
 		return cqr;
 	ccw = cqr->cpaddr;

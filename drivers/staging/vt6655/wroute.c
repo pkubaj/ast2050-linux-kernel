@@ -31,13 +31,25 @@
  *
  */
 
-#include "mac.h"
-#include "tcrc.h"
-#include "rxtx.h"
-#include "wroute.h"
-#include "card.h"
-#include "baseband.h"
 
+#if !defined(__MAC_H__)
+#include "mac.h"
+#endif
+#if !defined(__TCRC_H__)
+#include "tcrc.h"
+#endif
+#if !defined(__RXTX_H__)
+#include "rxtx.h"
+#endif
+#if !defined(__WROUTE_H__)
+#include "wroute.h"
+#endif
+#if !defined(__CARD_H__)
+#include "card.h"
+#endif
+#if !defined(__BASEBAND_H__)
+#include "baseband.h"
+#endif
 /*---------------------  Static Definitions -------------------------*/
 
 /*---------------------  Static Classes  ----------------------------*/
@@ -71,7 +83,7 @@ BOOL ROUTEbRelay (PSDevice pDevice, PBYTE pbySkbData, UINT uDataLen, UINT uNodeI
     PSTxDesc        pHeadTD, pLastTD;
     UINT            cbFrameBodySize;
     UINT            uMACfragNum;
-    BYTE            byPktType;
+    BYTE            byPktTyp;
     BOOL            bNeedEncryption = FALSE;
     SKeyItem        STempKey;
     PSKeyItem       pTransmitKey = NULL;
@@ -83,7 +95,7 @@ BOOL ROUTEbRelay (PSDevice pDevice, PBYTE pbySkbData, UINT uDataLen, UINT uNodeI
 
 
     if (AVAIL_TD(pDevice, TYPE_AC0DMA)<=0) {
-        DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO "Relay can't allocate TD1..\n");
+        DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO "Relay can't allocate TD1..\n");
         return FALSE;
     }
 
@@ -106,9 +118,9 @@ BOOL ROUTEbRelay (PSDevice pDevice, PBYTE pbySkbData, UINT uDataLen, UINT uNodeI
         pbyBSSID = pDevice->abyBroadcastAddr;
         if(KeybGetTransmitKey(&(pDevice->sKey), pbyBSSID, GROUP_KEY, &pTransmitKey) == FALSE) {
             pTransmitKey = NULL;
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_DEBUG"KEY is NULL. [%d]\n", pDevice->pMgmt->eCurrMode);
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_DEBUG"KEY is NULL. [%d]\n", pDevice->pMgmt->eCurrMode);
         } else {
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_DEBUG"Get GTK.\n");
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_DEBUG"Get GTK.\n");
         }
     }
 
@@ -132,7 +144,7 @@ BOOL ROUTEbRelay (PSDevice pDevice, PBYTE pbySkbData, UINT uDataLen, UINT uNodeI
     if (uMACfragNum > AVAIL_TD(pDevice,TYPE_AC0DMA)) {
         return FALSE;
     }
-    byPktType = (BYTE)pDevice->byPacketType;
+    byPktTyp = (BYTE)pDevice->byPacketType;
 
     if (pDevice->bFixRate) {
         if (pDevice->eCurrentPHYType == PHY_TYPE_11B) {
@@ -158,9 +170,9 @@ BOOL ROUTEbRelay (PSDevice pDevice, PBYTE pbySkbData, UINT uDataLen, UINT uNodeI
     }
 
     if (pDevice->wCurrentRate <= RATE_11M)
-        byPktType = PK_TYPE_11B;
+        byPktTyp = PK_TYPE_11B;
 
-    vGenerateFIFOHeader(pDevice, byPktType, pDevice->pbyTmpBuff, bNeedEncryption,
+    vGenerateFIFOHeader(pDevice, byPktTyp, pDevice->pbyTmpBuff, bNeedEncryption,
                         cbFrameBodySize, TYPE_AC0DMA, pHeadTD,
                         &pDevice->sTxEthHeader, pbySkbData, pTransmitKey, uNodeIndex,
                         &uMACfragNum,

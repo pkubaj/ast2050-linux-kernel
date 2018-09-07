@@ -18,7 +18,6 @@
  */
 #include <linux/in.h>
 #include <linux/in6.h>
-#include <linux/slow-work.h>
 #include "cifs_fs_sb.h"
 #include "cifsacl.h"
 /*
@@ -33,7 +32,7 @@
 #define MAX_SHARE_SIZE  64	/* used to be 20, this should still be enough */
 #define MAX_USERNAME_SIZE 32	/* 32 is to allow for 15 char names + null
 				   termination then *2 for unicode versions */
-#define MAX_PASSWORD_SIZE 512  /* max for windows seems to be 256 wide chars */
+#define MAX_PASSWORD_SIZE 16
 
 #define CIFS_MIN_RCV_POOL 4
 
@@ -347,32 +346,15 @@ struct cifsFileInfo {
 	/* lock scope id (0 if none) */
 	struct file *pfile; /* needed for writepage */
 	struct inode *pInode; /* needed for oplock break */
-	struct vfsmount *mnt;
 	struct mutex lock_mutex;
 	struct list_head llist; /* list of byte range locks we have. */
 	bool closePend:1;	/* file is marked to close */
 	bool invalidHandle:1;	/* file closed via session abend */
-	bool oplock_break_cancelled:1;
-	atomic_t count;		/* reference count */
+	bool messageMode:1;	/* for pipes: message vs byte mode */
+	atomic_t wrtPending;   /* handle in use - defer close */
 	struct mutex fh_mutex; /* prevents reopen race after dead ses*/
 	struct cifs_search_info srch_inf;
-	struct slow_work oplock_break; /* slow_work job for oplock breaks */
 };
-
-/* Take a reference on the file private data */
-static inline void cifsFileInfo_get(struct cifsFileInfo *cifs_file)
-{
-	atomic_inc(&cifs_file->count);
-}
-
-/* Release a reference on the file private data */
-static inline void cifsFileInfo_put(struct cifsFileInfo *cifs_file)
-{
-	if (atomic_dec_and_test(&cifs_file->count)) {
-		iput(cifs_file->pInode);
-		kfree(cifs_file);
-	}
-}
 
 /*
  * One of these for each file inode
@@ -387,6 +369,7 @@ struct cifsInodeInfo {
 	unsigned long time;	/* jiffies of last update/check of inode */
 	bool clientCanCacheRead:1;	/* read oplock */
 	bool clientCanCacheAll:1;	/* read and writebehind oplock */
+	bool oplockPending:1;
 	bool delete_pending:1;		/* DELETE_ON_CLOSE is set */
 	u64  server_eof;		/* current file size on server */
 	u64  uniqueid;			/* server inode number */
@@ -499,7 +482,6 @@ struct dfs_info3_param {
 #define CIFS_FATTR_DFS_REFERRAL		0x1
 #define CIFS_FATTR_DELETE_PENDING	0x2
 #define CIFS_FATTR_NEED_REVAL		0x4
-#define CIFS_FATTR_INO_COLLISION	0x8
 
 struct cifs_fattr {
 	u32		cf_flags;
@@ -674,6 +656,8 @@ GLOBAL_EXTERN rwlock_t		cifs_tcp_ses_lock;
  */
 GLOBAL_EXTERN rwlock_t GlobalSMBSeslock;
 
+GLOBAL_EXTERN struct list_head GlobalOplock_Q;
+
 /* Outstanding dir notify requests */
 GLOBAL_EXTERN struct list_head GlobalDnotifyReqList;
 /* DirNotify response queue */
@@ -724,4 +708,3 @@ GLOBAL_EXTERN unsigned int cifs_min_rcv;    /* min size of big ntwrk buf pool */
 GLOBAL_EXTERN unsigned int cifs_min_small;  /* min size of small buf pool */
 GLOBAL_EXTERN unsigned int cifs_max_pending; /* MAX requests at once to server*/
 
-extern const struct slow_work_ops cifs_oplock_break_ops;

@@ -64,15 +64,13 @@ int falcon_reset_xaui(struct efx_nic *efx)
 	efx_oword_t reg;
 	int count;
 
-	/* Start reset sequence */
 	EFX_POPULATE_DWORD_1(reg, XX_RST_XX_EN, 1);
 	falcon_write(efx, &reg, XX_PWR_RST_REG);
 
-	/* Wait up to 10 ms for completion, then reinitialise */
-	for (count = 0; count < 1000; count++) {
+	/* Give some time for the link to establish */
+	for (count = 0; count < 1000; count++) { /* wait upto 10ms */
 		falcon_read(efx, &reg, XX_PWR_RST_REG);
-		if (EFX_OWORD_FIELD(reg, XX_RST_XX_EN) == 0 &&
-		    EFX_OWORD_FIELD(reg, XX_SD_RST_ACT) == 0) {
+		if (EFX_OWORD_FIELD(reg, XX_RST_XX_EN) == 0) {
 			falcon_setup_xaui(efx);
 			return 0;
 		}

@@ -32,6 +32,7 @@
  * SOFTWARE.
  */
 
+#include <linux/init.h>
 #include <linux/errno.h>
 
 #include <linux/mlx4/cmd.h>

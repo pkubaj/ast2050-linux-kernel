@@ -727,8 +727,7 @@ static void rtl8150_set_multicast(struct net_device *netdev)
 	netif_wake_queue(netdev);
 }
 
-static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
-					    struct net_device *netdev)
+static int rtl8150_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	rtl8150_t *dev = netdev_priv(netdev);
 	int count, res;
@@ -754,7 +753,7 @@ static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
 		netdev->trans_start = jiffies;
 	}
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 
@@ -865,7 +864,7 @@ static int rtl8150_get_settings(struct net_device *netdev, struct ethtool_cmd *e
 	return 0;
 }
 
-static const struct ethtool_ops ops = {
+static struct ethtool_ops ops = {
 	.get_drvinfo = rtl8150_get_drvinfo,
 	.get_settings = rtl8150_get_settings,
 	.get_link = ethtool_op_get_link

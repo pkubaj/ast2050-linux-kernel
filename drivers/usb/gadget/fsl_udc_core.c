@@ -489,7 +489,7 @@ static int fsl_ep_enable(struct usb_ep *_ep,
 	case USB_ENDPOINT_XFER_ISOC:
 		/* Calculate transactions needed for high bandwidth iso */
 		mult = (unsigned char)(1 + ((max >> 11) & 0x03));
-		max = max & 0x7ff;	/* bit 0~10 */
+		max = max & 0x8ff;	/* bit 0~10 */
 		/* 3 transactions at most */
 		if (mult > 3)
 			goto en_done;
@@ -2139,7 +2139,7 @@ static int fsl_proc_read(char *page, char **start, off_t off, int count,
 static void fsl_udc_release(struct device *dev)
 {
 	complete(udc_controller->done);
-	dma_free_coherent(dev->parent, udc_controller->ep_qh_size,
+	dma_free_coherent(dev, udc_controller->ep_qh_size,
 			udc_controller->ep_qh, udc_controller->ep_qh_dma);
 	kfree(udc_controller);
 }

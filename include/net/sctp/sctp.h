@@ -486,16 +486,15 @@ static inline __s32 sctp_jitter(__u32 rto)
 }
 
 /* Break down data chunks at this point.  */
-static inline int sctp_frag_point(const struct sctp_association *asoc, int pmtu)
+static inline int sctp_frag_point(const struct sctp_sock *sp, int pmtu)
 {
-	struct sctp_sock *sp = sctp_sk(asoc->base.sk);
 	int frag = pmtu;
 
 	frag -= sp->pf->af->net_header_len;
 	frag -= sizeof(struct sctphdr) + sizeof(struct sctp_data_chunk);
 
-	if (asoc->user_frag)
-		frag = min_t(int, frag, asoc->user_frag);
+	if (sp->user_frag)
+		frag = min_t(int, frag, sp->user_frag);
 
 	frag = min_t(int, frag, SCTP_MAX_CHUNK_LEN);
 
@@ -507,11 +506,6 @@ static inline void sctp_assoc_pending_pmtu(struct sctp_association *asoc)
 
 	sctp_assoc_sync_pmtu(asoc);
 	asoc->pmtu_pending = 0;
-}
-
-static inline bool sctp_chunk_pending(const struct sctp_chunk *chunk)
-{
-	return !list_empty(&chunk->list);
 }
 
 /* Walk through a list of TLV parameters.  Don't trust the

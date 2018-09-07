@@ -37,7 +37,6 @@
 
 #include <linux/interrupt.h>	/* For task queue support */
 
-#include <linux/vgaarb.h>
 /**
  * Get interrupt from bus id.
  *
@@ -172,26 +171,6 @@ err:
 }
 EXPORT_SYMBOL(drm_vblank_init);
 
-static void drm_irq_vgaarb_nokms(void *cookie, bool state)
-{
-	struct drm_device *dev = cookie;
-
-	if (dev->driver->vgaarb_irq) {
-		dev->driver->vgaarb_irq(dev, state);
-		return;
-	}
-
-	if (!dev->irq_enabled)
-		return;
-
-	if (state)
-		dev->driver->irq_uninstall(dev);
-	else {
-		dev->driver->irq_preinstall(dev);
-		dev->driver->irq_postinstall(dev);
-	}
-}
-
 /**
  * Install IRQ handler.
  *
@@ -252,9 +231,6 @@ int drm_irq_install(struct drm_device *dev)
 		return ret;
 	}
 
-	if (!drm_core_check_feature(dev, DRIVER_MODESET))
-		vga_client_register(dev->pdev, (void *)dev, drm_irq_vgaarb_nokms, NULL);
-
 	/* After installing handler */
 	ret = dev->driver->irq_postinstall(dev);
 	if (ret < 0) {
@@ -302,9 +278,6 @@ int drm_irq_uninstall(struct drm_device * dev)
 		return -EINVAL;
 
 	DRM_DEBUG("irq=%d\n", dev->pdev->irq);
-
-	if (!drm_core_check_feature(dev, DRIVER_MODESET))
-		vga_client_register(dev->pdev, NULL, NULL, NULL);
 
 	dev->driver->irq_uninstall(dev);
 
@@ -540,8 +513,7 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv)
 {
 	struct drm_modeset_ctl *modeset = data;
-	int ret = 0;
-	unsigned int crtc;
+	int crtc, ret = 0;
 
 	/* If drm_vblank_init() hasn't been called yet, just no-op */
 	if (!dev->num_crtcs)

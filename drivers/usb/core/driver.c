@@ -207,9 +207,6 @@ static int usb_probe_interface(struct device *dev)
 
 	intf->needs_binding = 0;
 
-	if (usb_device_is_owned(udev))
-		return -ENODEV;
-
 	if (udev->authorized == 0) {
 		dev_err(&intf->dev, "Device is not authorized for usage\n");
 		return -ENODEV;
@@ -235,34 +232,27 @@ static int usb_probe_interface(struct device *dev)
 		/* The interface should always appear to be in use
 		 * unless the driver suports autosuspend.
 		 */
-		atomic_set(&intf->pm_usage_cnt, !driver->supports_autosuspend);
+		intf->pm_usage_cnt = !(driver->supports_autosuspend);
 
 		/* Carry out a deferred switch to altsetting 0 */
 		if (intf->needs_altsetting0) {
-			error = usb_set_interface(udev, intf->altsetting[0].
+			usb_set_interface(udev, intf->altsetting[0].
 					desc.bInterfaceNumber, 0);
-			if (error < 0)
-				goto err;
-
 			intf->needs_altsetting0 = 0;
 		}
 
 		error = driver->probe(intf, id);
-		if (error)
-			goto err;
+		if (error) {
+			mark_quiesced(intf);
+			intf->needs_remote_wakeup = 0;
+			intf->condition = USB_INTERFACE_UNBOUND;
+			usb_cancel_queued_reset(intf);
+		} else
+			intf->condition = USB_INTERFACE_BOUND;
 
-		intf->condition = USB_INTERFACE_BOUND;
 		usb_autosuspend_device(udev);
 	}
 
-	return error;
-
-err:
-	mark_quiesced(intf);
-	intf->needs_remote_wakeup = 0;
-	intf->condition = USB_INTERFACE_UNBOUND;
-	usb_cancel_queued_reset(intf);
-	usb_autosuspend_device(udev);
 	return error;
 }
 
@@ -272,7 +262,7 @@ static int usb_unbind_interface(struct device *dev)
 	struct usb_driver *driver = to_usb_driver(dev->driver);
 	struct usb_interface *intf = to_usb_interface(dev);
 	struct usb_device *udev;
-	int error, r;
+	int error;
 
 	intf->condition = USB_INTERFACE_UNBINDING;
 
@@ -300,14 +290,11 @@ static int usb_unbind_interface(struct device *dev)
 		 * Just re-enable it without affecting the endpoint toggles.
 		 */
 		usb_enable_interface(udev, intf, false);
-	} else if (!error && intf->dev.power.status == DPM_ON) {
-		r = usb_set_interface(udev, intf->altsetting[0].
+	} else if (!error && intf->dev.power.status == DPM_ON)
+		usb_set_interface(udev, intf->altsetting[0].
 				desc.bInterfaceNumber, 0);
-		if (r < 0)
-			intf->needs_altsetting0 = 1;
-	} else {
+	else
 		intf->needs_altsetting0 = 1;
-	}
 	usb_set_intfdata(intf, NULL);
 
 	intf->condition = USB_INTERFACE_UNBOUND;
@@ -357,7 +344,7 @@ int usb_driver_claim_interface(struct usb_driver *driver,
 	usb_pm_lock(udev);
 	iface->condition = USB_INTERFACE_BOUND;
 	mark_active(iface);
-	atomic_set(&iface->pm_usage_cnt, !driver->supports_autosuspend);
+	iface->pm_usage_cnt = !(driver->supports_autosuspend);
 	usb_pm_unlock(udev);
 
 	/* if interface was already added, bind now; else let
@@ -625,6 +612,9 @@ static int usb_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	struct usb_device *usb_dev;
 
+	/* driver is often null here; dev_dbg() would oops */
+	pr_debug("usb %s: uevent\n", dev_name(dev));
+
 	if (is_usb_device(dev)) {
 		usb_dev = to_usb_device(dev);
 	} else if (is_usb_interface(dev)) {
@@ -636,7 +626,6 @@ static int usb_uevent(struct device *dev, struct kobj_uevent_env *env)
 	}
 
 	if (usb_dev->devnum < 0) {
-		/* driver is often null here; dev_dbg() would oops */
 		pr_debug("usb %s: already deleted?\n", dev_name(dev));
 		return -ENODEV;
 	}
@@ -1076,7 +1065,7 @@ static int autosuspend_check(struct usb_device *udev, int reschedule)
 			intf = udev->actconfig->interface[i];
 			if (!is_active(intf))
 				continue;
-			if (atomic_read(&intf->pm_usage_cnt) > 0)
+			if (intf->pm_usage_cnt > 0)
 				return -EBUSY;
 			if (intf->needs_remote_wakeup &&
 					!udev->do_remote_wakeup) {
@@ -1175,8 +1164,9 @@ static int usb_suspend_both(struct usb_device *udev, pm_message_t msg)
 			udev->state == USB_STATE_SUSPENDED)
 		goto done;
 
+	udev->do_remote_wakeup = device_may_wakeup(&udev->dev);
+
 	if (msg.event & PM_EVENT_AUTO) {
-		udev->do_remote_wakeup = device_may_wakeup(&udev->dev);
 		status = autosuspend_check(udev, 0);
 		if (status < 0)
 			goto done;
@@ -1187,21 +1177,12 @@ static int usb_suspend_both(struct usb_device *udev, pm_message_t msg)
 		for (; i < udev->actconfig->desc.bNumInterfaces; i++) {
 			intf = udev->actconfig->interface[i];
 			status = usb_suspend_interface(udev, intf, msg);
-
-			/* Ignore errors during system sleep transitions */
-			if (!(msg.event & PM_EVENT_AUTO))
-				status = 0;
 			if (status != 0)
 				break;
 		}
 	}
-	if (status == 0) {
+	if (status == 0)
 		status = usb_suspend_device(udev, msg);
-
-		/* Again, ignore errors during system sleep transitions */
-		if (!(msg.event & PM_EVENT_AUTO))
-			status = 0;
-	}
 
 	/* If the suspend failed, resume interfaces that did get suspended */
 	if (status != 0) {
@@ -1480,19 +1461,17 @@ static int usb_autopm_do_interface(struct usb_interface *intf,
 		status = -ENODEV;
 	else {
 		udev->auto_pm = 1;
-		atomic_add(inc_usage_cnt, &intf->pm_usage_cnt);
+		intf->pm_usage_cnt += inc_usage_cnt;
 		udev->last_busy = jiffies;
-		if (inc_usage_cnt >= 0 &&
-				atomic_read(&intf->pm_usage_cnt) > 0) {
+		if (inc_usage_cnt >= 0 && intf->pm_usage_cnt > 0) {
 			if (udev->state == USB_STATE_SUSPENDED)
 				status = usb_resume_both(udev,
 						PMSG_AUTO_RESUME);
 			if (status != 0)
-				atomic_sub(inc_usage_cnt, &intf->pm_usage_cnt);
+				intf->pm_usage_cnt -= inc_usage_cnt;
 			else
 				udev->last_busy = jiffies;
-		} else if (inc_usage_cnt <= 0 &&
-				atomic_read(&intf->pm_usage_cnt) <= 0) {
+		} else if (inc_usage_cnt <= 0 && intf->pm_usage_cnt <= 0) {
 			status = usb_suspend_both(udev, PMSG_AUTO_SUSPEND);
 		}
 	}
@@ -1537,7 +1516,7 @@ void usb_autopm_put_interface(struct usb_interface *intf)
 
 	status = usb_autopm_do_interface(intf, -1);
 	dev_vdbg(&intf->dev, "%s: status %d cnt %d\n",
-			__func__, status, atomic_read(&intf->pm_usage_cnt));
+			__func__, status, intf->pm_usage_cnt);
 }
 EXPORT_SYMBOL_GPL(usb_autopm_put_interface);
 
@@ -1565,10 +1544,10 @@ void usb_autopm_put_interface_async(struct usb_interface *intf)
 		status = -ENODEV;
 	} else {
 		udev->last_busy = jiffies;
-		atomic_dec(&intf->pm_usage_cnt);
+		--intf->pm_usage_cnt;
 		if (udev->autosuspend_disabled || udev->autosuspend_delay < 0)
 			status = -EPERM;
-		else if (atomic_read(&intf->pm_usage_cnt) <= 0 &&
+		else if (intf->pm_usage_cnt <= 0 &&
 				!timer_pending(&udev->autosuspend.timer)) {
 			queue_delayed_work(ksuspend_usb_wq, &udev->autosuspend,
 					round_jiffies_up_relative(
@@ -1576,7 +1555,7 @@ void usb_autopm_put_interface_async(struct usb_interface *intf)
 		}
 	}
 	dev_vdbg(&intf->dev, "%s: status %d cnt %d\n",
-			__func__, status, atomic_read(&intf->pm_usage_cnt));
+			__func__, status, intf->pm_usage_cnt);
 }
 EXPORT_SYMBOL_GPL(usb_autopm_put_interface_async);
 
@@ -1620,7 +1599,7 @@ int usb_autopm_get_interface(struct usb_interface *intf)
 
 	status = usb_autopm_do_interface(intf, 1);
 	dev_vdbg(&intf->dev, "%s: status %d cnt %d\n",
-			__func__, status, atomic_read(&intf->pm_usage_cnt));
+			__func__, status, intf->pm_usage_cnt);
 	return status;
 }
 EXPORT_SYMBOL_GPL(usb_autopm_get_interface);
@@ -1648,14 +1627,10 @@ int usb_autopm_get_interface_async(struct usb_interface *intf)
 		status = -ENODEV;
 	else if (udev->autoresume_disabled)
 		status = -EPERM;
-	else {
-		atomic_inc(&intf->pm_usage_cnt);
-		if (atomic_read(&intf->pm_usage_cnt) > 0 &&
-				udev->state == USB_STATE_SUSPENDED)
-			queue_work(ksuspend_usb_wq, &udev->autoresume);
-	}
+	else if (++intf->pm_usage_cnt > 0 && udev->state == USB_STATE_SUSPENDED)
+		queue_work(ksuspend_usb_wq, &udev->autoresume);
 	dev_vdbg(&intf->dev, "%s: status %d cnt %d\n",
-			__func__, status, atomic_read(&intf->pm_usage_cnt));
+			__func__, status, intf->pm_usage_cnt);
 	return status;
 }
 EXPORT_SYMBOL_GPL(usb_autopm_get_interface_async);
@@ -1677,7 +1652,7 @@ int usb_autopm_set_interface(struct usb_interface *intf)
 
 	status = usb_autopm_do_interface(intf, 0);
 	dev_vdbg(&intf->dev, "%s: status %d cnt %d\n",
-			__func__, status, atomic_read(&intf->pm_usage_cnt));
+			__func__, status, intf->pm_usage_cnt);
 	return status;
 }
 EXPORT_SYMBOL_GPL(usb_autopm_set_interface);
@@ -1750,23 +1725,6 @@ int usb_external_resume_device(struct usb_device *udev, pm_message_t msg)
 	return status;
 }
 
-static void choose_wakeup(struct usb_device *udev, pm_message_t msg)
-{
-	/* Remote wakeup is needed only when we actually go to sleep.
-	 * For things like FREEZE and QUIESCE, if the device is already
-	 * autosuspended then its current wakeup setting is okay.
-	 */
-	if (msg.event == PM_EVENT_FREEZE || msg.event == PM_EVENT_QUIESCE) {
-		udev->do_remote_wakeup = 0;
-		return;
-	}
-
-	/* Allow remote wakeup if it is enabled, even if no interface drivers
-	 * actually want it.
-	 */
-	udev->do_remote_wakeup = device_may_wakeup(&udev->dev);
-}
-
 int usb_suspend(struct device *dev, pm_message_t msg)
 {
 	struct usb_device	*udev;
@@ -1786,7 +1744,6 @@ int usb_suspend(struct device *dev, pm_message_t msg)
 	}
 
 	udev->skip_sys_resume = 0;
-	choose_wakeup(udev, msg);
 	return usb_external_suspend_device(udev, msg);
 }
 

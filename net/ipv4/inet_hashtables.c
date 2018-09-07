@@ -21,7 +21,6 @@
 
 #include <net/inet_connection_sock.h>
 #include <net/inet_hashtables.h>
-#include <net/secure_seq.h>
 #include <net/ip.h>
 
 /*
@@ -247,7 +246,7 @@ begintw:
 			}
 			if (unlikely(!INET_TW_MATCH(sk, net, hash, acookie,
 				 saddr, daddr, ports, dif))) {
-				inet_twsk_put(inet_twsk(sk));
+				sock_put(sk);
 				goto begintw;
 			}
 			goto out;

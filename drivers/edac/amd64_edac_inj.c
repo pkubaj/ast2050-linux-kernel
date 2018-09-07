@@ -1,11 +1,5 @@
 #include "amd64_edac.h"
 
-static ssize_t amd64_inject_section_show(struct mem_ctl_info *mci, char *buf)
-{
-	struct amd64_pvt *pvt = mci->pvt_info;
-	return sprintf(buf, "0x%x\n", pvt->injection.section);
-}
-
 /*
  * store error injection section value which refers to one of 4 16-byte sections
  * within a 64-byte cacheline
@@ -21,24 +15,10 @@ static ssize_t amd64_inject_section_store(struct mem_ctl_info *mci,
 
 	ret = strict_strtoul(data, 10, &value);
 	if (ret != -EINVAL) {
-
-		if (value > 3) {
-			amd64_printk(KERN_WARNING,
-				     "%s: invalid section 0x%lx\n",
-				     __func__, value);
-			return -EINVAL;
-		}
-
 		pvt->injection.section = (u32) value;
 		return count;
 	}
 	return ret;
-}
-
-static ssize_t amd64_inject_word_show(struct mem_ctl_info *mci, char *buf)
-{
-	struct amd64_pvt *pvt = mci->pvt_info;
-	return sprintf(buf, "0x%x\n", pvt->injection.word);
 }
 
 /*
@@ -57,23 +37,12 @@ static ssize_t amd64_inject_word_store(struct mem_ctl_info *mci,
 	ret = strict_strtoul(data, 10, &value);
 	if (ret != -EINVAL) {
 
-		if (value > 8) {
-			amd64_printk(KERN_WARNING,
-				     "%s: invalid word 0x%lx\n",
-				     __func__, value);
-			return -EINVAL;
-		}
-
+		value = (value <= 8) ? value : 0;
 		pvt->injection.word = (u32) value;
+
 		return count;
 	}
 	return ret;
-}
-
-static ssize_t amd64_inject_ecc_vector_show(struct mem_ctl_info *mci, char *buf)
-{
-	struct amd64_pvt *pvt = mci->pvt_info;
-	return sprintf(buf, "0x%x\n", pvt->injection.bit_map);
 }
 
 /*
@@ -91,14 +60,8 @@ static ssize_t amd64_inject_ecc_vector_store(struct mem_ctl_info *mci,
 	ret = strict_strtoul(data, 16, &value);
 	if (ret != -EINVAL) {
 
-		if (value & 0xFFFF0000) {
-			amd64_printk(KERN_WARNING,
-				     "%s: invalid EccVector: 0x%lx\n",
-				     __func__, value);
-			return -EINVAL;
-		}
+		pvt->injection.bit_map = (u32) value & 0xFFFF;
 
-		pvt->injection.bit_map = (u32) value;
 		return count;
 	}
 	return ret;
@@ -184,7 +147,7 @@ struct mcidev_sysfs_attribute amd64_inj_attrs[] = {
 			.name = "inject_section",
 			.mode = (S_IRUGO | S_IWUSR)
 		},
-		.show = amd64_inject_section_show,
+		.show = NULL,
 		.store = amd64_inject_section_store,
 	},
 	{
@@ -192,7 +155,7 @@ struct mcidev_sysfs_attribute amd64_inj_attrs[] = {
 			.name = "inject_word",
 			.mode = (S_IRUGO | S_IWUSR)
 		},
-		.show = amd64_inject_word_show,
+		.show = NULL,
 		.store = amd64_inject_word_store,
 	},
 	{
@@ -200,7 +163,7 @@ struct mcidev_sysfs_attribute amd64_inj_attrs[] = {
 			.name = "inject_ecc_vector",
 			.mode = (S_IRUGO | S_IWUSR)
 		},
-		.show = amd64_inject_ecc_vector_show,
+		.show = NULL,
 		.store = amd64_inject_ecc_vector_store,
 	},
 	{

@@ -246,8 +246,7 @@ static char mca_irqmap[] = { 12, 9, 3, 4, 5, 10, 11, 15 };
 static int eexp_open(struct net_device *dev);
 static int eexp_close(struct net_device *dev);
 static void eexp_timeout(struct net_device *dev);
-static netdev_tx_t eexp_xmit(struct sk_buff *buf,
-			     struct net_device *dev);
+static int eexp_xmit(struct sk_buff *buf, struct net_device *dev);
 
 static irqreturn_t eexp_irq(int irq, void *dev_addr);
 static void eexp_set_multicast(struct net_device *dev);
@@ -651,7 +650,7 @@ static void eexp_timeout(struct net_device *dev)
  * Called to transmit a packet, or to allow us to right ourselves
  * if the kernel thinks we've died.
  */
-static netdev_tx_t eexp_xmit(struct sk_buff *buf, struct net_device *dev)
+static int eexp_xmit(struct sk_buff *buf, struct net_device *dev)
 {
 	short length = buf->len;
 #ifdef CONFIG_SMP
@@ -665,7 +664,7 @@ static netdev_tx_t eexp_xmit(struct sk_buff *buf, struct net_device *dev)
 
 	if (buf->len < ETH_ZLEN) {
 		if (skb_padto(buf, ETH_ZLEN))
-			return NETDEV_TX_OK;
+			return 0;
 		length = ETH_ZLEN;
 	}
 
@@ -692,7 +691,7 @@ static netdev_tx_t eexp_xmit(struct sk_buff *buf, struct net_device *dev)
 	spin_unlock_irqrestore(&lp->lock, flags);
 #endif
 	enable_irq(dev->irq);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*

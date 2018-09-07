@@ -80,11 +80,11 @@ void cmp_send_ipi_single(int cpu, unsigned int action)
 	local_irq_restore(flags);
 }
 
-static void cmp_send_ipi_mask(const struct cpumask *mask, unsigned int action)
+static void cmp_send_ipi_mask(cpumask_t mask, unsigned int action)
 {
 	unsigned int i;
 
-	for_each_cpu(i, mask)
+	for_each_cpu_mask(i, mask)
 		cmp_send_ipi_single(i, action);
 }
 
@@ -171,7 +171,7 @@ void __init cmp_smp_setup(void)
 
 	for (i = 1; i < NR_CPUS; i++) {
 		if (amon_cpu_avail(i)) {
-			set_cpu_possible(i, true);
+			cpu_set(i, cpu_possible_map);
 			__cpu_number_map[i]	= ++ncpu;
 			__cpu_logical_map[ncpu]	= i;
 		}

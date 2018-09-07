@@ -15,10 +15,10 @@
 /**
  * suspend_device_irqs - disable all currently enabled interrupt lines
  *
- * During system-wide suspend or hibernation device drivers need to be prevented
- * from receiving interrupts and this function is provided for this purpose.
- * It marks all interrupt lines in use, except for the timer ones, as disabled
- * and sets the IRQ_SUSPENDED flag for each of them.
+ * During system-wide suspend or hibernation device interrupts need to be
+ * disabled at the chip level and this function is provided for this purpose.
+ * It disables all interrupt lines that are enabled at the moment and sets the
+ * IRQ_SUSPENDED flag for them.
  */
 void suspend_device_irqs(void)
 {
@@ -39,45 +39,27 @@ void suspend_device_irqs(void)
 }
 EXPORT_SYMBOL_GPL(suspend_device_irqs);
 
-static void resume_irqs(bool want_early)
+/**
+ * resume_device_irqs - enable interrupt lines disabled by suspend_device_irqs()
+ *
+ * Enable all interrupt lines previously disabled by suspend_device_irqs() that
+ * have the IRQ_SUSPENDED flag set.
+ */
+void resume_device_irqs(void)
 {
 	struct irq_desc *desc;
 	int irq;
 
 	for_each_irq_desc(irq, desc) {
 		unsigned long flags;
-		bool is_early = desc->action &&
-			desc->action->flags & IRQF_EARLY_RESUME;
 
-		if (is_early != want_early)
+		if (!(desc->status & IRQ_SUSPENDED))
 			continue;
 
 		spin_lock_irqsave(&desc->lock, flags);
 		__enable_irq(desc, irq, true);
 		spin_unlock_irqrestore(&desc->lock, flags);
 	}
-}
-
-/**
- * irq_pm_syscore_ops - enable interrupt lines early
- *
- * Enable all interrupt lines with %IRQF_EARLY_RESUME set.
- */
-void irq_pm_syscore_resume(void)
-{
-	resume_irqs(true);
-}
-
-/**
- * resume_device_irqs - enable interrupt lines disabled by suspend_device_irqs()
- *
- * Enable all non-%IRQF_EARLY_RESUME interrupt lines previously
- * disabled by suspend_device_irqs() that have the IRQS_SUSPENDED flag
- * set as well as those with %IRQF_FORCE_RESUME.
- */
-void resume_device_irqs(void)
-{
-	resume_irqs(false);
 }
 EXPORT_SYMBOL_GPL(resume_device_irqs);
 

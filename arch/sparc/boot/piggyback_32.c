@@ -35,17 +35,17 @@
  * as PROM looks for a.out image only.
  */
 
-static unsigned short ld2(char *p)
+unsigned short ld2(char *p)
 {
 	return (p[0] << 8) | p[1];
 }
 
-static unsigned int ld4(char *p)
+unsigned int ld4(char *p)
 {
 	return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
 }
 
-static void st4(char *p, unsigned int x)
+void st4(char *p, unsigned int x)
 {
 	p[0] = x >> 24;
 	p[1] = x >> 16;
@@ -53,7 +53,7 @@ static void st4(char *p, unsigned int x)
 	p[3] = x;
 }
 
-static void usage(void)
+void usage(void)
 {
 	/* fs_img.gz is an image of initial ramdisk. */
 	fprintf(stderr, "Usage: piggyback vmlinux.aout System.map fs_img.gz\n");
@@ -61,7 +61,7 @@ static void usage(void)
 	exit(1);
 }
 
-static void die(char *str)
+void die(char *str)
 {
 	perror (str);
 	exit(1);

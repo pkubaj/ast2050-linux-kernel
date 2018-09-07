@@ -16,7 +16,6 @@
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
-#include <linux/sched.h>
 #include "lg.h"
 
 /* Allow Guests to use a non-128 (ie. non-Linux) syscall trap. */

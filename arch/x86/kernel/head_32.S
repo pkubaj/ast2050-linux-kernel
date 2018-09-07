@@ -79,7 +79,7 @@ RESERVE_BRK(pagetables, INIT_MAP_SIZE)
  * any particular GDT layout, because we load our own as soon as we
  * can.
  */
-__HEAD
+.section .text.head,"ax",@progbits
 ENTRY(startup_32)
 	/* test KEEP_SEGMENTS flag to see if the bootloader is asking
 		us to not reload segments */
@@ -157,7 +157,6 @@ subarch_entries:
 	.long default_entry		/* normal x86/PC */
 	.long lguest_entry		/* lguest hypervisor */
 	.long xen_entry			/* Xen hypervisor */
-	.long default_entry		/* Moorestown MID */
 num_subarch_entries = (. - subarch_entries) / 4
 .previous
 #endif /* CONFIG_PARAVIRT */
@@ -324,7 +323,7 @@ ENTRY(startup_32_smp)
 /*
  * Enable paging
  */
-	movl pa(initial_page_table), %eax
+	movl $pa(swapper_pg_dir),%eax
 	movl %eax,%cr3		/* set the page table pointer.. */
 	movl %cr0,%eax
 	orl  $X86_CR0_PG,%eax
@@ -604,13 +603,11 @@ ignore_int:
 .align 4
 ENTRY(initial_code)
 	.long i386_start_kernel
-ENTRY(initial_page_table)
-	.long pa(swapper_pg_dir)
 
 /*
  * BSS section
  */
-__PAGE_ALIGNED_BSS
+.section ".bss.page_aligned","wa"
 	.align PAGE_SIZE_asm
 #ifdef CONFIG_X86_PAE
 swapper_pg_pmd:
@@ -621,10 +618,6 @@ ENTRY(swapper_pg_dir)
 #endif
 swapper_pg_fixmap:
 	.fill 1024,4,0
-#ifdef CONFIG_X86_TRAMPOLINE
-ENTRY(trampoline_pg_dir)
-	.fill 1024,4,0
-#endif
 ENTRY(empty_zero_page)
 	.fill 4096,1,0
 
@@ -632,7 +625,7 @@ ENTRY(empty_zero_page)
  * This starts the data section.
  */
 #ifdef CONFIG_X86_PAE
-__PAGE_ALIGNED_DATA
+.section ".data.page_aligned","wa"
 	/* Page-aligned for the benefit of paravirt? */
 	.align PAGE_SIZE_asm
 ENTRY(swapper_pg_dir)

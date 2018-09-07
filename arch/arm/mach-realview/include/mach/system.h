@@ -25,8 +25,6 @@
 #include <mach/hardware.h>
 #include <mach/platform.h>
 
-void (*realview_reset)(char mode);
-
 static inline void arch_idle(void)
 {
 	/*
@@ -38,12 +36,16 @@ static inline void arch_idle(void)
 
 static inline void arch_reset(char mode, const char *cmd)
 {
+	void __iomem *hdr_ctrl = __io_address(REALVIEW_SYS_BASE) + REALVIEW_SYS_RESETCTL_OFFSET;
+	unsigned int val;
+
 	/*
 	 * To reset, we hit the on-board reset register
 	 * in the system FPGA
 	 */
-	if (realview_reset)
-		realview_reset(mode);
+	val = __raw_readl(hdr_ctrl);
+	val |= REALVIEW_SYS_CTRL_RESET_CONFIGCLR;
+	__raw_writel(val, hdr_ctrl);
 }
 
 #endif

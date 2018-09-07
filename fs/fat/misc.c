@@ -43,19 +43,19 @@ EXPORT_SYMBOL_GPL(fat_fs_error);
 
 /* Flushes the number of free clusters on FAT32 */
 /* XXX: Need to write one per FSINFO block.  Currently only writes 1 */
-int fat_clusters_flush(struct super_block *sb)
+void fat_clusters_flush(struct super_block *sb)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	struct buffer_head *bh;
 	struct fat_boot_fsinfo *fsinfo;
 
 	if (sbi->fat_bits != 32)
-		return 0;
+		return;
 
 	bh = sb_bread(sb, sbi->fsinfo_sector);
 	if (bh == NULL) {
 		printk(KERN_ERR "FAT: bread failed in fat_clusters_flush\n");
-		return -EIO;
+		return;
 	}
 
 	fsinfo = (struct fat_boot_fsinfo *)bh->b_data;
@@ -74,8 +74,6 @@ int fat_clusters_flush(struct super_block *sb)
 		mark_buffer_dirty(bh);
 	}
 	brelse(bh);
-
-	return 0;
 }
 
 /*
@@ -121,8 +119,8 @@ int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 		MSDOS_I(inode)->i_start = new_dclus;
 		MSDOS_I(inode)->i_logstart = new_dclus;
 		/*
-		 * Since generic_write_sync() synchronizes regular files later,
-		 * we sync here only directories.
+		 * Since generic_osync_inode() synchronize later if
+		 * this is not directory, we don't here.
 		 */
 		if (S_ISDIR(inode->i_mode) && IS_DIRSYNC(inode)) {
 			ret = fat_sync_inode(inode);

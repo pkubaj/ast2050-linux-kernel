@@ -20,7 +20,6 @@
  *
  */
 
-#include <linux/sched.h>
 #include "ibmasm.h"
 #include "dot_command.h"
 

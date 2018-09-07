@@ -16,7 +16,7 @@
 #include <net/sock.h>
 #include <linux/rtnetlink.h>
 #include <linux/wireless.h>
-#include <net/wext.h>
+#include <net/iw_handler.h>
 
 #include "net-sysfs.h"
 
@@ -141,7 +141,7 @@ static ssize_t show_dormant(struct device *dev,
 	return -EINVAL;
 }
 
-static const char *const operstates[] = {
+static const char *operstates[] = {
 	"unknown",
 	"notpresent", /* currently unused */
 	"down",
@@ -363,17 +363,18 @@ static ssize_t wireless_show(struct device *d, char *buf,
 					       char *))
 {
 	struct net_device *dev = to_net_dev(d);
-	const struct iw_statistics *iw;
+	const struct iw_statistics *iw = NULL;
 	ssize_t ret = -EINVAL;
 
-	if (!rtnl_trylock())
-		return restart_syscall();
+	read_lock(&dev_base_lock);
 	if (dev_isalive(dev)) {
-		iw = get_wireless_stats(dev);
-		if (iw)
+		if (dev->wireless_handlers &&
+		    dev->wireless_handlers->get_wireless_stats)
+			iw = dev->wireless_handlers->get_wireless_stats(dev);
+		if (iw != NULL)
 			ret = (*format)(iw, buf);
 	}
-	rtnl_unlock();
+	read_unlock(&dev_base_lock);
 
 	return ret;
 }
@@ -492,7 +493,7 @@ void netdev_unregister_kobject(struct net_device * net)
 int netdev_register_kobject(struct net_device *net)
 {
 	struct device *dev = &(net->dev);
-	const struct attribute_group **groups = net->sysfs_groups;
+	struct attribute_group **groups = net->sysfs_groups;
 
 	dev->class = &net_class;
 	dev->platform_data = net;
@@ -504,7 +505,7 @@ int netdev_register_kobject(struct net_device *net)
 	*groups++ = &netstat_group;
 
 #ifdef CONFIG_WIRELESS_EXT_SYSFS
-	if (net->wireless_handlers || net->ieee80211_ptr)
+	if (net->wireless_handlers && net->wireless_handlers->get_wireless_stats)
 		*groups++ = &wireless_group;
 #endif
 #endif /* CONFIG_SYSFS */

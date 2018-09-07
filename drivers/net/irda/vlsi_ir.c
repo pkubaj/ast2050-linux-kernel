@@ -854,8 +854,7 @@ static int vlsi_set_baud(vlsi_irda_dev_t *idev, unsigned iobase)
 	return ret;
 }
 
-static netdev_tx_t vlsi_hard_start_xmit(struct sk_buff *skb,
-					      struct net_device *ndev)
+static int vlsi_hard_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	vlsi_irda_dev_t *idev = netdev_priv(ndev);
 	struct vlsi_ring	*r = idev->tx_ring;
@@ -916,7 +915,7 @@ static netdev_tx_t vlsi_hard_start_xmit(struct sk_buff *skb,
 			 */
 		spin_unlock_irqrestore(&idev->lock, flags);
 		dev_kfree_skb_any(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	/* sanity checks - simply drop the packet */
@@ -1045,7 +1044,7 @@ static netdev_tx_t vlsi_hard_start_xmit(struct sk_buff *skb,
 	}
 	spin_unlock_irqrestore(&idev->lock, flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 
 drop_unlock:
 	spin_unlock_irqrestore(&idev->lock, flags);
@@ -1059,7 +1058,7 @@ drop:
 	 * packet for later retry of transmission - which isn't exactly
 	 * what we want after we've just called dev_kfree_skb_any ;-)
 	 */
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void vlsi_tx_interrupt(struct net_device *ndev)

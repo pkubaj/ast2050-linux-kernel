@@ -37,7 +37,6 @@
 
 #include <linux/interrupt.h>
 #include <linux/pci.h>
-#include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <rdma/ib_verbs.h>

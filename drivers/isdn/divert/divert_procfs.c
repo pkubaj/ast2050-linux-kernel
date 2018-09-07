@@ -16,7 +16,6 @@
 #else
 #include <linux/fs.h>
 #endif
-#include <linux/sched.h>
 #include <linux/isdnif.h>
 #include <net/net_namespace.h>
 #include "isdn_divert.h"

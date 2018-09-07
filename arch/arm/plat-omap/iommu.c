@@ -351,14 +351,16 @@ EXPORT_SYMBOL_GPL(flush_iotlb_all);
 
 #if defined(CONFIG_OMAP_IOMMU_DEBUG_MODULE)
 
-ssize_t iommu_dump_ctx(struct iommu *obj, char *buf, ssize_t bytes)
+ssize_t iommu_dump_ctx(struct iommu *obj, char *buf)
 {
+	ssize_t bytes;
+
 	if (!obj || !buf)
 		return -EINVAL;
 
 	clk_enable(obj->clk);
 
-	bytes = arch_iommu->dump_ctx(obj, buf, bytes);
+	bytes = arch_iommu->dump_ctx(obj, buf);
 
 	clk_disable(obj->clk);
 
@@ -366,7 +368,7 @@ ssize_t iommu_dump_ctx(struct iommu *obj, char *buf, ssize_t bytes)
 }
 EXPORT_SYMBOL_GPL(iommu_dump_ctx);
 
-static int __dump_tlb_entries(struct iommu *obj, struct cr_regs *crs, int num)
+static int __dump_tlb_entries(struct iommu *obj, struct cr_regs *crs)
 {
 	int i;
 	struct iotlb_lock saved, l;
@@ -377,7 +379,7 @@ static int __dump_tlb_entries(struct iommu *obj, struct cr_regs *crs, int num)
 	iotlb_lock_get(obj, &saved);
 	memcpy(&l, &saved, sizeof(saved));
 
-	for (i = 0; i < num; i++) {
+	for (i = 0; i < obj->nr_tlb_entries; i++) {
 		struct cr_regs tmp;
 
 		iotlb_lock_get(obj, &l);
@@ -400,21 +402,18 @@ static int __dump_tlb_entries(struct iommu *obj, struct cr_regs *crs, int num)
  * @obj:	target iommu
  * @buf:	output buffer
  **/
-size_t dump_tlb_entries(struct iommu *obj, char *buf, ssize_t bytes)
+size_t dump_tlb_entries(struct iommu *obj, char *buf)
 {
-	int i, num;
+	int i, n;
 	struct cr_regs *cr;
 	char *p = buf;
 
-	num = bytes / sizeof(*cr);
-	num = min(obj->nr_tlb_entries, num);
-
-	cr = kcalloc(num, sizeof(*cr), GFP_KERNEL);
+	cr = kcalloc(obj->nr_tlb_entries, sizeof(*cr), GFP_KERNEL);
 	if (!cr)
 		return 0;
 
-	num = __dump_tlb_entries(obj, cr, num);
-	for (i = 0; i < num; i++)
+	n = __dump_tlb_entries(obj, cr);
+	for (i = 0; i < n; i++)
 		p += iotlb_dump_cr(obj, cr + i, p);
 	kfree(cr);
 
@@ -664,7 +663,7 @@ static size_t iopgtable_clear_entry_core(struct iommu *obj, u32 da)
 		nent = 1; /* for the next L1 entry */
 	} else {
 		bytes = IOPGD_SIZE;
-		if ((*iopgd & IOPGD_SUPER) == IOPGD_SUPER) {
+		if (*iopgd & IOPGD_SUPER) {
 			nent *= 16;
 			/* rewind to the 1st entry */
 			iopgd = (u32 *)((u32)iopgd & IOSUPER_MASK);

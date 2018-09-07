@@ -22,9 +22,6 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -150,8 +147,6 @@ static int ip_vs_ftp_out(struct ip_vs_app *app, struct ip_vs_conn *cp,
 	unsigned buf_len;
 	int ret;
 
-	*diff = 0;
-
 #ifdef CONFIG_IP_VS_IPV6
 	/* This application helper doesn't work with IPv6 yet,
 	 * so turn this into a no-op for IPv6 packets
@@ -159,6 +154,8 @@ static int ip_vs_ftp_out(struct ip_vs_app *app, struct ip_vs_conn *cp,
 	if (cp->af == AF_INET6)
 		return 1;
 #endif
+
+	*diff = 0;
 
 	/* Only useful for established sessions */
 	if (cp->state != IP_VS_TCP_S_ESTABLISHED)
@@ -257,9 +254,6 @@ static int ip_vs_ftp_in(struct ip_vs_app *app, struct ip_vs_conn *cp,
 	__be16 port;
 	struct ip_vs_conn *n_cp;
 
-	/* no diff required for incoming packets */
-	*diff = 0;
-
 #ifdef CONFIG_IP_VS_IPV6
 	/* This application helper doesn't work with IPv6 yet,
 	 * so turn this into a no-op for IPv6 packets
@@ -267,6 +261,9 @@ static int ip_vs_ftp_in(struct ip_vs_app *app, struct ip_vs_conn *cp,
 	if (cp->af == AF_INET6)
 		return 1;
 #endif
+
+	/* no diff required for incoming packets */
+	*diff = 0;
 
 	/* Only useful for established sessions */
 	if (cp->state != IP_VS_TCP_S_ESTABLISHED)
@@ -385,8 +382,8 @@ static int __init ip_vs_ftp_init(void)
 		ret = register_ip_vs_app_inc(app, app->protocol, ports[i]);
 		if (ret)
 			break;
-		pr_info("%s: loaded support on port[%d] = %d\n",
-			app->name, i, ports[i]);
+		IP_VS_INFO("%s: loaded support on port[%d] = %d\n",
+			   app->name, i, ports[i]);
 	}
 
 	if (ret)

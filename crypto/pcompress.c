@@ -36,12 +36,14 @@ static int crypto_pcomp_init(struct crypto_tfm *tfm, u32 type, u32 mask)
 	return 0;
 }
 
-static unsigned int crypto_pcomp_extsize(struct crypto_alg *alg)
+static unsigned int crypto_pcomp_extsize(struct crypto_alg *alg,
+					 const struct crypto_type *frontend)
 {
 	return alg->cra_ctxsize;
 }
 
-static int crypto_pcomp_init_tfm(struct crypto_tfm *tfm)
+static int crypto_pcomp_init_tfm(struct crypto_tfm *tfm,
+				 const struct crypto_type *frontend)
 {
 	return 0;
 }

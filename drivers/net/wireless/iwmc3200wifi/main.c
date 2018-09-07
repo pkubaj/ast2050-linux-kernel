@@ -38,7 +38,6 @@
 
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
-#include <linux/sched.h>
 #include <linux/ieee80211.h>
 #include <linux/wireless.h>
 
@@ -54,12 +53,11 @@
 static struct iwm_conf def_iwm_conf = {
 
 	.sdio_ior_timeout	= 5000,
-	.calib_map		= BIT(CALIB_CFG_DC_IDX)	|
-				  BIT(CALIB_CFG_LO_IDX)	|
-				  BIT(CALIB_CFG_TX_IQ_IDX)	|
-				  BIT(CALIB_CFG_RX_IQ_IDX)	|
-				  BIT(SHILOH_PHY_CALIBRATE_BASE_BAND_CMD),
-	.expected_calib_map	= BIT(PHY_CALIBRATE_DC_CMD)	|
+	.init_calib_map		= BIT(PHY_CALIBRATE_DC_CMD)	|
+				  BIT(PHY_CALIBRATE_LO_CMD)	|
+				  BIT(PHY_CALIBRATE_TX_IQ_CMD)	|
+				  BIT(PHY_CALIBRATE_RX_IQ_CMD),
+	.periodic_calib_map	= BIT(PHY_CALIBRATE_DC_CMD)	|
 				  BIT(PHY_CALIBRATE_LO_CMD)	|
 				  BIT(PHY_CALIBRATE_TX_IQ_CMD)	|
 				  BIT(PHY_CALIBRATE_RX_IQ_CMD)	|
@@ -114,28 +112,8 @@ static void iwm_statistics_request(struct work_struct *work)
 	iwm_send_umac_stats_req(iwm, 0);
 }
 
-static void iwm_disconnect_work(struct work_struct *work)
-{
-	struct iwm_priv *iwm =
-		container_of(work, struct iwm_priv, disconnect.work);
-
-	if (iwm->umac_profile_active)
-		iwm_invalidate_mlme_profile(iwm);
-
-	clear_bit(IWM_STATUS_ASSOCIATED, &iwm->status);
-	iwm->umac_profile_active = 0;
-	memset(iwm->bssid, 0, ETH_ALEN);
-	iwm->channel = 0;
-
-	iwm_link_off(iwm);
-
-	wake_up_interruptible(&iwm->mlme_queue);
-
-	cfg80211_disconnected(iwm_to_ndev(iwm), 0, NULL, 0, GFP_KERNEL);
-}
-
-static int __iwm_up(struct iwm_priv *iwm);
-static int __iwm_down(struct iwm_priv *iwm);
+int __iwm_up(struct iwm_priv *iwm);
+int __iwm_down(struct iwm_priv *iwm);
 
 static void iwm_reset_worker(struct work_struct *work)
 {
@@ -188,8 +166,7 @@ static void iwm_reset_worker(struct work_struct *work)
 		memcpy(iwm->umac_profile, profile, sizeof(*profile));
 		iwm_send_mlme_profile(iwm);
 		kfree(profile);
-	} else
-		clear_bit(IWM_STATUS_RESETTING, &iwm->status);
+	}
 
  out:
 	mutex_unlock(&iwm->mutex);
@@ -202,7 +179,7 @@ static void iwm_watchdog(unsigned long data)
 	IWM_WARN(iwm, "Watchdog expired: UMAC stalls!\n");
 
 	if (modparam_reset)
-		iwm_resetting(iwm);
+		schedule_work(&iwm->reset_worker);
 }
 
 int iwm_priv_init(struct iwm_priv *iwm)
@@ -214,7 +191,6 @@ int iwm_priv_init(struct iwm_priv *iwm)
 	INIT_LIST_HEAD(&iwm->pending_notif);
 	init_waitqueue_head(&iwm->notif_queue);
 	init_waitqueue_head(&iwm->nonwifi_queue);
-	init_waitqueue_head(&iwm->wifi_ntfy_queue);
 	init_waitqueue_head(&iwm->mlme_queue);
 	memcpy(&iwm->conf, &def_iwm_conf, sizeof(struct iwm_conf));
 	spin_lock_init(&iwm->tx_credit.lock);
@@ -225,7 +201,6 @@ int iwm_priv_init(struct iwm_priv *iwm)
 	spin_lock_init(&iwm->cmd_lock);
 	iwm->scan_id = 1;
 	INIT_DELAYED_WORK(&iwm->stats_request, iwm_statistics_request);
-	INIT_DELAYED_WORK(&iwm->disconnect, iwm_disconnect_work);
 	INIT_WORK(&iwm->reset_worker, iwm_reset_worker);
 	INIT_LIST_HEAD(&iwm->bss_list);
 
@@ -254,17 +229,12 @@ int iwm_priv_init(struct iwm_priv *iwm)
 	for (i = 0; i < IWM_NUM_KEYS; i++)
 		memset(&iwm->keys[i], 0, sizeof(struct iwm_key));
 
-	iwm->default_key = -1;
+	iwm->default_key = NULL;
 
 	init_timer(&iwm->watchdog);
 	iwm->watchdog.function = iwm_watchdog;
 	iwm->watchdog.data = (unsigned long)iwm;
 	mutex_init(&iwm->mutex);
-
-	iwm->last_fw_err = kzalloc(sizeof(struct iwm_fw_error_hdr),
-				   GFP_KERNEL);
-	if (iwm->last_fw_err == NULL)
-		return -ENOMEM;
 
 	return 0;
 }
@@ -277,7 +247,6 @@ void iwm_priv_deinit(struct iwm_priv *iwm)
 		destroy_workqueue(iwm->txq[i].wq);
 
 	destroy_workqueue(iwm->rx_wq);
-	kfree(iwm->last_fw_err);
 }
 
 /*
@@ -292,11 +261,7 @@ void iwm_reset(struct iwm_priv *iwm)
 	if (test_bit(IWM_STATUS_READY, &iwm->status))
 		iwm_target_reset(iwm);
 
-	if (test_bit(IWM_STATUS_RESETTING, &iwm->status)) {
-		iwm->status = 0;
-		set_bit(IWM_STATUS_RESETTING, &iwm->status);
-	} else
-		iwm->status = 0;
+	iwm->status = 0;
 	iwm->scan_id = 1;
 
 	list_for_each_entry_safe(notif, next, &iwm->pending_notif, pending) {
@@ -310,13 +275,6 @@ void iwm_reset(struct iwm_priv *iwm)
 	flush_workqueue(iwm->rx_wq);
 
 	iwm_link_off(iwm);
-}
-
-void iwm_resetting(struct iwm_priv *iwm)
-{
-	set_bit(IWM_STATUS_RESETTING, &iwm->status);
-
-	schedule_work(&iwm->reset_worker);
 }
 
 /*
@@ -542,13 +500,6 @@ void iwm_link_off(struct iwm_priv *iwm)
 	memset(wstats, 0, sizeof(struct iw_statistics));
 	wstats->qual.updated = IW_QUAL_ALL_INVALID;
 
-	kfree(iwm->req_ie);
-	iwm->req_ie = NULL;
-	iwm->req_ie_len = 0;
-	kfree(iwm->resp_ie);
-	iwm->resp_ie = NULL;
-	iwm->resp_ie_len = 0;
-
 	del_timer_sync(&iwm->watchdog);
 }
 
@@ -567,6 +518,13 @@ static int iwm_channels_init(struct iwm_priv *iwm)
 {
 	int ret;
 
+#ifdef CONFIG_IWM_B0_HW_SUPPORT
+	if (iwm->conf.hw_b0) {
+		IWM_INFO(iwm, "Workaround EEPROM channels for B0 hardware\n");
+		return 0;
+	}
+#endif
+
 	ret = iwm_send_umac_channel_list(iwm);
 	if (ret) {
 		IWM_ERR(iwm, "Send channel list failed\n");
@@ -583,7 +541,7 @@ static int iwm_channels_init(struct iwm_priv *iwm)
 	return 0;
 }
 
-static int __iwm_up(struct iwm_priv *iwm)
+int __iwm_up(struct iwm_priv *iwm)
 {
 	int ret;
 	struct iwm_notif *notif_reboot, *notif_ack = NULL;
@@ -684,16 +642,29 @@ static int __iwm_up(struct iwm_priv *iwm)
 		}
 	}
 
+	iwm->umac_profile = kmalloc(sizeof(struct iwm_umac_profile),
+				    GFP_KERNEL);
+	if (!iwm->umac_profile) {
+		IWM_ERR(iwm, "Couldn't alloc memory for profile\n");
+		goto err_fw;
+	}
+
+	iwm_init_default_profile(iwm, iwm->umac_profile);
+
 	ret = iwm_channels_init(iwm);
 	if (ret < 0) {
 		IWM_ERR(iwm, "Couldn't init channels\n");
-		goto err_fw;
+		goto err_profile;
 	}
 
 	/* Set the READY bit to indicate interface is brought up successfully */
 	set_bit(IWM_STATUS_READY, &iwm->status);
 
 	return 0;
+
+ err_profile:
+	kfree(iwm->umac_profile);
+	iwm->umac_profile = NULL;
 
  err_fw:
 	iwm_eeprom_exit(iwm);
@@ -717,7 +688,7 @@ int iwm_up(struct iwm_priv *iwm)
 	return ret;
 }
 
-static int __iwm_down(struct iwm_priv *iwm)
+int __iwm_down(struct iwm_priv *iwm)
 {
 	int ret;
 
@@ -733,10 +704,11 @@ static int __iwm_down(struct iwm_priv *iwm)
 	clear_bit(IWM_STATUS_READY, &iwm->status);
 
 	iwm_eeprom_exit(iwm);
+	kfree(iwm->umac_profile);
+	iwm->umac_profile = NULL;
 	iwm_bss_list_clean(iwm);
-	iwm_init_default_profile(iwm, iwm->umac_profile);
-	iwm->umac_profile_active = false;
-	iwm->default_key = -1;
+
+	iwm->default_key = NULL;
 	iwm->core_enabled = 0;
 
 	ret = iwm_bus_disable(iwm);

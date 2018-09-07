@@ -58,8 +58,7 @@ static struct local_tlb_flush_counts {
 	unsigned int count;
 } __attribute__((__aligned__(32))) local_tlb_flush_counts[NR_CPUS];
 
-static DEFINE_PER_CPU_SHARED_ALIGNED(unsigned short [NR_CPUS],
-				     shadow_flush_counts);
+static DEFINE_PER_CPU(unsigned short, shadow_flush_counts[NR_CPUS]) ____cacheline_aligned;
 
 #define IPI_CALL_FUNC		0
 #define IPI_CPU_STOP		1
@@ -302,7 +301,7 @@ smp_flush_tlb_mm (struct mm_struct *mm)
 		return;
 	}
 
-	smp_call_function_many(mm_cpumask(mm),
+	smp_call_function_mask(mm->cpu_vm_mask,
 		(void (*)(void *))local_finish_flush_tlb_mm, mm, 1);
 	local_irq_disable();
 	local_finish_flush_tlb_mm(mm);

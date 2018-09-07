@@ -31,17 +31,36 @@
  *
  */
 
+
 #ifndef __WMGR_H__
 #define __WMGR_H__
 
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+#if !defined(__80211MGR_H__)
 #include "80211mgr.h"
+#endif
+#if !defined(__80211HDR_H__)
 #include "80211hdr.h"
+#endif
+#if !defined(__WCMD_H__)
 #include "wcmd.h"
+#endif
+#if !defined(__BSSDB_H__)
 #include "bssdb.h"
-#include "wpa2.h"
-#include "vntwifi.h"
+#endif
+#if !defined(__CARD_H__)
 #include "card.h"
+#endif
+#if !defined(__WPA2_H__)
+#include "wpa2.h"
+#endif
+#if !defined(__VNTWIFI_H__)
+#include "vntwifi.h"
+#endif
+
+
 
 /*---------------------  Export Definitions -------------------------*/
 
@@ -124,7 +143,7 @@ typedef struct tagSAssocInfo {
     // store ReqIEs set by OID_802_11_ASSOCIATION_INFORMATION
     ULONG                                   RequestIELength;
     BYTE                                    abyReqIEs[WLAN_BEACON_FR_MAXLEN];
-} SAssocInfo, *PSAssocInfo;
+} SAssocInfo, DEF* PSAssocInfo;
 //---
 
 
@@ -227,7 +246,7 @@ typedef struct tagSTxMgmtPacket {
     UINT                cbMPDULen;
     UINT                cbPayloadLen;
 
-} STxMgmtPacket, *PSTxMgmtPacket;
+} STxMgmtPacket, DEF* PSTxMgmtPacket;
 
 
 // Rx Managment Packet descriptor
@@ -242,7 +261,7 @@ typedef struct tagSRxMgmtPacket {
     BYTE                byRxRate;
     BYTE                byRxChannel;
 
-} SRxMgmtPacket, *PSRxMgmtPacket;
+} SRxMgmtPacket, DEF* PSRxMgmtPacket;
 
 
 
@@ -337,11 +356,11 @@ typedef struct tagSMgmtObject
     BOOL                    bRxBeaconInTBTTWake;
     BYTE                    abyPSTxMap[MAX_NODE_NUM + 1];
 
-    // management command related
+    // managment command related
     UINT                    uCmdBusy;
     UINT                    uCmdHostAPBusy;
 
-    // management packet pool
+    // managment packet pool
     PBYTE                   pbyMgmtPacketPool;
     BYTE                    byMgmtPacketPool[sizeof(STxMgmtPacket) + WLAN_A3FR_MAXLEN];
 
@@ -390,7 +409,7 @@ typedef struct tagSMgmtObject
 
     struct sk_buff  skb;
 
-} SMgmtObject, *PSMgmtObject;
+} SMgmtObject, DEF *PSMgmtObject;
 
 
 /*---------------------  Export Macros ------------------------------*/

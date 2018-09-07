@@ -35,7 +35,6 @@
 #include <linux/errno.h>
 #include <asm/system.h>
 #include <linux/poll.h>
-#include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>

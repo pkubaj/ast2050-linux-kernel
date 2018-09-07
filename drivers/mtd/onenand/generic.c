@@ -19,16 +19,12 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/onenand.h>
 #include <linux/mtd/partitions.h>
-#include <asm/io.h>
 
-/*
- * Note: Driver name and platform data format have been updated!
- *
- * This version of the driver is named "onenand-flash" and takes struct
- * onenand_platform_data as platform data. The old ARM-specific version
- * with the name "onenand" used to take struct flash_platform_data.
- */
-#define DRIVER_NAME	"onenand-flash"
+#include <asm/io.h>
+#include <asm/mach/flash.h>
+
+#define DRIVER_NAME	"onenand"
+
 
 #ifdef CONFIG_MTD_PARTITIONS
 static const char *part_probes[] = { "cmdlinepart", NULL,  };
@@ -43,16 +39,16 @@ struct onenand_info {
 static int __devinit generic_onenand_probe(struct platform_device *pdev)
 {
 	struct onenand_info *info;
-	struct onenand_platform_data *pdata = pdev->dev.platform_data;
+	struct flash_platform_data *pdata = pdev->dev.platform_data;
 	struct resource *res = pdev->resource;
-	unsigned long size = resource_size(res);
+	unsigned long size = res->end - res->start + 1;
 	int err;
 
 	info = kzalloc(sizeof(struct onenand_info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
-	if (!request_mem_region(res->start, size, dev_name(&pdev->dev))) {
+	if (!request_mem_region(res->start, size, pdev->dev.driver->name)) {
 		err = -EBUSY;
 		goto out_free_info;
 	}
@@ -63,7 +59,7 @@ static int __devinit generic_onenand_probe(struct platform_device *pdev)
 		goto out_release_mem_region;
 	}
 
-	info->onenand.mmcontrol = pdata ? pdata->mmcontrol : 0;
+	info->onenand.mmcontrol = pdata->mmcontrol;
 	info->onenand.irq = platform_get_irq(pdev, 0);
 
 	info->mtd.name = dev_name(&pdev->dev);
@@ -79,7 +75,7 @@ static int __devinit generic_onenand_probe(struct platform_device *pdev)
 	err = parse_mtd_partitions(&info->mtd, part_probes, &info->parts, 0);
 	if (err > 0)
 		add_mtd_partitions(&info->mtd, info->parts, err);
-	else if (err <= 0 && pdata && pdata->parts)
+	else if (err <= 0 && pdata->parts)
 		add_mtd_partitions(&info->mtd, pdata->parts, pdata->nr_parts);
 	else
 #endif
@@ -103,7 +99,7 @@ static int __devexit generic_onenand_remove(struct platform_device *pdev)
 {
 	struct onenand_info *info = platform_get_drvdata(pdev);
 	struct resource *res = pdev->resource;
-	unsigned long size = resource_size(res);
+	unsigned long size = res->end - res->start + 1;
 
 	platform_set_drvdata(pdev, NULL);
 
@@ -131,7 +127,7 @@ static struct platform_driver generic_onenand_driver = {
 	.remove		= __devexit_p(generic_onenand_remove),
 };
 
-MODULE_ALIAS("platform:" DRIVER_NAME);
+MODULE_ALIAS(DRIVER_NAME);
 
 static int __init generic_onenand_init(void)
 {

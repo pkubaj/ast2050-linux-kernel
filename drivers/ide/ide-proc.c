@@ -30,9 +30,11 @@
 
 static struct proc_dir_entry *proc_ide_root;
 
-static int ide_imodel_proc_show(struct seq_file *m, void *v)
+static int proc_ide_read_imodel
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_hwif_t	*hwif = (ide_hwif_t *) m->private;
+	ide_hwif_t	*hwif = (ide_hwif_t *) data;
+	int		len;
 	const char	*name;
 
 	switch (hwif->chipset) {
@@ -51,107 +53,62 @@ static int ide_imodel_proc_show(struct seq_file *m, void *v)
 	case ide_acorn:		name = "acorn";		break;
 	default:		name = "(unknown)";	break;
 	}
-	seq_printf(m, "%s\n", name);
-	return 0;
+	len = sprintf(page, "%s\n", name);
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
-static int ide_imodel_proc_open(struct inode *inode, struct file *file)
+static int proc_ide_read_mate
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	return single_open(file, ide_imodel_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations ide_imodel_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_imodel_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int ide_mate_proc_show(struct seq_file *m, void *v)
-{
-	ide_hwif_t	*hwif = (ide_hwif_t *) m->private;
+	ide_hwif_t	*hwif = (ide_hwif_t *) data;
+	int		len;
 
 	if (hwif && hwif->mate)
-		seq_printf(m, "%s\n", hwif->mate->name);
+		len = sprintf(page, "%s\n", hwif->mate->name);
 	else
-		seq_printf(m, "(none)\n");
-	return 0;
+		len = sprintf(page, "(none)\n");
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
-static int ide_mate_proc_open(struct inode *inode, struct file *file)
+static int proc_ide_read_channel
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	return single_open(file, ide_mate_proc_show, PDE(inode)->data);
+	ide_hwif_t	*hwif = (ide_hwif_t *) data;
+	int		len;
+
+	page[0] = hwif->channel ? '1' : '0';
+	page[1] = '\n';
+	len = 2;
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
-static const struct file_operations ide_mate_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_mate_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int ide_channel_proc_show(struct seq_file *m, void *v)
+static int proc_ide_read_identify
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_hwif_t	*hwif = (ide_hwif_t *) m->private;
+	ide_drive_t	*drive = (ide_drive_t *)data;
+	int		len = 0, i = 0;
+	int		err = 0;
 
-	seq_printf(m, "%c\n", hwif->channel ? '1' : '0');
-	return 0;
-}
+	len = sprintf(page, "\n");
 
-static int ide_channel_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ide_channel_proc_show, PDE(inode)->data);
-}
+	if (drive) {
+		__le16 *val = (__le16 *)page;
 
-static const struct file_operations ide_channel_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_channel_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+		err = taskfile_lib_get_identify(drive, page);
+		if (!err) {
+			char *out = (char *)page + SECTOR_SIZE;
 
-static int ide_identify_proc_show(struct seq_file *m, void *v)
-{
-	ide_drive_t *drive = (ide_drive_t *)m->private;
-	u8 *buf;
-
-	if (!drive) {
-		seq_putc(m, '\n');
-		return 0;
-	}
-
-	buf = kmalloc(SECTOR_SIZE, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-	if (taskfile_lib_get_identify(drive, buf) == 0) {
-		__le16 *val = (__le16 *)buf;
-		int i;
-
-		for (i = 0; i < SECTOR_SIZE / 2; i++) {
-			seq_printf(m, "%04x%c", le16_to_cpu(val[i]),
-					(i % 8) == 7 ? '\n' : ' ');
+			page = out;
+			do {
+				out += sprintf(out, "%04x%c",
+					le16_to_cpup(val), (++i & 7) ? ' ' : '\n');
+				val += 1;
+			} while (i < SECTOR_SIZE / 2);
+			len = out - page;
 		}
-	} else
-		seq_putc(m, buf[0]);
-	kfree(buf);
-	return 0;
+	}
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
-
-static int ide_identify_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ide_identify_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations ide_identify_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_identify_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 /**
  *	ide_find_setting	-	find a specific setting
@@ -238,6 +195,7 @@ ide_devset_get(xfer_rate, current_speed);
 static int set_xfer_rate (ide_drive_t *drive, int arg)
 {
 	struct ide_cmd cmd;
+	int err;
 
 	if (arg < XFER_PIO_0 || arg > XFER_UDMA_6)
 		return -EINVAL;
@@ -248,9 +206,14 @@ static int set_xfer_rate (ide_drive_t *drive, int arg)
 	cmd.tf.nsect   = (u8)arg;
 	cmd.valid.out.tf = IDE_VALID_FEATURE | IDE_VALID_NSECT;
 	cmd.valid.in.tf  = IDE_VALID_NSECT;
-	cmd.tf_flags   = IDE_TFLAG_SET_XFER;
 
-	return ide_no_data_taskfile(drive, &cmd);
+	err = ide_no_data_taskfile(drive, &cmd);
+
+	if (!err) {
+		ide_set_xfer_rate(drive, (u8) arg);
+		ide_driveid_update(drive);
+	}
+	return err;
 }
 
 ide_devset_rw(current_speed, xfer_rate);
@@ -273,24 +236,32 @@ static const struct ide_proc_devset ide_generic_settings[] = {
 
 static void proc_ide_settings_warn(void)
 {
-	printk_once(KERN_WARNING "Warning: /proc/ide/hd?/settings interface is "
+	static int warned;
+
+	if (warned)
+		return;
+
+	printk(KERN_WARNING "Warning: /proc/ide/hd?/settings interface is "
 			    "obsolete, and will be removed soon!\n");
+	warned = 1;
 }
 
-static int ide_settings_proc_show(struct seq_file *m, void *v)
+static int proc_ide_read_settings
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
 	const struct ide_proc_devset *setting, *g, *d;
 	const struct ide_devset *ds;
-	ide_drive_t	*drive = (ide_drive_t *) m->private;
-	int		rc, mul_factor, div_factor;
+	ide_drive_t	*drive = (ide_drive_t *) data;
+	char		*out = page;
+	int		len, rc, mul_factor, div_factor;
 
 	proc_ide_settings_warn();
 
 	mutex_lock(&ide_setting_mtx);
 	g = ide_generic_settings;
 	d = drive->settings;
-	seq_printf(m, "name\t\t\tvalue\t\tmin\t\tmax\t\tmode\n");
-	seq_printf(m, "----\t\t\t-----\t\t---\t\t---\t\t----\n");
+	out += sprintf(out, "name\t\t\tvalue\t\tmin\t\tmax\t\tmode\n");
+	out += sprintf(out, "----\t\t\t-----\t\t---\t\t---\t\t----\n");
 	while (g->name || (d && d->name)) {
 		/* read settings in the alphabetical order */
 		if (g->name && d && d->name) {
@@ -304,35 +275,31 @@ static int ide_settings_proc_show(struct seq_file *m, void *v)
 			setting = g++;
 		mul_factor = setting->mulf ? setting->mulf(drive) : 1;
 		div_factor = setting->divf ? setting->divf(drive) : 1;
-		seq_printf(m, "%-24s", setting->name);
+		out += sprintf(out, "%-24s", setting->name);
 		rc = ide_read_setting(drive, setting);
 		if (rc >= 0)
-			seq_printf(m, "%-16d", rc * mul_factor / div_factor);
+			out += sprintf(out, "%-16d", rc * mul_factor / div_factor);
 		else
-			seq_printf(m, "%-16s", "write-only");
-		seq_printf(m, "%-16d%-16d", (setting->min * mul_factor + div_factor - 1) / div_factor, setting->max * mul_factor / div_factor);
+			out += sprintf(out, "%-16s", "write-only");
+		out += sprintf(out, "%-16d%-16d", (setting->min * mul_factor + div_factor - 1) / div_factor, setting->max * mul_factor / div_factor);
 		ds = setting->setting;
 		if (ds->get)
-			seq_printf(m, "r");
+			out += sprintf(out, "r");
 		if (ds->set)
-			seq_printf(m, "w");
-		seq_printf(m, "\n");
+			out += sprintf(out, "w");
+		out += sprintf(out, "\n");
 	}
+	len = out - page;
 	mutex_unlock(&ide_setting_mtx);
-	return 0;
-}
-
-static int ide_settings_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ide_settings_proc_show, PDE(inode)->data);
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
 #define MAX_LEN	30
 
-static ssize_t ide_settings_proc_write(struct file *file, const char __user *buffer,
-				       size_t count, loff_t *pos)
+static int proc_ide_write_settings(struct file *file, const char __user *buffer,
+				   unsigned long count, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) PDE(file->f_path.dentry->d_inode)->data;
+	ide_drive_t	*drive = (ide_drive_t *) data;
 	char		name[MAX_LEN + 1];
 	int		for_real = 0, mul_factor, div_factor;
 	unsigned long	n;
@@ -427,104 +394,63 @@ static ssize_t ide_settings_proc_write(struct file *file, const char __user *buf
 	return count;
 parse_error:
 	free_page((unsigned long)buf);
-	printk("%s(): parse error\n", __func__);
+	printk("proc_ide_write_settings(): parse error\n");
 	return -EINVAL;
 }
 
-static const struct file_operations ide_settings_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_settings_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.write		= ide_settings_proc_write,
-};
-
-static int ide_capacity_proc_show(struct seq_file *m, void *v)
+int proc_ide_read_capacity
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	seq_printf(m, "%llu\n", (long long)0x7fffffff);
-	return 0;
+	int len = sprintf(page, "%llu\n", (long long)0x7fffffff);
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
-static int ide_capacity_proc_open(struct inode *inode, struct file *file)
+EXPORT_SYMBOL_GPL(proc_ide_read_capacity);
+
+int proc_ide_read_geometry
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	return single_open(file, ide_capacity_proc_show, NULL);
-}
+	ide_drive_t	*drive = (ide_drive_t *) data;
+	char		*out = page;
+	int		len;
 
-const struct file_operations ide_capacity_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_capacity_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-EXPORT_SYMBOL_GPL(ide_capacity_proc_fops);
-
-static int ide_geometry_proc_show(struct seq_file *m, void *v)
-{
-	ide_drive_t	*drive = (ide_drive_t *) m->private;
-
-	seq_printf(m, "physical     %d/%d/%d\n",
+	out += sprintf(out, "physical     %d/%d/%d\n",
 			drive->cyl, drive->head, drive->sect);
-	seq_printf(m, "logical      %d/%d/%d\n",
+	out += sprintf(out, "logical      %d/%d/%d\n",
 			drive->bios_cyl, drive->bios_head, drive->bios_sect);
-	return 0;
+
+	len = out - page;
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
-static int ide_geometry_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ide_geometry_proc_show, PDE(inode)->data);
-}
+EXPORT_SYMBOL(proc_ide_read_geometry);
 
-const struct file_operations ide_geometry_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_geometry_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-EXPORT_SYMBOL(ide_geometry_proc_fops);
-
-static int ide_dmodel_proc_show(struct seq_file *seq, void *v)
+static int proc_ide_read_dmodel
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) seq->private;
+	ide_drive_t	*drive = (ide_drive_t *) data;
 	char		*m = (char *)&drive->id[ATA_ID_PROD];
+	int		len;
 
-	seq_printf(seq, "%.40s\n", m[0] ? m : "(none)");
-	return 0;
+	len = sprintf(page, "%.40s\n", m[0] ? m : "(none)");
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
-static int ide_dmodel_proc_open(struct inode *inode, struct file *file)
+static int proc_ide_read_driver
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	return single_open(file, ide_dmodel_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations ide_dmodel_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_dmodel_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int ide_driver_proc_show(struct seq_file *m, void *v)
-{
-	ide_drive_t		*drive = (ide_drive_t *)m->private;
+	ide_drive_t		*drive = (ide_drive_t *)data;
 	struct device		*dev = &drive->gendev;
 	struct ide_driver	*ide_drv;
+	int			len;
 
 	if (dev->driver) {
 		ide_drv = to_ide_driver(dev->driver);
-		seq_printf(m, "%s version %s\n",
+		len = sprintf(page, "%s version %s\n",
 				dev->driver->name, ide_drv->version);
 	} else
-		seq_printf(m, "ide-default version 0.9.newide\n");
-	return 0;
-}
-
-static int ide_driver_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ide_driver_proc_show, PDE(inode)->data);
+		len = sprintf(page, "ide-default version 0.9.newide\n");
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
 
 static int ide_replace_subdriver(ide_drive_t *drive, const char *driver)
@@ -554,10 +480,10 @@ static int ide_replace_subdriver(ide_drive_t *drive, const char *driver)
 	return ret;
 }
 
-static ssize_t ide_driver_proc_write(struct file *file, const char __user *buffer,
-				     size_t count, loff_t *pos)
+static int proc_ide_write_driver
+	(struct file *file, const char __user *buffer, unsigned long count, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) PDE(file->f_path.dentry->d_inode)->data;
+	ide_drive_t	*drive = (ide_drive_t *) data;
 	char name[32];
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -572,19 +498,12 @@ static ssize_t ide_driver_proc_write(struct file *file, const char __user *buffe
 	return count;
 }
 
-static const struct file_operations ide_driver_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_driver_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.write		= ide_driver_proc_write,
-};
-
-static int ide_media_proc_show(struct seq_file *m, void *v)
+static int proc_ide_read_media
+	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	ide_drive_t	*drive = (ide_drive_t *) m->private;
+	ide_drive_t	*drive = (ide_drive_t *) data;
 	const char	*media;
+	int		len;
 
 	switch (drive->media) {
 	case ide_disk:		media = "disk\n";	break;
@@ -594,30 +513,20 @@ static int ide_media_proc_show(struct seq_file *m, void *v)
 	case ide_optical:	media = "optical\n";	break;
 	default:		media = "UNKNOWN\n";	break;
 	}
-	seq_puts(m, media);
-	return 0;
+	strcpy(page, media);
+	len = strlen(media);
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
-
-static int ide_media_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ide_media_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations ide_media_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ide_media_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 static ide_proc_entry_t generic_drive_entries[] = {
-	{ "driver",	S_IFREG|S_IRUGO,	 &ide_driver_proc_fops	},
-	{ "identify",	S_IFREG|S_IRUSR,	 &ide_identify_proc_fops},
-	{ "media",	S_IFREG|S_IRUGO,	 &ide_media_proc_fops	},
-	{ "model",	S_IFREG|S_IRUGO,	 &ide_dmodel_proc_fops	},
-	{ "settings",	S_IFREG|S_IRUSR|S_IWUSR, &ide_settings_proc_fops},
-	{}
+	{ "driver",	S_IFREG|S_IRUGO,	 proc_ide_read_driver,
+						 proc_ide_write_driver },
+	{ "identify",	S_IFREG|S_IRUSR,	 proc_ide_read_identify, NULL },
+	{ "media",	S_IFREG|S_IRUGO,	 proc_ide_read_media,    NULL },
+	{ "model",	S_IFREG|S_IRUGO,	 proc_ide_read_dmodel,   NULL },
+	{ "settings",	S_IFREG|S_IRUSR|S_IWUSR, proc_ide_read_settings,
+						 proc_ide_write_settings },
+	{ NULL,	0, NULL, NULL }
 };
 
 static void ide_add_proc_entries(struct proc_dir_entry *dir, ide_proc_entry_t *p, void *data)
@@ -627,8 +536,11 @@ static void ide_add_proc_entries(struct proc_dir_entry *dir, ide_proc_entry_t *p
 	if (!dir || !p)
 		return;
 	while (p->name != NULL) {
-		ent = proc_create_data(p->name, p->mode, dir, p->proc_fops, data);
+		ent = create_proc_entry(p->name, p->mode, dir);
 		if (!ent) return;
+		ent->data = data;
+		ent->read_proc = p->read_proc;
+		ent->write_proc = p->write_proc;
 		p++;
 	}
 }
@@ -711,10 +623,10 @@ void ide_proc_unregister_device(ide_drive_t *drive)
 }
 
 static ide_proc_entry_t hwif_entries[] = {
-	{ "channel",	S_IFREG|S_IRUGO,	&ide_channel_proc_fops	},
-	{ "mate",	S_IFREG|S_IRUGO,	&ide_mate_proc_fops	},
-	{ "model",	S_IFREG|S_IRUGO,	&ide_imodel_proc_fops	},
-	{}
+	{ "channel",	S_IFREG|S_IRUGO,	proc_ide_read_channel,	NULL },
+	{ "mate",	S_IFREG|S_IRUGO,	proc_ide_read_mate,	NULL },
+	{ "model",	S_IFREG|S_IRUGO,	proc_ide_read_imodel,	NULL },
+	{ NULL,	0, NULL, NULL }
 };
 
 void ide_proc_register_port(ide_hwif_t *hwif)

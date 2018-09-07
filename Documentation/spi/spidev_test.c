@@ -69,7 +69,7 @@ static void transfer(int fd)
 	puts("");
 }
 
-static void print_usage(const char *prog)
+void print_usage(const char *prog)
 {
 	printf("Usage: %s [-DsbdlHOLC3]\n", prog);
 	puts("  -D --device   device to use (default /dev/spidev1.1)\n"
@@ -85,7 +85,7 @@ static void print_usage(const char *prog)
 	exit(1);
 }
 
-static void parse_opts(int argc, char *argv[])
+void parse_opts(int argc, char *argv[])
 {
 	while (1) {
 		static const struct option lopts[] = {

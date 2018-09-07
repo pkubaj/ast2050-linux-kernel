@@ -20,9 +20,8 @@
 #define FALCON_B_P_DEVID        0x0710
 
 /* TX */
-extern netdev_tx_t efx_xmit(struct efx_nic *efx,
-				  struct efx_tx_queue *tx_queue,
-				  struct sk_buff *skb);
+extern int efx_xmit(struct efx_nic *efx,
+		    struct efx_tx_queue *tx_queue, struct sk_buff *skb);
 extern void efx_stop_queue(struct efx_nic *efx);
 extern void efx_wake_queue(struct efx_nic *efx);
 

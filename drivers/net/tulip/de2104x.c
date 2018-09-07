@@ -599,8 +599,7 @@ next:
 		netif_wake_queue(de->dev);
 }
 
-static netdev_tx_t de_start_xmit (struct sk_buff *skb,
-					struct net_device *dev)
+static int de_start_xmit (struct sk_buff *skb, struct net_device *dev)
 {
 	struct de_private *de = netdev_priv(dev);
 	unsigned int entry, tx_free;
@@ -652,7 +651,7 @@ static netdev_tx_t de_start_xmit (struct sk_buff *skb,
 	dw32(TxPoll, NormalTxPoll);
 	dev->trans_start = jiffies;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* Set or clear the multicast filter for this adaptor.

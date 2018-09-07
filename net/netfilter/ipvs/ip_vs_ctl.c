@@ -18,9 +18,6 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/types.h>
@@ -343,8 +340,8 @@ static int ip_vs_svc_hash(struct ip_vs_service *svc)
 	unsigned hash;
 
 	if (svc->flags & IP_VS_SVC_F_HASHED) {
-		pr_err("%s(): request for already hashed, called from %pF\n",
-		       __func__, __builtin_return_address(0));
+		IP_VS_ERR("ip_vs_svc_hash(): request for already hashed, "
+			  "called from %p\n", __builtin_return_address(0));
 		return 0;
 	}
 
@@ -377,8 +374,8 @@ static int ip_vs_svc_hash(struct ip_vs_service *svc)
 static int ip_vs_svc_unhash(struct ip_vs_service *svc)
 {
 	if (!(svc->flags & IP_VS_SVC_F_HASHED)) {
-		pr_err("%s(): request for unhash flagged, called from %pF\n",
-		       __func__, __builtin_return_address(0));
+		IP_VS_ERR("ip_vs_svc_unhash(): request for unhash flagged, "
+			  "called from %p\n", __builtin_return_address(0));
 		return 0;
 	}
 
@@ -844,7 +841,7 @@ ip_vs_new_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest,
 
 	dest = kzalloc(sizeof(struct ip_vs_dest), GFP_ATOMIC);
 	if (dest == NULL) {
-		pr_err("%s(): no memory.\n", __func__);
+		IP_VS_ERR("ip_vs_new_dest: kmalloc failed.\n");
 		return -ENOMEM;
 	}
 
@@ -888,13 +885,13 @@ ip_vs_add_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest)
 	EnterFunction(2);
 
 	if (udest->weight < 0) {
-		pr_err("%s(): server weight less than zero\n", __func__);
+		IP_VS_ERR("ip_vs_add_dest(): server weight less than zero\n");
 		return -ERANGE;
 	}
 
 	if (udest->l_threshold > udest->u_threshold) {
-		pr_err("%s(): lower threshold is higher than upper threshold\n",
-			__func__);
+		IP_VS_ERR("ip_vs_add_dest(): lower threshold is higher than "
+			  "upper threshold\n");
 		return -ERANGE;
 	}
 
@@ -906,7 +903,7 @@ ip_vs_add_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest)
 	dest = ip_vs_lookup_dest(svc, &daddr, dport);
 
 	if (dest != NULL) {
-		IP_VS_DBG(1, "%s(): dest already exists\n", __func__);
+		IP_VS_DBG(1, "ip_vs_add_dest(): dest already exists\n");
 		return -EEXIST;
 	}
 
@@ -1000,13 +997,13 @@ ip_vs_edit_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest)
 	EnterFunction(2);
 
 	if (udest->weight < 0) {
-		pr_err("%s(): server weight less than zero\n", __func__);
+		IP_VS_ERR("ip_vs_edit_dest(): server weight less than zero\n");
 		return -ERANGE;
 	}
 
 	if (udest->l_threshold > udest->u_threshold) {
-		pr_err("%s(): lower threshold is higher than upper threshold\n",
-			__func__);
+		IP_VS_ERR("ip_vs_edit_dest(): lower threshold is higher than "
+			  "upper threshold\n");
 		return -ERANGE;
 	}
 
@@ -1018,7 +1015,7 @@ ip_vs_edit_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest)
 	dest = ip_vs_lookup_dest(svc, &daddr, dport);
 
 	if (dest == NULL) {
-		IP_VS_DBG(1, "%s(): dest doesn't exist\n", __func__);
+		IP_VS_DBG(1, "ip_vs_edit_dest(): dest doesn't exist\n");
 		return -ENOENT;
 	}
 
@@ -1118,7 +1115,7 @@ ip_vs_del_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest)
 	dest = ip_vs_lookup_dest(svc, &udest->addr, dport);
 
 	if (dest == NULL) {
-		IP_VS_DBG(1, "%s(): destination not found!\n", __func__);
+		IP_VS_DBG(1, "ip_vs_del_dest(): destination not found!\n");
 		return -ENOENT;
 	}
 
@@ -1164,7 +1161,8 @@ ip_vs_add_service(struct ip_vs_service_user_kern *u,
 	/* Lookup the scheduler by 'u->sched_name' */
 	sched = ip_vs_scheduler_get(u->sched_name);
 	if (sched == NULL) {
-		pr_info("Scheduler module ip_vs_%s not found\n", u->sched_name);
+		IP_VS_INFO("Scheduler module ip_vs_%s not found\n",
+			   u->sched_name);
 		ret = -ENOENT;
 		goto out_mod_dec;
 	}
@@ -1178,7 +1176,7 @@ ip_vs_add_service(struct ip_vs_service_user_kern *u,
 
 	svc = kzalloc(sizeof(struct ip_vs_service), GFP_ATOMIC);
 	if (svc == NULL) {
-		IP_VS_DBG(1, "%s(): no memory\n", __func__);
+		IP_VS_DBG(1, "ip_vs_add_service: kmalloc failed.\n");
 		ret = -ENOMEM;
 		goto out_err;
 	}
@@ -1261,7 +1259,8 @@ ip_vs_edit_service(struct ip_vs_service *svc, struct ip_vs_service_user_kern *u)
 	 */
 	sched = ip_vs_scheduler_get(u->sched_name);
 	if (sched == NULL) {
-		pr_info("Scheduler module ip_vs_%s not found\n", u->sched_name);
+		IP_VS_INFO("Scheduler module ip_vs_%s not found\n",
+			   u->sched_name);
 		return -ENOENT;
 	}
 	old_sched = sched;
@@ -1496,14 +1495,14 @@ static int ip_vs_zero_all(void)
 
 
 static int
-proc_do_defense_mode(ctl_table *table, int write,
+proc_do_defense_mode(ctl_table *table, int write, struct file * filp,
 		     void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *valp = table->data;
 	int val = *valp;
 	int rc;
 
-	rc = proc_dointvec(table, write, buffer, lenp, ppos);
+	rc = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if (write && (*valp != val)) {
 		if ((*valp < 0) || (*valp > 3)) {
 			/* Restore the correct value */
@@ -1517,7 +1516,7 @@ proc_do_defense_mode(ctl_table *table, int write,
 
 
 static int
-proc_do_sync_threshold(ctl_table *table, int write,
+proc_do_sync_threshold(ctl_table *table, int write, struct file *filp,
 		       void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *valp = table->data;
@@ -1527,7 +1526,7 @@ proc_do_sync_threshold(ctl_table *table, int write,
 	/* backup the value first */
 	memcpy(val, valp, sizeof(val));
 
-	rc = proc_dointvec(table, write, buffer, lenp, ppos);
+	rc = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if (write && (valp[0] < 0 || valp[1] < 0 || valp[0] >= valp[1])) {
 		/* Restore the correct value */
 		memcpy(valp, val, sizeof(val));
@@ -2078,8 +2077,8 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		return -EPERM;
 
 	if (len != set_arglen[SET_CMDID(cmd)]) {
-		pr_err("set_ctl: len %u != %u\n",
-		       len, set_arglen[SET_CMDID(cmd)]);
+		IP_VS_ERR("set_ctl: len %u != %u\n",
+			  len, set_arglen[SET_CMDID(cmd)]);
 		return -EINVAL;
 	}
 
@@ -2130,9 +2129,9 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 
 	/* Check for valid protocol: TCP or UDP, even for fwmark!=0 */
 	if (usvc.protocol != IPPROTO_TCP && usvc.protocol != IPPROTO_UDP) {
-		pr_err("set_ctl: invalid protocol: %d %pI4:%d %s\n",
-		       usvc.protocol, &usvc.addr.ip,
-		       ntohs(usvc.port), usvc.sched_name);
+		IP_VS_ERR("set_ctl: invalid protocol: %d %pI4:%d %s\n",
+			  usvc.protocol, &usvc.addr.ip,
+			  ntohs(usvc.port), usvc.sched_name);
 		ret = -EFAULT;
 		goto out_unlock;
 	}
@@ -2357,8 +2356,8 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 		return -EPERM;
 
 	if (*len < get_arglen[GET_CMDID(cmd)]) {
-		pr_err("get_ctl: len %u < %u\n",
-		       *len, get_arglen[GET_CMDID(cmd)]);
+		IP_VS_ERR("get_ctl: len %u < %u\n",
+			  *len, get_arglen[GET_CMDID(cmd)]);
 		return -EINVAL;
 	}
 
@@ -2403,7 +2402,7 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 		size = sizeof(*get) +
 			sizeof(struct ip_vs_service_entry) * get->num_services;
 		if (*len != size) {
-			pr_err("length: %u != %u\n", *len, size);
+			IP_VS_ERR("length: %u != %u\n", *len, size);
 			ret = -EINVAL;
 			goto out;
 		}
@@ -2443,7 +2442,7 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 		size = sizeof(*get) +
 			sizeof(struct ip_vs_dest_entry) * get->num_dests;
 		if (*len != size) {
-			pr_err("length: %u != %u\n", *len, size);
+			IP_VS_ERR("length: %u != %u\n", *len, size);
 			ret = -EINVAL;
 			goto out;
 		}
@@ -2455,7 +2454,6 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	{
 		struct ip_vs_timeout_user t;
 
-		memset(&t, 0, sizeof(t));
 		__ip_vs_get_timeouts(&t);
 		if (copy_to_user(user, &t, sizeof(t)) != 0)
 			ret = -EFAULT;
@@ -3176,7 +3174,7 @@ static int ip_vs_genl_get_cmd(struct sk_buff *skb, struct genl_info *info)
 	else if (cmd == IPVS_CMD_GET_CONFIG)
 		reply_cmd = IPVS_CMD_SET_CONFIG;
 	else {
-		pr_err("unknown Generic Netlink command\n");
+		IP_VS_ERR("unknown Generic Netlink command\n");
 		return -EINVAL;
 	}
 
@@ -3237,11 +3235,11 @@ static int ip_vs_genl_get_cmd(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	genlmsg_end(msg, reply);
-	ret = genlmsg_reply(msg, info);
+	ret = genlmsg_unicast(msg, info->snd_pid);
 	goto out;
 
 nla_put_failure:
-	pr_err("not enough space in Netlink message\n");
+	IP_VS_ERR("not enough space in Netlink message\n");
 	ret = -EMSGSIZE;
 
 out_err:
@@ -3372,13 +3370,13 @@ int __init ip_vs_control_init(void)
 
 	ret = nf_register_sockopt(&ip_vs_sockopts);
 	if (ret) {
-		pr_err("cannot register sockopt.\n");
+		IP_VS_ERR("cannot register sockopt.\n");
 		return ret;
 	}
 
 	ret = ip_vs_genl_register();
 	if (ret) {
-		pr_err("cannot register Generic Netlink interface.\n");
+		IP_VS_ERR("cannot register Generic Netlink interface.\n");
 		nf_unregister_sockopt(&ip_vs_sockopts);
 		return ret;
 	}

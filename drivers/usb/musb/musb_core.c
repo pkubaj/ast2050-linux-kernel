@@ -1450,7 +1450,7 @@ static int __init musb_core_init(u16 musb_type, struct musb *musb)
 #endif
 
 		if (hw_ep->max_packet_sz_tx) {
-			DBG(1,
+			printk(KERN_DEBUG
 				"%s: hw_ep %d%s, %smax %d\n",
 				musb_driver_name, i,
 				hw_ep->is_shared_fifo ? "shared" : "tx",
@@ -1459,7 +1459,7 @@ static int __init musb_core_init(u16 musb_type, struct musb *musb)
 				hw_ep->max_packet_sz_tx);
 		}
 		if (hw_ep->max_packet_sz_rx && !hw_ep->is_shared_fifo) {
-			DBG(1,
+			printk(KERN_DEBUG
 				"%s: hw_ep %d%s, %smax %d\n",
 				musb_driver_name, i,
 				"rx",
@@ -1792,7 +1792,6 @@ allocate_instance(struct device *dev,
 	INIT_LIST_HEAD(&musb->out_bulk);
 
 	hcd->uses_new_polling = 1;
-	hcd->has_tt = 1;
 
 	musb->vbuserr_retry = VBUSERR_RETRY_COUNT;
 	musb->a_wait_bcon = OTG_TIME_A_WAIT_BCON;
@@ -1851,10 +1850,6 @@ static void musb_free(struct musb *musb)
 		dma_controller_destroy(c);
 	}
 
-#ifdef CONFIG_USB_MUSB_OTG
-	put_device(musb->xceiv->dev);
-#endif
-
 	musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
 	musb_platform_exit(musb);
 	musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
@@ -1863,6 +1858,10 @@ static void musb_free(struct musb *musb)
 		clk_disable(musb->clock);
 		clk_put(musb->clock);
 	}
+
+#ifdef CONFIG_USB_MUSB_OTG
+	put_device(musb->xceiv->dev);
+#endif
 
 #ifdef CONFIG_USB_MUSB_HDRC_HCD
 	usb_put_hcd(musb_to_hcd(musb));
@@ -2168,9 +2167,8 @@ static int __devexit musb_remove(struct platform_device *pdev)
 
 #ifdef	CONFIG_PM
 
-static int musb_suspend(struct device *dev)
+static int musb_suspend(struct platform_device *pdev, pm_message_t message)
 {
-	struct platform_device *pdev = to_platform_device(dev);
 	unsigned long	flags;
 	struct musb	*musb = dev_to_musb(&pdev->dev);
 
@@ -2197,9 +2195,8 @@ static int musb_suspend(struct device *dev)
 	return 0;
 }
 
-static int musb_resume_noirq(struct device *dev)
+static int musb_resume_early(struct platform_device *pdev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
 	struct musb	*musb = dev_to_musb(&pdev->dev);
 
 	if (!musb->clock)
@@ -2217,14 +2214,9 @@ static int musb_resume_noirq(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops musb_dev_pm_ops = {
-	.suspend	= musb_suspend,
-	.resume_noirq	= musb_resume_noirq,
-};
-
-#define MUSB_DEV_PM_OPS (&musb_dev_pm_ops)
 #else
-#define	MUSB_DEV_PM_OPS	NULL
+#define	musb_suspend	NULL
+#define	musb_resume_early	NULL
 #endif
 
 static struct platform_driver musb_driver = {
@@ -2232,10 +2224,11 @@ static struct platform_driver musb_driver = {
 		.name		= (char *)musb_driver_name,
 		.bus		= &platform_bus_type,
 		.owner		= THIS_MODULE,
-		.pm		= MUSB_DEV_PM_OPS,
 	},
 	.remove		= __devexit_p(musb_remove),
 	.shutdown	= musb_shutdown,
+	.suspend	= musb_suspend,
+	.resume_early	= musb_resume_early,
 };
 
 /*-------------------------------------------------------------------------*/

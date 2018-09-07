@@ -157,7 +157,7 @@ static int ipoib_stop(struct net_device *dev)
 
 	netif_stop_queue(dev);
 
-	ipoib_ib_dev_down(dev, 1);
+	ipoib_ib_dev_down(dev, 0);
 	ipoib_ib_dev_stop(dev, 0);
 
 	if (!test_bit(IPOIB_FLAG_SUBINTERFACE, &priv->flags)) {
@@ -604,11 +604,8 @@ static void neigh_add_path(struct sk_buff *skb, struct net_device *dev)
 					   skb_queue_len(&neigh->queue));
 				goto err_drop;
 			}
-		} else {
-			spin_unlock_irqrestore(&priv->lock, flags);
+		} else
 			ipoib_send(dev, skb, path->ah, IPOIB_QPN(skb_dst(skb)->neighbour->ha));
-			return;
-		}
 	} else {
 		neigh->ah  = NULL;
 
@@ -691,9 +688,7 @@ static void unicast_arp_send(struct sk_buff *skb, struct net_device *dev,
 		ipoib_dbg(priv, "Send unicast ARP to %04x\n",
 			  be16_to_cpu(path->pathrec.dlid));
 
-		spin_unlock_irqrestore(&priv->lock, flags);
 		ipoib_send(dev, skb, path->ah, IPOIB_QPN(phdr->hwaddr));
-		return;
 	} else if ((path->query || !path_rec_start(dev, path)) &&
 		   skb_queue_len(&path->queue) < IPOIB_MAX_PATH_REC_QUEUE) {
 		/* put pseudoheader back on for next time */
@@ -884,7 +879,6 @@ struct ipoib_neigh *ipoib_neigh_alloc(struct neighbour *neighbour,
 
 	neigh->neighbour = neighbour;
 	neigh->dev = dev;
-	memset(&neigh->dgid.raw, 0, sizeof (union ib_gid));
 	*to_ipoib_neigh(neighbour) = neigh;
 	skb_queue_head_init(&neigh->queue);
 	ipoib_cm_set(neigh, NULL);
@@ -1163,7 +1157,7 @@ static ssize_t create_child(struct device *dev,
 
 	return ret ? ret : count;
 }
-static DEVICE_ATTR(create_child, S_IWUSR, NULL, create_child);
+static DEVICE_ATTR(create_child, S_IWUGO, NULL, create_child);
 
 static ssize_t delete_child(struct device *dev,
 			    struct device_attribute *attr,
@@ -1183,7 +1177,7 @@ static ssize_t delete_child(struct device *dev,
 	return ret ? ret : count;
 
 }
-static DEVICE_ATTR(delete_child, S_IWUSR, NULL, delete_child);
+static DEVICE_ATTR(delete_child, S_IWUGO, NULL, delete_child);
 
 int ipoib_add_pkey_attr(struct net_device *dev)
 {

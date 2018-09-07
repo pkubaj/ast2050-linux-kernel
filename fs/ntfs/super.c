@@ -201,7 +201,8 @@ use_utf8:
 						v, old_nls->charset);
 				nls_map = old_nls;
 			} else /* nls_map */ {
-				unload_nls(old_nls);
+				if (old_nls)
+					unload_nls(old_nls);
 			}
 		} else if (!strcmp(p, "utf8")) {
 			bool val = false;
@@ -2426,9 +2427,10 @@ static void ntfs_put_super(struct super_block *sb)
 		ntfs_free(vol->upcase);
 		vol->upcase = NULL;
 	}
-
-	unload_nls(vol->nls_map);
-
+	if (vol->nls_map) {
+		unload_nls(vol->nls_map);
+		vol->nls_map = NULL;
+	}
 	sb->s_fs_info = NULL;
 	kfree(vol);
 

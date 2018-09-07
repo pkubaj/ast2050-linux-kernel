@@ -74,9 +74,11 @@ static void CfgInitHook(PRTMP_ADAPTER pAd);
 
 extern	const struct iw_handler_def rt28xx_iw_handler_def;
 
+#if WIRELESS_EXT >= 12
 // This function will be called when query /proc
 struct iw_statistics *rt28xx_get_wireless_stats(
     IN struct net_device *net_dev);
+#endif
 
 struct net_device_stats *RT28xx_get_ether_stats(
     IN  struct net_device *net_dev);
@@ -188,7 +190,7 @@ int rt28xx_close(IN PNET_DEV dev)
 	BOOLEAN 		Cancelled = FALSE;
 	UINT32			i = 0;
 #ifdef RT2870
-	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(unlink_wakeup);
+	DECLARE_WAIT_QUEUE_HEAD(unlink_wakeup);
 	DECLARE_WAITQUEUE(wait, current);
 
 	//RTMP_SET_FLAG(pAd, fRTMP_ADAPTER_REMOVE_IN_PROGRESS);
@@ -515,6 +517,9 @@ static int rt28xx_init(IN struct net_device *net_dev)
 	NICInitRT30xxRFRegisters(pAd);
 #endif // RT2870 //
 
+#ifdef IKANOS_VX_1X0
+	VR_IKANOS_FP_Init(pAd->ApCfg.BssidNum, pAd->PermanentAddress);
+#endif // IKANOS_VX_1X0 //
 
 		//
 	// Initialize RF register to default value
@@ -522,7 +527,7 @@ static int rt28xx_init(IN struct net_device *net_dev)
 	AsicSwitchChannel(pAd, pAd->CommonCfg.Channel, FALSE);
 	AsicLockChannel(pAd, pAd->CommonCfg.Channel);
 
-#ifndef RT2870
+#ifndef RT30xx
 	// 8051 firmware require the signal during booting time.
 	AsicSendCommandToMcu(pAd, 0x72, 0xFF, 0x00, 0x00);
 #endif
@@ -670,12 +675,16 @@ err:
 static const struct net_device_ops rt2860_netdev_ops = {
 	.ndo_open		= MainVirtualIF_open,
 	.ndo_stop		= MainVirtualIF_close,
-	.ndo_do_ioctl		= rt28xx_sta_ioctl,
+	.ndo_do_ioctl		= rt28xx_ioctl,
 	.ndo_get_stats		= RT28xx_get_ether_stats,
 	.ndo_validate_addr	= NULL,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_change_mtu		= eth_change_mtu,
+#ifdef IKANOS_VX_1X0
+	.ndo_start_xmit		= IKANOS_DataFramesTx,
+#else
 	.ndo_start_xmit		= rt28xx_send_packets,
+#endif
 };
 
 /* Must not be called for mdev and apdev */
@@ -686,17 +695,22 @@ static NDIS_STATUS rt_ieee80211_if_setup(struct net_device *dev, PRTMP_ADAPTER p
 	CHAR    slot_name[IFNAMSIZ];
 	struct net_device   *device;
 
+#if WIRELESS_EXT >= 12
 	if (pAd->OpMode == OPMODE_STA)
 	{
 		dev->wireless_handlers = &rt28xx_iw_handler_def;
 	}
+#endif //WIRELESS_EXT >= 12
 
+#if WIRELESS_EXT < 21
+		dev->get_wireless_stats = rt28xx_get_wireless_stats;
+#endif
 	dev->priv_flags = INT_MAIN;
 	dev->netdev_ops = &rt2860_netdev_ops;
 	// find available device name
 	for (i = 0; i < 8; i++)
 	{
-		sprintf(slot_name, "wlan%d", i);
+		sprintf(slot_name, "ra%d", i);
 
 		device = dev_get_by_name(dev_net(dev), slot_name);
 		if (device != NULL)
@@ -713,7 +727,7 @@ static NDIS_STATUS rt_ieee80211_if_setup(struct net_device *dev, PRTMP_ADAPTER p
 	}
 	else
 	{
-		sprintf(dev->name, "wlan%d", i);
+		sprintf(dev->name, "ra%d", i);
 		Status = NDIS_STATUS_SUCCESS;
 	}
 
@@ -777,8 +791,6 @@ INT __devinit   rt28xx_probe(
 
 	// Allocate RTMP_ADAPTER miniport adapter structure
 	handle = kmalloc(sizeof(struct os_cookie), GFP_KERNEL);
-	if (handle == NULL)
-		goto err_out_free_netdev;;
 	RT28XX_HANDLE_DEV_ASSIGN(handle, dev_p);
 
 	status = RTMPAllocAdapterBlock(handle, &pAd);
@@ -850,7 +862,7 @@ int rt28xx_packet_xmit(struct sk_buff *skb)
 {
 	struct net_device *net_dev = skb->dev;
 	PRTMP_ADAPTER pAd = net_dev->ml_priv;
-	int status = NETDEV_TX_OK;
+	int status = 0;
 	PNDIS_PACKET pPacket = (PNDIS_PACKET) skb;
 
 	{
@@ -880,7 +892,7 @@ int rt28xx_packet_xmit(struct sk_buff *skb)
 
 	STASendPackets((NDIS_HANDLE)pAd, (PPNDIS_PACKET) &pPacket, 1);
 
-	status = NETDEV_TX_OK;
+	status = 0;
 done:
 
 	return status;
@@ -911,7 +923,7 @@ INT rt28xx_send_packets(
 	if (!(net_dev->flags & IFF_UP))
 	{
 		RELEASE_NDIS_PACKET(pAd, (PNDIS_PACKET)skb_p, NDIS_STATUS_FAILURE);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	NdisZeroMemory((PUCHAR)&skb_p->cb[CB_OFF], 15);
@@ -930,6 +942,7 @@ void CfgInitHook(PRTMP_ADAPTER pAd)
 } /* End of CfgInitHook */
 
 
+#if WIRELESS_EXT >= 12
 // This function will be called when query /proc
 struct iw_statistics *rt28xx_get_wireless_stats(
     IN struct net_device *net_dev)
@@ -963,6 +976,7 @@ struct iw_statistics *rt28xx_get_wireless_stats(
 	DBGPRINT(RT_DEBUG_TRACE, ("<--- rt28xx_get_wireless_stats\n"));
 	return &pAd->iw_stats;
 } /* End of rt28xx_get_wireless_stats */
+#endif // WIRELESS_EXT //
 
 
 
@@ -970,6 +984,37 @@ void tbtt_tasklet(unsigned long data)
 {
 #define MAX_TX_IN_TBTT		(16)
 
+}
+
+INT rt28xx_ioctl(
+	IN	struct net_device	*net_dev,
+	IN	OUT	struct ifreq	*rq,
+	IN	INT					cmd)
+{
+	VIRTUAL_ADAPTER	*pVirtualAd = NULL;
+	RTMP_ADAPTER	*pAd = NULL;
+	INT				ret = 0;
+
+	if (net_dev->priv_flags == INT_MAIN)
+	{
+		pAd = net_dev->ml_priv;
+	}
+	else
+	{
+		pVirtualAd = net_dev->ml_priv;
+		pAd = pVirtualAd->RtmpDev->ml_priv;
+	}
+
+	if (pAd == NULL)
+	{
+		/* if 1st open fail, pAd will be free;
+		   So the net_dev->ml_priv will be NULL in 2rd open */
+		return -ENETDOWN;
+	}
+
+	ret = rt28xx_sta_ioctl(net_dev, rq, cmd);
+
+	return ret;
 }
 
 /*

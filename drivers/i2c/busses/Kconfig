@@ -77,7 +77,7 @@ config I2C_AMD8111
 	  will be called i2c-amd8111.
 
 config I2C_I801
-	tristate "Intel 82801 (ICH/PCH)"
+	tristate "Intel 82801 (ICH)"
 	depends on PCI
 	help
 	  If you say yes to this option, support will be included for the Intel
@@ -97,8 +97,7 @@ config I2C_I801
 	    ICH9
 	    Tolapai
 	    ICH10
-	    3400/5 Series (PCH)
-	    Cougar Point (PCH)
+	    PCH
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i801.
@@ -114,7 +113,7 @@ config I2C_ISCH
 	  will be called i2c-isch.
 
 config I2C_PIIX4
-	tristate "Intel PIIX4 and compatible (ATI/AMD/Serverworks/Broadcom/SMSC)"
+	tristate "Intel PIIX4 and compatible (ATI/Serverworks/Broadcom/SMSC)"
 	depends on PCI
 	help
 	  If you say yes to this option, support will be included for the Intel
@@ -129,7 +128,6 @@ config I2C_PIIX4
 	    ATI SB600
 	    ATI SB700
 	    ATI SB800
-	    AMD Hudson-2
 	    Serverworks OSB4
 	    Serverworks CSB5
 	    Serverworks CSB6
@@ -232,22 +230,6 @@ config I2C_VIAPRO
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-viapro.
-
-if ACPI
-
-comment "ACPI drivers"
-
-config I2C_SCMI
-	tristate "SMBus Control Method Interface"
-	help
-	  This driver supports the SMBus Control Method Interface. It needs the
-	  BIOS to declare ACPI control methods as described in the SMBus Control
-	  Method Interface specification.
-
-	  To compile this driver as a module, choose M here:
-	  the module will be called i2c-scmi.
-
-endif # ACPI
 
 comment "Mac SMBus host controller drivers"
 	depends on PPC_CHRP || PPC_PMAC
@@ -478,8 +460,8 @@ config I2C_PNX
 	  will be called i2c-pnx.
 
 config I2C_PXA
-	tristate "Intel PXA2XX I2C adapter"
-	depends on ARCH_PXA || ARCH_MMP
+	tristate "Intel PXA2XX I2C adapter (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && ARCH_PXA
 	help
 	  If you have devices in the PXA I2C bus, say yes to this option.
 	  This driver can also be built as a module.  If so, the module
@@ -492,6 +474,51 @@ config I2C_PXA_SLAVE
 	  Support I2C slave mode communications on the PXA I2C bus.  This
 	  is necessary for systems where the PXA may be a target on the
 	  I2C bus.
+
+config I2C_AST
+        tristate "ASPEED AST I2C adapter "
+#        depends on ARCH_ASPEED
+        help
+          If you have devices in the AST I2C bus, say yes to this option.
+          This driver can also be built as a module.  If so, the module
+          will be called i2c-ast.
+
+config I2C_AST1070
+        tristate "ASPEED AST1070 I2C adapter "
+        depends on ARCH_AST1070
+        help
+          If you have devices in the AST1070 I2C bus, say yes to this option.
+          This driver can also be built as a module.  If so, the module
+          will be called i2c-ast.
+
+config AST_I2C_SLAVE_MODE
+        bool "AST I2C Slave mode"
+	depends on I2C_AST
+
+if AST_I2C_SLAVE_MODE
+
+choice 
+	prompt "I2C slave config"
+        default AST_I2C_SLAVE_EEPROM
+
+config AST_I2C_SLAVE_EEPROM
+        bool "10 byte EEPROM Device"
+        help
+          Support I2C slave mode communications on the AST I2C bus.  This
+          is necessary for systems where the AST may be a target on the
+          I2C bus.
+	  
+config AST_I2C_SLAVE_RDWR
+        bool "I2C Slave RD/WR via ioctl"
+
+        help
+          Support I2C slave mode communications on the AST I2C bus.  This
+          is necessary for systems where the AST may be a target on the
+          I2C bus.
+
+endchoice
+
+endif
 
 config I2C_S3C2410
 	tristate "S3C2410 I2C Driver"

@@ -279,7 +279,7 @@ static int igbvf_set_ringparam(struct net_device *netdev,
 {
 	struct igbvf_adapter *adapter = netdev_priv(netdev);
 	struct igbvf_ring *temp_ring;
-	int err = 0;
+	int err;
 	u32 new_rx_count, new_tx_count;
 
 	if ((ring->rx_mini_pending) || (ring->rx_jumbo_pending))
@@ -299,22 +299,15 @@ static int igbvf_set_ringparam(struct net_device *netdev,
 		return 0;
 	}
 
+	temp_ring = vmalloc(sizeof(struct igbvf_ring));
+	if (!temp_ring)
+		return -ENOMEM;
+
 	while (test_and_set_bit(__IGBVF_RESETTING, &adapter->state))
 		msleep(1);
 
-	if (!netif_running(adapter->netdev)) {
-		adapter->tx_ring->count = new_tx_count;
-		adapter->rx_ring->count = new_rx_count;
-		goto clear_reset;
-	}
-
-	temp_ring = vmalloc(sizeof(struct igbvf_ring));
-	if (!temp_ring) {
-		err = -ENOMEM;
-		goto clear_reset;
-	}
-
-	igbvf_down(adapter);
+	if (netif_running(adapter->netdev))
+		igbvf_down(adapter);
 
 	/*
 	 * We can't just free everything and then setup again,
@@ -346,11 +339,14 @@ static int igbvf_set_ringparam(struct net_device *netdev,
 
 		memcpy(adapter->rx_ring, temp_ring,sizeof(struct igbvf_ring));
 	}
+
+	err = 0;
 err_setup:
-	igbvf_up(adapter);
-	vfree(temp_ring);
-clear_reset:
+	if (netif_running(adapter->netdev))
+		igbvf_up(adapter);
+
 	clear_bit(__IGBVF_RESETTING, &adapter->state);
+	vfree(temp_ring);
 	return err;
 }
 

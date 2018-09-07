@@ -49,8 +49,8 @@
 #include <asm/processor.h>
 
 #define DRV_NAME	"r6040"
-#define DRV_VERSION	"0.25"
-#define DRV_RELDATE	"20Aug2009"
+#define DRV_VERSION	"0.24"
+#define DRV_RELDATE	"08Jul2009"
 
 /* PHY CHIP Address */
 #define PHY1_ADDR	1	/* For MAC1 */
@@ -135,7 +135,7 @@
 #define RX_DESC_SIZE	(RX_DCNT * sizeof(struct r6040_descriptor))
 #define TX_DESC_SIZE	(TX_DCNT * sizeof(struct r6040_descriptor))
 #define MBCR_DEFAULT	0x012A	/* MAC Bus Control Register */
-#define MCAST_MAX	3	/* Max number multicast addresses to filter */
+#define MCAST_MAX	4	/* Max number multicast addresses to filter */
 
 /* Descriptor status */
 #define DSC_OWNER_MAC	0x8000	/* MAC is the owner of this descriptor */
@@ -750,6 +750,14 @@ static int r6040_up(struct net_device *dev)
 	struct r6040_private *lp = netdev_priv(dev);
 	void __iomem *ioaddr = lp->base;
 	int ret;
+	u16 val;
+
+	/* Check presence of a second PHY */
+	val = r6040_phy_read(ioaddr, lp->phy_addr, 2);
+	if (val == 0xFFFF) {
+		printk(KERN_ERR DRV_NAME " no second PHY attached\n");
+		return -EIO;
+	}
 
 	/* Initialise and alloc RX/TX buffers */
 	r6040_init_txbufs(dev);
@@ -883,13 +891,13 @@ static int r6040_open(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t r6040_start_xmit(struct sk_buff *skb,
-				    struct net_device *dev)
+static int r6040_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct r6040_private *lp = netdev_priv(dev);
 	struct r6040_descriptor *descptr;
 	void __iomem *ioaddr = lp->base;
 	unsigned long flags;
+	int ret = NETDEV_TX_OK;
 
 	/* Critical Section */
 	spin_lock_irqsave(&lp->lock, flags);
@@ -899,7 +907,8 @@ static netdev_tx_t r6040_start_xmit(struct sk_buff *skb,
 		spin_unlock_irqrestore(&lp->lock, flags);
 		netif_stop_queue(dev);
 		printk(KERN_ERR DRV_NAME ": no tx descriptor\n");
-		return NETDEV_TX_BUSY;
+		ret = NETDEV_TX_BUSY;
+		return ret;
 	}
 
 	/* Statistic Counter */
@@ -927,8 +936,7 @@ static netdev_tx_t r6040_start_xmit(struct sk_buff *skb,
 
 	dev->trans_start = jiffies;
 	spin_unlock_irqrestore(&lp->lock, flags);
-
-	return NETDEV_TX_OK;
+	return ret;
 }
 
 static void r6040_multicast_list(struct net_device *dev)
@@ -985,6 +993,9 @@ static void r6040_multicast_list(struct net_device *dev)
 			crc >>= 26;
 			hash_table[crc >> 4] |= 1 << (15 - (crc & 0xf));
 		}
+		/* Write the index of the hash table */
+		for (i = 0; i < 4; i++)
+			iowrite16(hash_table[i] << 14, ioaddr + MCR1);
 		/* Fill the MAC hash tables with their values */
 		iowrite16(hash_table[0], ioaddr + MAR0);
 		iowrite16(hash_table[1], ioaddr + MAR1);
@@ -992,7 +1003,6 @@ static void r6040_multicast_list(struct net_device *dev)
 		iowrite16(hash_table[3], ioaddr + MAR3);
 	}
 	/* Multicast Address 1~4 case */
-	dmi = dev->mc_list;
 	for (i = 0, dmi; (i < dev->mc_count) && (i < MCAST_MAX); i++) {
 		adrp = (u16 *)dmi->dmi_addr;
 		iowrite16(adrp[0], ioaddr + MID_1L + 8*i);
@@ -1001,9 +1011,9 @@ static void r6040_multicast_list(struct net_device *dev)
 		dmi = dmi->next;
 	}
 	for (i = dev->mc_count; i < MCAST_MAX; i++) {
-		iowrite16(0xffff, ioaddr + MID_1L + 8*i);
-		iowrite16(0xffff, ioaddr + MID_1M + 8*i);
-		iowrite16(0xffff, ioaddr + MID_1H + 8*i);
+		iowrite16(0xffff, ioaddr + MID_0L + 8*i);
+		iowrite16(0xffff, ioaddr + MID_0M + 8*i);
+		iowrite16(0xffff, ioaddr + MID_0H + 8*i);
 	}
 }
 
@@ -1081,9 +1091,10 @@ static int __devinit r6040_init_one(struct pci_dev *pdev,
 	int err, io_size = R6040_IO_SIZE;
 	static int card_idx = -1;
 	int bar = 0;
+	long pioaddr;
 	u16 *adrp;
 
-	printk("%s\n", version);
+	printk(KERN_INFO "%s\n", version);
 
 	err = pci_enable_device(pdev);
 	if (err)
@@ -1104,12 +1115,13 @@ static int __devinit r6040_init_one(struct pci_dev *pdev,
 	}
 
 	/* IO Size check */
-	if (pci_resource_len(pdev, bar) < io_size) {
+	if (pci_resource_len(pdev, 0) < io_size) {
 		printk(KERN_ERR DRV_NAME ": Insufficient PCI resources, aborting\n");
 		err = -EIO;
 		goto err_out;
 	}
 
+	pioaddr = pci_resource_start(pdev, 0);	/* IO map base address */
 	pci_set_master(pdev);
 
 	dev = alloc_etherdev(sizeof(struct r6040_private));
@@ -1183,13 +1195,6 @@ static int __devinit r6040_init_one(struct pci_dev *pdev,
 	lp->mii_if.phy_id = lp->phy_addr;
 	lp->mii_if.phy_id_mask = 0x1f;
 	lp->mii_if.reg_num_mask = 0x1f;
-
-	/* Check the vendor ID on the PHY, if 0xffff assume none attached */
-	if (r6040_phy_read(ioaddr, lp->phy_addr, 2) == 0xffff) {
-		printk(KERN_ERR DRV_NAME ": Failed to detect an attached PHY\n");
-		err = -ENODEV;
-		goto err_out_unmap;
-	}
 
 	/* Register net device. After this dev->name assign */
 	err = register_netdev(dev);

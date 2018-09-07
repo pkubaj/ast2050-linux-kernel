@@ -100,10 +100,9 @@ static unsigned int __init estimate_cpu_frequency(void)
 	return count;
 }
 
-void read_persistent_clock(struct timespec *ts)
+unsigned long read_persistent_clock(void)
 {
-	ts->tv_sec = mc146818_get_cmos_time();
-	ts->tv_nsec = 0;
+	return mc146818_get_cmos_time();
 }
 
 static void __init plat_perf_setup(void)

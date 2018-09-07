@@ -782,7 +782,7 @@ static u32 kaweth_get_link(struct net_device *dev)
 	return kaweth->linkstate;
 }
 
-static const struct ethtool_ops ops = {
+static struct ethtool_ops ops = {
 	.get_drvinfo	= kaweth_get_drvinfo,
 	.get_link	= kaweth_get_link
 };
@@ -807,8 +807,7 @@ static void kaweth_usb_transmit_complete(struct urb *urb)
 /****************************************************************
  *     kaweth_start_xmit
  ****************************************************************/
-static netdev_tx_t kaweth_start_xmit(struct sk_buff *skb,
-					   struct net_device *net)
+static int kaweth_start_xmit(struct sk_buff *skb, struct net_device *net)
 {
 	struct kaweth_device *kaweth = netdev_priv(net);
 	__le16 *private_header;
@@ -834,7 +833,7 @@ static netdev_tx_t kaweth_start_xmit(struct sk_buff *skb,
 			kaweth->stats.tx_errors++;
 			netif_start_queue(net);
 			spin_unlock_irq(&kaweth->device_lock);
-			return NETDEV_TX_OK;
+			return 0;
 		}
 	}
 
@@ -869,7 +868,7 @@ skip:
 
 	spin_unlock_irq(&kaweth->device_lock);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /****************************************************************
@@ -1325,7 +1324,7 @@ static int kaweth_internal_control_msg(struct usb_device *usb_dev,
         int retv;
         int length = 0; /* shut up GCC */
 
-	urb = usb_alloc_urb(0, GFP_ATOMIC);
+        urb = usb_alloc_urb(0, GFP_NOIO);
         if (!urb)
                 return -ENOMEM;
 

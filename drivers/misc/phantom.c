@@ -22,7 +22,6 @@
 #include <linux/interrupt.h>
 #include <linux/cdev.h>
 #include <linux/phantom.h>
-#include <linux/sched.h>
 #include <linux/smp_lock.h>
 
 #include <asm/atomic.h>
@@ -272,7 +271,7 @@ static unsigned int phantom_poll(struct file *file, poll_table *wait)
 	return mask;
 }
 
-static const struct file_operations phantom_file_ops = {
+static struct file_operations phantom_file_ops = {
 	.open = phantom_open,
 	.release = phantom_release,
 	.unlocked_ioctl = phantom_ioctl,

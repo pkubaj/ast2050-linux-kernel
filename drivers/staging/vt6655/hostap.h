@@ -26,12 +26,24 @@
  *
  */
 
+
 #ifndef __HOSTAP_H__
 #define __HOSTAP_H__
 
+#if !defined(__DEVICE_H__)
 #include "device.h"
+#endif
+
 
 /*---------------------  Export Definitions -------------------------*/
+
+#if WIRELESS_EXT < 9
+struct iw_point {
+	caddr_t pointer;
+	__u16 length;
+	__u16 flags;
+};
+#endif /* WIRELESS_EXT < 9 */
 
 #define WLAN_RATE_1M    BIT0
 #define WLAN_RATE_2M    BIT1
@@ -53,6 +65,11 @@
 
 /*---------------------  Export Functions  --------------------------*/
 
+
+#ifdef __cplusplus
+extern "C" {                            /* Assume C declarations for C++ */
+#endif /* __cplusplus */
+
 #ifndef ETH_P_PAE
 #define ETH_P_PAE 0x888E /* Port Access Entity (IEEE 802.1X) */
 #endif /* ETH_P_PAE */
@@ -63,6 +80,13 @@
 
 int hostap_set_hostapd(PSDevice pDevice, int val, int rtnl_locked);
 int hostap_ioctl(PSDevice pDevice, struct iw_point *p);
+
+#ifdef __cplusplus
+}                                       /* End of extern "C" { */
+#endif /* __cplusplus */
+
+
+
 
 #endif // __HOSTAP_H__
 

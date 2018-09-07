@@ -58,7 +58,9 @@
 #define ZD_MAX_KEY_SIZE			    32
 #define ZD_MAX_GENERIC_SIZE		    64
 
+#if WIRELESS_EXT > 12
 #include <net/iw_handler.h>
+#endif
 
 extern u16_t zfLnxGetVapId(zdev_t *dev);
 
@@ -246,6 +248,7 @@ int usbdrv_ioctl_setrts(struct net_device *dev, struct iw_param *rrq)
 	return 0;
 }
 
+#if WIRELESS_EXT > 14
 /*
  * Encode a WPA or RSN information element as a custom
  * element using the hostap format.
@@ -266,6 +269,7 @@ u32 encode_ie(void *buf, u32 bufsize, const u8 *ie, u32 ielen,
 		p += sprintf(p, "%02x", ie[i]);
 	return (i == ielen ? p - (u8 *)buf:0);
 }
+#endif  /* WIRELESS_EXT > 14 */
 
 /*
  * Translate scan data returned from the card to a card independent
@@ -280,7 +284,9 @@ char *usbdrv_translate_scan(struct net_device *dev,
 	char *current_val;     /* For rates */
 	char *last_ev;
 	int i;
-	char    buf[64*2 + 30];
+	#if WIRELESS_EXT > 14
+		char    buf[64*2 + 30];
+	#endif
 
 	last_ev = current_ev;
 
@@ -359,8 +365,10 @@ char *usbdrv_translate_scan(struct net_device *dev,
 
 	/* Add quality statistics */
 	iwe.cmd = IWEVQUAL;
+	#if WIRELESS_EXT > 18
 	iwe.u.qual.updated = IW_QUAL_QUAL_UPDATED | IW_QUAL_LEVEL_UPDATED
 				| IW_QUAL_NOISE_UPDATED;
+	#endif
 	iwe.u.qual.level = list->signalStrength;
 	iwe.u.qual.noise = 0;
 	iwe.u.qual.qual = list->signalQuality;
@@ -433,6 +441,7 @@ char *usbdrv_translate_scan(struct net_device *dev,
 	/* Check if we added any event */
 	if ((current_val - current_ev) > IW_EV_LCP_LEN)
 		current_ev = current_val;
+	#if WIRELESS_EXT > 14
 		#define IEEE80211_ELEMID_RSN 0x30
 	memset(&iwe, 0, sizeof(iwe));
 	iwe.cmd = IWEVCUSTOM;
@@ -494,6 +503,7 @@ char *usbdrv_translate_scan(struct net_device *dev,
 			last_ev = current_ev;
 		}
 	}
+	#endif
 	/* The other data in the scan result are not really
 	* interesting, so for now drop it
 	*/
@@ -687,9 +697,12 @@ int usbdrvwext_giwrange(struct net_device *dev,
 	if (!netif_running(dev))
 		return -EINVAL;
 
+	#if WIRELESS_EXT > 9
 	range->txpower_capa = IW_TXPOW_DBM;
 	/* XXX what about min/max_pmp, min/max_pmt, etc. */
+	#endif
 
+	#if WIRELESS_EXT > 10
 	range->we_version_compiled = WIRELESS_EXT;
 	range->we_version_source = 13;
 
@@ -697,6 +710,7 @@ int usbdrvwext_giwrange(struct net_device *dev,
 	range->retry_flags = IW_RETRY_LIMIT;
 	range->min_retry = 0;
 	range->max_retry = 255;
+	#endif  /* WIRELESS_EXT > 10 */
 
 	channel_num = zfiWlanQueryAllowChannels(dev, channels);
 
@@ -903,11 +917,13 @@ int usbdrvwext_giwscan(struct net_device *dev,
 		current_ev = usbdrv_translate_scan(dev, info, current_ev,
 					end_buf, &pBssList->bssInfo[i]);
 
+		#if WIRELESS_EXT > 16
 		if (current_ev == end_buf) {
 			kfree(pBssList);
 			data->length = current_ev - extra;
 			return -E2BIG;
 		}
+		#endif
 	}
 
 	/* Length of data */
@@ -2029,7 +2045,6 @@ int usbdrv_wpa_ioctl(struct net_device *dev, struct athr_wlan_param *zdparm)
 	struct zsKeyInfo keyInfo;
 	struct usbdrv_private *macp = dev->ml_priv;
 	u16_t vapId = 0;
-	int ii;
 
 	/* zmw_get_wlan_dev(dev); */
 
@@ -2153,6 +2168,7 @@ int usbdrv_wpa_ioctl(struct net_device *dev, struct athr_wlan_param *zdparm)
 		/* DUMP key context */
 		/* #ifdef WPA_DEBUG */
 		if (keyInfo.keyLength > 0) {
+			int ii;
 			printk(KERN_WARNING
 						"Otus: Key Context:\n");
 			for (ii = 0; ii < keyInfo.keyLength; ) {
@@ -2250,6 +2266,7 @@ int usbdrv_wpa_ioctl(struct net_device *dev, struct athr_wlan_param *zdparm)
 		/* zfiWlanSetWpaIe(dev, zdparm->u.generic_elem.data,
 		* zdparm->u.generic_elem.len);
 		*/
+		int ii;
 		u8_t len = zdparm->u.generic_elem.len;
 		u8_t *wpaie = (u8_t *)zdparm->u.generic_elem.data;
 
@@ -2384,7 +2401,7 @@ int usbdrv_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	struct athr_wlan_param zdparm;
 	struct usbdrv_private *macp = dev->ml_priv;
 
-	int err = 0, val = 0;
+	int err = 0;
 	int changed = 0;
 
 	/* regp = macp->regp; */
@@ -2428,7 +2445,7 @@ int usbdrv_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			err = -EPERM;
 			break;
 		}
-		val = *((int *) wrq->u.name);
+		int val = *((int *) wrq->u.name);
 		if ((val < 0) || (val > 2)) {
 			err = -EINVAL;
 			break;

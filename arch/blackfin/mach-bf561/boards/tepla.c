@@ -1,13 +1,15 @@
 /*
- * Copyright 2004-2007 Analog Devices Inc.
- *                2005 National ICT Australia (NICTA)
- *                      Aidan Williams <aidan@nicta.com.au>
+ *  File: arch/blackfin/mach-bf561/tepla.c
  *
- * Thanks to Jamey Hicks.
+ *  Copyright 2004-2007 Analog Devices Inc.
+ *  Only SMSC91C1111 was registered, may do more later.
  *
- * Only SMSC91C1111 was registered, may do more later.
+ *  Copyright 2005 National ICT Australia (NICTA), Aidan Williams <aidan@nicta.com.au>
+ *  Thanks to Jamey Hicks.
  *
- * Licensed under the GPL-2
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2 as
+ *  published by the Free Software Foundation.
  */
 
 #include <linux/device.h>

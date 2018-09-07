@@ -27,8 +27,6 @@
 #include <linux/types.h>
 #include <linux/kallsyms.h>
 #include <linux/mm.h>
-#include <linux/namei.h>
-#include <linux/mount.h>
 #include <linux/slab.h>
 #include <linux/utsname.h>
 #include <linux/workqueue.h>
@@ -99,49 +97,33 @@ static int
 rpc_setup_pipedir(struct rpc_clnt *clnt, char *dir_name)
 {
 	static uint32_t clntid;
-	struct nameidata nd;
-	struct path path;
-	char name[15];
-	struct qstr q = {
-		.name = name,
-	};
 	int error;
 
-	clnt->cl_path.mnt = ERR_PTR(-ENOENT);
-	clnt->cl_path.dentry = ERR_PTR(-ENOENT);
+	clnt->cl_vfsmnt = ERR_PTR(-ENOENT);
+	clnt->cl_dentry = ERR_PTR(-ENOENT);
 	if (dir_name == NULL)
 		return 0;
 
-	path.mnt = rpc_get_mount();
-	if (IS_ERR(path.mnt))
-		return PTR_ERR(path.mnt);
-	error = vfs_path_lookup(path.mnt->mnt_root, path.mnt, dir_name, 0, &nd);
-	if (error)
-		goto err;
+	clnt->cl_vfsmnt = rpc_get_mount();
+	if (IS_ERR(clnt->cl_vfsmnt))
+		return PTR_ERR(clnt->cl_vfsmnt);
 
 	for (;;) {
-		q.len = snprintf(name, sizeof(name), "clnt%x", (unsigned int)clntid++);
-		name[sizeof(name) - 1] = '\0';
-		q.hash = full_name_hash(q.name, q.len);
-		path.dentry = rpc_create_client_dir(nd.path.dentry, &q, clnt);
-		if (!IS_ERR(path.dentry))
-			break;
-		error = PTR_ERR(path.dentry);
+		snprintf(clnt->cl_pathname, sizeof(clnt->cl_pathname),
+				"%s/clnt%x", dir_name,
+				(unsigned int)clntid++);
+		clnt->cl_pathname[sizeof(clnt->cl_pathname) - 1] = '\0';
+		clnt->cl_dentry = rpc_mkdir(clnt->cl_pathname, clnt);
+		if (!IS_ERR(clnt->cl_dentry))
+			return 0;
+		error = PTR_ERR(clnt->cl_dentry);
 		if (error != -EEXIST) {
-			printk(KERN_INFO "RPC: Couldn't create pipefs entry"
-					" %s/%s, error %d\n",
-					dir_name, name, error);
-			goto err_path_put;
+			printk(KERN_INFO "RPC: Couldn't create pipefs entry %s, error %d\n",
+					clnt->cl_pathname, error);
+			rpc_put_mount();
+			return error;
 		}
 	}
-	path_put(&nd.path);
-	clnt->cl_path = path;
-	return 0;
-err_path_put:
-	path_put(&nd.path);
-err:
-	rpc_put_mount();
-	return error;
 }
 
 static struct rpc_clnt * rpc_new_client(const struct rpc_create_args *args, struct rpc_xprt *xprt)
@@ -249,8 +231,8 @@ static struct rpc_clnt * rpc_new_client(const struct rpc_create_args *args, stru
 	return clnt;
 
 out_no_auth:
-	if (!IS_ERR(clnt->cl_path.dentry)) {
-		rpc_remove_client_dir(clnt->cl_path.dentry);
+	if (!IS_ERR(clnt->cl_dentry)) {
+		rpc_rmdir(clnt->cl_dentry);
 		rpc_put_mount();
 	}
 out_no_path:
@@ -288,7 +270,6 @@ struct rpc_clnt *rpc_create(struct rpc_create_args *args)
 		.srcaddr = args->saddress,
 		.dstaddr = args->address,
 		.addrlen = args->addrsize,
-		.bc_xprt = args->bc_xprt,
 	};
 	char servername[48];
 
@@ -442,8 +423,8 @@ rpc_free_client(struct kref *kref)
 
 	dprintk("RPC:       destroying %s client for %s\n",
 			clnt->cl_protname, clnt->cl_server);
-	if (!IS_ERR(clnt->cl_path.dentry)) {
-		rpc_remove_client_dir(clnt->cl_path.dentry);
+	if (!IS_ERR(clnt->cl_dentry)) {
+		rpc_rmdir(clnt->cl_dentry);
 		rpc_put_mount();
 	}
 	if (clnt->cl_parent != clnt) {
@@ -640,11 +621,10 @@ EXPORT_SYMBOL_GPL(rpc_call_async);
 /**
  * rpc_run_bc_task - Allocate a new RPC task for backchannel use, then run
  * rpc_execute against it
- * @req: RPC request
- * @tk_ops: RPC call ops
+ * @ops: RPC call ops
  */
 struct rpc_task *rpc_run_bc_task(struct rpc_rqst *req,
-				const struct rpc_call_ops *tk_ops)
+					const struct rpc_call_ops *tk_ops)
 {
 	struct rpc_task *task;
 	struct xdr_buf *xbufp = &req->rq_snd_buf;
@@ -938,7 +918,7 @@ call_allocate(struct rpc_task *task)
 
 	dprintk("RPC: %5u rpc_buffer allocation failed\n", task->tk_pid);
 
-	if (RPC_IS_ASYNC(task) || !fatal_signal_pending(current)) {
+	if (RPC_IS_ASYNC(task) || !signalled()) {
 		task->tk_action = call_allocate;
 		rpc_delay(task, HZ>>4);
 		return;
@@ -1052,9 +1032,6 @@ call_bind_status(struct rpc_task *task)
 			status = -EOPNOTSUPP;
 			break;
 		}
-		if (task->tk_rebind_retry == 0)
-			break;
-		task->tk_rebind_retry--;
 		rpc_delay(task, 3*HZ);
 		goto retry_timeout;
 	case -ETIMEDOUT:

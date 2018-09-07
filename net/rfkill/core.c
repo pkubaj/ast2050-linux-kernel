@@ -27,7 +27,6 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/rfkill.h>
-#include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/miscdevice.h>
 #include <linux/wait.h>
@@ -49,6 +48,7 @@
 struct rfkill {
 	spinlock_t		lock;
 
+	const char		*name;
 	enum rfkill_type	type;
 
 	unsigned long		state;
@@ -72,7 +72,6 @@ struct rfkill {
 	struct delayed_work	poll_work;
 	struct work_struct	uevent_work;
 	struct work_struct	sync_work;
-	char			name[];
 };
 #define to_rfkill(d)	container_of(d, struct rfkill, dev)
 
@@ -590,13 +589,11 @@ static const char *rfkill_get_type_str(enum rfkill_type type)
 		return "wimax";
 	case RFKILL_TYPE_WWAN:
 		return "wwan";
-	case RFKILL_TYPE_GPS:
-		return "gps";
 	default:
 		BUG();
 	}
 
-	BUILD_BUG_ON(NUM_RFKILL_TYPES != RFKILL_TYPE_GPS + 1);
+	BUILD_BUG_ON(NUM_RFKILL_TYPES != RFKILL_TYPE_WWAN + 1);
 }
 
 static ssize_t rfkill_type_show(struct device *dev,
@@ -820,14 +817,14 @@ struct rfkill * __must_check rfkill_alloc(const char *name,
 	if (WARN_ON(type == RFKILL_TYPE_ALL || type >= NUM_RFKILL_TYPES))
 		return NULL;
 
-	rfkill = kzalloc(sizeof(*rfkill) + strlen(name) + 1, GFP_KERNEL);
+	rfkill = kzalloc(sizeof(*rfkill), GFP_KERNEL);
 	if (!rfkill)
 		return NULL;
 
 	spin_lock_init(&rfkill->lock);
 	INIT_LIST_HEAD(&rfkill->node);
 	rfkill->type = type;
-	strcpy(rfkill->name, name);
+	rfkill->name = name;
 	rfkill->ops = ops;
 	rfkill->data = ops_data;
 
@@ -1037,6 +1034,17 @@ static unsigned int rfkill_fop_poll(struct file *file, poll_table *wait)
 	return res;
 }
 
+static bool rfkill_readable(struct rfkill_data *data)
+{
+	bool r;
+
+	mutex_lock(&data->mtx);
+	r = !list_empty(&data->events);
+	mutex_unlock(&data->mtx);
+
+	return r;
+}
+
 static ssize_t rfkill_fop_read(struct file *file, char __user *buf,
 			       size_t count, loff_t *pos)
 {
@@ -1053,11 +1061,8 @@ static ssize_t rfkill_fop_read(struct file *file, char __user *buf,
 			goto out;
 		}
 		mutex_unlock(&data->mtx);
-		/* since we re-check and it just compares pointers,
-		 * using !list_empty() without locking isn't a problem
-		 */
 		ret = wait_event_interruptible(data->read_wait,
-					       !list_empty(&data->events));
+					       rfkill_readable(data));
 		mutex_lock(&data->mtx);
 
 		if (ret)
@@ -1086,16 +1091,10 @@ static ssize_t rfkill_fop_write(struct file *file, const char __user *buf,
 	struct rfkill_event ev;
 
 	/* we don't need the 'hard' variable but accept it */
-	if (count < RFKILL_EVENT_SIZE_V1 - 1)
+	if (count < sizeof(ev) - 1)
 		return -EINVAL;
 
-	/*
-	 * Copy as much data as we can accept into our 'ev' buffer,
-	 * but tell userspace how much we've copied so it can determine
-	 * our API version even in a write() call, if it cares.
-	 */
-	count = min(count, sizeof(ev));
-	if (copy_from_user(&ev, buf, count))
+	if (copy_from_user(&ev, buf, sizeof(ev) - 1))
 		return -EFAULT;
 
 	if (ev.op != RFKILL_OP_CHANGE && ev.op != RFKILL_OP_CHANGE_ALL)

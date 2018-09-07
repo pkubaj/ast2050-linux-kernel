@@ -232,11 +232,8 @@ static int sa1100_irda_startup(struct sa1100_irda *si)
 	/*
 	 * Ensure that the ports for this device are setup correctly.
 	 */
-	if (si->pdata->startup)	{
-		ret = si->pdata->startup(si->dev);
-		if (ret)
-			return ret;
-	}
+	if (si->pdata->startup)
+		si->pdata->startup(si->dev);
 
 	/*
 	 * Configure PPC for IRDA - we want to drive TXD2 low.
@@ -669,7 +666,7 @@ static int sa1100_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 			sa1100_irda_set_speed(si, speed);
 		}
 		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	if (!IS_FIR(si)) {
@@ -717,7 +714,7 @@ static int sa1100_irda_hard_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev->trans_start = jiffies;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static int

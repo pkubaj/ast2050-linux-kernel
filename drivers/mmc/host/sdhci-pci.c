@@ -83,8 +83,7 @@ static int ricoh_probe(struct sdhci_pci_chip *chip)
 	if (chip->pdev->subsystem_vendor == PCI_VENDOR_ID_IBM)
 		chip->quirks |= SDHCI_QUIRK_CLOCK_BEFORE_RESET;
 
-	if (chip->pdev->subsystem_vendor == PCI_VENDOR_ID_SAMSUNG ||
-	    chip->pdev->subsystem_vendor == PCI_VENDOR_ID_SONY)
+	if (chip->pdev->subsystem_vendor == PCI_VENDOR_ID_SAMSUNG)
 		chip->quirks |= SDHCI_QUIRK_NO_CARD_NO_RESET;
 
 	return 0;
@@ -396,7 +395,7 @@ static int sdhci_pci_enable_dma(struct sdhci_host *host)
 
 	if (((pdev->class & 0xFFFF00) == (PCI_CLASS_SYSTEM_SDHCI << 8)) &&
 		((pdev->class & 0x0000FF) != PCI_SDHCI_IFDMA) &&
-		(host->flags & SDHCI_USE_SDMA)) {
+		(host->flags & SDHCI_USE_DMA)) {
 		dev_warn(&pdev->dev, "Will use DMA mode even though HW "
 			"doesn't fully claim to support it.\n");
 	}
@@ -569,7 +568,6 @@ static struct sdhci_pci_slot * __devinit sdhci_pci_probe_slot(
 	host->ioaddr = pci_ioremap_bar(pdev, bar);
 	if (!host->ioaddr) {
 		dev_err(&pdev->dev, "failed to remap registers\n");
-		ret = -ENOMEM;
 		goto release;
 	}
 

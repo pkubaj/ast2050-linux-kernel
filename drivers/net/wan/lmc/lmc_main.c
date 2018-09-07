@@ -89,8 +89,7 @@ MODULE_DEVICE_TABLE(pci, lmc_pci_tbl);
 MODULE_LICENSE("GPL v2");
 
 
-static netdev_tx_t lmc_start_xmit(struct sk_buff *skb,
-					struct net_device *dev);
+static int lmc_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static int lmc_rx (struct net_device *dev);
 static int lmc_open(struct net_device *dev);
 static int lmc_close(struct net_device *dev);
@@ -1424,12 +1423,12 @@ lmc_int_fail_out:
     return IRQ_RETVAL(handled);
 }
 
-static netdev_tx_t lmc_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static int lmc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
     lmc_softc_t *sc = dev_to_sc(dev);
     u32 flag;
     int entry;
+    int ret = 0;
     unsigned long flags;
 
     lmc_trace(dev, "lmc_start_xmit in");
@@ -1511,7 +1510,7 @@ static netdev_tx_t lmc_start_xmit(struct sk_buff *skb,
     spin_unlock_irqrestore(&sc->lmc_lock, flags);
 
     lmc_trace(dev, "lmc_start_xmit_out");
-    return NETDEV_TX_OK;
+    return ret;
 }
 
 
@@ -1658,7 +1657,7 @@ static int lmc_rx(struct net_device *dev)
             }
             skb_copy_from_linear_data(skb, skb_put(nsb, len), len);
             
-            nsb->protocol = lmc_proto_type(sc, nsb);
+            nsb->protocol = lmc_proto_type(sc, skb);
             skb_reset_mac_header(nsb);
             /* skb_reset_network_header(nsb); */
             nsb->dev = dev;
@@ -1898,11 +1897,10 @@ static void lmc_softreset (lmc_softc_t * const sc) /*fold00*/
     /*
      * Sets end of ring
      */
-    if (i != 0) {
-        sc->lmc_rxring[i - 1].length |= 0x02000000; /* Set end of buffers flag */
-        sc->lmc_rxring[i - 1].buffer2 = virt_to_bus(&sc->lmc_rxring[0]); /* Point back to the start */
-    }
+    sc->lmc_rxring[i - 1].length |= 0x02000000; /* Set end of buffers flag */
+    sc->lmc_rxring[i - 1].buffer2 = virt_to_bus (&sc->lmc_rxring[0]); /* Point back to the start */
     LMC_CSR_WRITE (sc, csr_rxlist, virt_to_bus (sc->lmc_rxring)); /* write base address */
+
 
     /* Initialize the transmit rings and buffers */
     for (i = 0; i < LMC_TXDESCS; i++)

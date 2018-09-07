@@ -92,7 +92,6 @@ typedef struct board_info {
 	u16		tx_pkt_cnt;
 	u16		queue_pkt_len;
 	u16		queue_start_addr;
-	u16		queue_ip_summed;
 	u16		dbug_cnt;
 	u8		io_mode;		/* 0:word, 2:byte */
 	u8		phy_addr;
@@ -125,10 +124,6 @@ typedef struct board_info {
 
 	struct mii_if_info mii;
 	u32		msg_enable;
-
-	int		rx_csum;
-	int		can_csum;
-	int		ip_summed;
 } board_info_t;
 
 /* debug code */
@@ -465,49 +460,6 @@ static int dm9000_nway_reset(struct net_device *dev)
 	return mii_nway_restart(&dm->mii);
 }
 
-static uint32_t dm9000_get_rx_csum(struct net_device *dev)
-{
-	board_info_t *dm = to_dm9000_board(dev);
-	return dm->rx_csum;
-}
-
-static int dm9000_set_rx_csum_unlocked(struct net_device *dev, uint32_t data)
-{
-	board_info_t *dm = to_dm9000_board(dev);
-
-	if (dm->can_csum) {
-		dm->rx_csum = data;
-		iow(dm, DM9000_RCSR, dm->rx_csum ? RCSR_CSUM : 0);
-
-		return 0;
-	}
-
-	return -EOPNOTSUPP;
-}
-
-static int dm9000_set_rx_csum(struct net_device *dev, uint32_t data)
-{
-	board_info_t *dm = to_dm9000_board(dev);
-	unsigned long flags;
-	int ret;
-
-	spin_lock_irqsave(&dm->lock, flags);
-	ret = dm9000_set_rx_csum_unlocked(dev, data);
-	spin_unlock_irqrestore(&dm->lock, flags);
-
-	return ret;
-}
-
-static int dm9000_set_tx_csum(struct net_device *dev, uint32_t data)
-{
-	board_info_t *dm = to_dm9000_board(dev);
-	int ret = -EOPNOTSUPP;
-
-	if (dm->can_csum)
-		ret = ethtool_op_set_tx_csum(dev, data);
-	return ret;
-}
-
 static u32 dm9000_get_link(struct net_device *dev)
 {
 	board_info_t *dm = to_dm9000_board(dev);
@@ -588,10 +540,6 @@ static const struct ethtool_ops dm9000_ethtool_ops = {
  	.get_eeprom_len		= dm9000_get_eeprom_len,
  	.get_eeprom		= dm9000_get_eeprom,
  	.set_eeprom		= dm9000_set_eeprom,
-	.get_rx_csum		= dm9000_get_rx_csum,
-	.set_rx_csum		= dm9000_set_rx_csum,
-	.get_tx_csum		= ethtool_op_get_tx_csum,
-	.set_tx_csum		= dm9000_set_tx_csum,
 };
 
 static void dm9000_show_carrier(board_info_t *db,
@@ -676,7 +624,7 @@ static unsigned char dm9000_type_to_char(enum dm9000_type type)
  *  Set DM9000 multicast address
  */
 static void
-dm9000_hash_table_unlocked(struct net_device *dev)
+dm9000_hash_table(struct net_device *dev)
 {
 	board_info_t *db = netdev_priv(dev);
 	struct dev_mc_list *mcptr = dev->mc_list;
@@ -685,8 +633,11 @@ dm9000_hash_table_unlocked(struct net_device *dev)
 	u32 hash_val;
 	u16 hash_table[4];
 	u8 rcr = RCR_DIS_LONG | RCR_DIS_CRC | RCR_RXEN;
+	unsigned long flags;
 
 	dm9000_dbg(db, 1, "entering %s\n", __func__);
+
+	spin_lock_irqsave(&db->lock, flags);
 
 	for (i = 0, oft = DM9000_PAR; i < 6; i++, oft++)
 		iow(db, oft, dev->dev_addr[i]);
@@ -717,16 +668,6 @@ dm9000_hash_table_unlocked(struct net_device *dev)
 	}
 
 	iow(db, DM9000_RCR, rcr);
-}
-
-static void
-dm9000_hash_table(struct net_device *dev)
-{
-	board_info_t *db = netdev_priv(dev);
-	unsigned long flags;
-
-	spin_lock_irqsave(&db->lock, flags);
-	dm9000_hash_table_unlocked(dev);
 	spin_unlock_irqrestore(&db->lock, flags);
 }
 
@@ -743,9 +684,6 @@ dm9000_init_dm9000(struct net_device *dev)
 
 	/* I/O mode */
 	db->io_mode = ior(db, DM9000_ISR) >> 6;	/* ISR bit7:6 keeps I/O mode */
-
-	/* Checksum mode */
-	dm9000_set_rx_csum_unlocked(dev, db->rx_csum);
 
 	/* GPIO0 on pre-activate PHY */
 	iow(db, DM9000_GPR, 0);	/* REG_1F bit0 activate phyxcer */
@@ -765,7 +703,7 @@ dm9000_init_dm9000(struct net_device *dev)
 	iow(db, DM9000_ISR, ISR_CLR_STATUS); /* Clear interrupt status */
 
 	/* Set address filter table */
-	dm9000_hash_table_unlocked(dev);
+	dm9000_hash_table(dev);
 
 	imr = IMR_PAR | IMR_PTM | IMR_PRM;
 	if (db->type != TYPE_DM9000E)
@@ -805,29 +743,6 @@ static void dm9000_timeout(struct net_device *dev)
 	spin_unlock_irqrestore(&db->lock, flags);
 }
 
-static void dm9000_send_packet(struct net_device *dev,
-			       int ip_summed,
-			       u16 pkt_len)
-{
-	board_info_t *dm = to_dm9000_board(dev);
-
-	/* The DM9000 is not smart enough to leave fragmented packets alone. */
-	if (dm->ip_summed != ip_summed) {
-		if (ip_summed == CHECKSUM_NONE)
-			iow(dm, DM9000_TCCR, 0);
-		else
-			iow(dm, DM9000_TCCR, TCCR_IP | TCCR_UDP | TCCR_TCP);
-		dm->ip_summed = ip_summed;
-	}
-
-	/* Set TX length to DM9000 */
-	iow(dm, DM9000_TXPLL, pkt_len);
-	iow(dm, DM9000_TXPLH, pkt_len >> 8);
-
-	/* Issue TX polling command */
-	iow(dm, DM9000_TCR, TCR_TXREQ);	/* Cleared after TX complete */
-}
-
 /*
  *  Hardware start transmission.
  *  Send a packet to media from the upper layer.
@@ -854,11 +769,17 @@ dm9000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	db->tx_pkt_cnt++;
 	/* TX control: First packet immediately send, second packet queue */
 	if (db->tx_pkt_cnt == 1) {
-		dm9000_send_packet(dev, skb->ip_summed, skb->len);
+		/* Set TX length to DM9000 */
+		iow(db, DM9000_TXPLL, skb->len);
+		iow(db, DM9000_TXPLH, skb->len >> 8);
+
+		/* Issue TX polling command */
+		iow(db, DM9000_TCR, TCR_TXREQ);	/* Cleared after TX complete */
+
+		dev->trans_start = jiffies;	/* save the time stamp */
 	} else {
 		/* Second packet */
 		db->queue_pkt_len = skb->len;
-		db->queue_ip_summed = skb->ip_summed;
 		netif_stop_queue(dev);
 	}
 
@@ -867,7 +788,7 @@ dm9000_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	/* free this SKB */
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*
@@ -888,9 +809,12 @@ static void dm9000_tx_done(struct net_device *dev, board_info_t *db)
 			dev_dbg(db->dev, "tx done, NSR %02x\n", tx_status);
 
 		/* Queue packet check & send */
-		if (db->tx_pkt_cnt > 0)
-			dm9000_send_packet(dev, db->queue_ip_summed,
-					   db->queue_pkt_len);
+		if (db->tx_pkt_cnt > 0) {
+			iow(db, DM9000_TXPLL, db->queue_pkt_len);
+			iow(db, DM9000_TXPLH, db->queue_pkt_len >> 8);
+			iow(db, DM9000_TCR, TCR_TXREQ);
+			dev->trans_start = jiffies;
+		}
 		netif_wake_queue(dev);
 	}
 }
@@ -922,14 +846,14 @@ dm9000_rx(struct net_device *dev)
 		rxbyte = readb(db->io_data);
 
 		/* Status check: this byte must be 0 or 1 */
-		if (rxbyte & DM9000_PKT_ERR) {
+		if (rxbyte > DM9000_PKT_RDY) {
 			dev_warn(db->dev, "status check fail: %d\n", rxbyte);
 			iow(db, DM9000_RCR, 0x00);	/* Stop Device */
 			iow(db, DM9000_ISR, IMR_PAR);	/* Stop INT request */
 			return;
 		}
 
-		if (!(rxbyte & DM9000_PKT_RDY))
+		if (rxbyte != DM9000_PKT_RDY)
 			return;
 
 		/* A packet ready now  & Get status/length */
@@ -990,12 +914,6 @@ dm9000_rx(struct net_device *dev)
 
 			/* Pass to upper layer */
 			skb->protocol = eth_type_trans(skb, dev);
-			if (db->rx_csum) {
-				if ((((rxbyte & 0x1c) << 3) & rxbyte) == 0)
-					skb->ip_summed = CHECKSUM_UNNECESSARY;
-				else
-					skb->ip_summed = CHECKSUM_NONE;
-			}
 			netif_rx(skb);
 			dev->stats.rx_packets++;
 
@@ -1004,7 +922,7 @@ dm9000_rx(struct net_device *dev)
 
 			(db->dumpblk)(db->io_data, RxLen);
 		}
-	} while (rxbyte & DM9000_PKT_RDY);
+	} while (rxbyte == DM9000_PKT_RDY);
 }
 
 static irqreturn_t dm9000_interrupt(int irq, void *dev_id)
@@ -1267,6 +1185,8 @@ static const struct net_device_ops dm9000_netdev_ops = {
 #endif
 };
 
+#define res_size(_r) (((_r)->end - (_r)->start) + 1)
+
 /*
  * Search DM9000 board, allocate space and register it
  */
@@ -1295,6 +1215,7 @@ dm9000_probe(struct platform_device *pdev)
 
 	/* setup board info structure */
 	db = netdev_priv(ndev);
+	memset(db, 0, sizeof(*db));
 
 	db->dev = &pdev->dev;
 	db->ndev = ndev;
@@ -1315,7 +1236,7 @@ dm9000_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	iosize = resource_size(db->addr_res);
+	iosize = res_size(db->addr_res);
 	db->addr_req = request_mem_region(db->addr_res->start, iosize,
 					  pdev->name);
 
@@ -1333,7 +1254,7 @@ dm9000_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	iosize = resource_size(db->data_res);
+	iosize = res_size(db->data_res);
 	db->data_req = request_mem_region(db->data_res->start, iosize,
 					  pdev->name);
 
@@ -1428,13 +1349,6 @@ dm9000_probe(struct platform_device *pdev)
 		db->type = TYPE_DM9000E;
 	}
 
-	/* dm9000a/b are capable of hardware checksum offload */
-	if (db->type == TYPE_DM9000A || db->type == TYPE_DM9000B) {
-		db->can_csum = 1;
-		db->rx_csum = 1;
-		ndev->features |= NETIF_F_IP_CSUM;
-	}
-
 	/* from this point we assume that we have found a DM9000 */
 
 	/* driver system function */
@@ -1496,10 +1410,9 @@ out:
 }
 
 static int
-dm9000_drv_suspend(struct device *dev)
+dm9000_drv_suspend(struct platform_device *dev, pm_message_t state)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct net_device *ndev = platform_get_drvdata(dev);
 	board_info_t *db;
 
 	if (ndev) {
@@ -1515,10 +1428,9 @@ dm9000_drv_suspend(struct device *dev)
 }
 
 static int
-dm9000_drv_resume(struct device *dev)
+dm9000_drv_resume(struct platform_device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct net_device *ndev = platform_get_drvdata(dev);
 	board_info_t *db = netdev_priv(ndev);
 
 	if (ndev) {
@@ -1534,11 +1446,6 @@ dm9000_drv_resume(struct device *dev)
 	}
 	return 0;
 }
-
-static struct dev_pm_ops dm9000_drv_pm_ops = {
-	.suspend	= dm9000_drv_suspend,
-	.resume		= dm9000_drv_resume,
-};
 
 static int __devexit
 dm9000_drv_remove(struct platform_device *pdev)
@@ -1559,10 +1466,11 @@ static struct platform_driver dm9000_driver = {
 	.driver	= {
 		.name    = "dm9000",
 		.owner	 = THIS_MODULE,
-		.pm	 = &dm9000_drv_pm_ops,
 	},
 	.probe   = dm9000_probe,
 	.remove  = __devexit_p(dm9000_drv_remove),
+	.suspend = dm9000_drv_suspend,
+	.resume  = dm9000_drv_resume,
 };
 
 static int __init

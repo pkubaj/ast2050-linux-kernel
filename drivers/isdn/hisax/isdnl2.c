@@ -1623,6 +1623,8 @@ static struct FsmNode L2FnList[] __initdata =
 	{ST_L2_8, EV_L1_DEACTIVATE, l2_persistent_da},
 };
 
+#define L2_FN_COUNT (sizeof(L2FnList)/sizeof(struct FsmNode))
+
 static void
 isdnl2_l1l2(struct PStack *st, int pr, void *arg)
 {
@@ -1834,7 +1836,7 @@ Isdnl2New(void)
 	l2fsm.event_count = L2_EVENT_COUNT;
 	l2fsm.strEvent = strL2Event;
 	l2fsm.strState = strL2State;
-	return FsmNew(&l2fsm, L2FnList, ARRAY_SIZE(L2FnList));
+	return FsmNew(&l2fsm, L2FnList, L2_FN_COUNT);
 }
 
 void

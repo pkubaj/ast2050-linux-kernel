@@ -26,10 +26,14 @@
  *
  */
 
+
 #ifndef __IOCTL_H__
 #define __IOCTL_H__
 
+#if !defined(__DEVICE_H__)
 #include "device.h"
+#endif
+
 
 /*---------------------  Export Definitions -------------------------*/
 
@@ -39,6 +43,12 @@
 /*---------------------  Export Variables  --------------------------*/
 
 /*---------------------  Export Functions  --------------------------*/
+
+
+#ifdef __cplusplus
+extern "C" {                            /* Assume C declarations for C++ */
+#endif /* __cplusplus */
+
 
 int private_ioctl(PSDevice pDevice, struct ifreq *rq);
 
@@ -50,6 +60,13 @@ VOID vConfigWEPKey (
     IN ULONG    uKeyLength
     );
 */
+
+#ifdef __cplusplus
+}                                       /* End of extern "C" { */
+#endif /* __cplusplus */
+
+
+
 
 #endif // __IOCTL_H__
 

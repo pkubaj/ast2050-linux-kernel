@@ -49,10 +49,9 @@ Configuration Options:
 #define PCI_DEVICE_ID_PCI7296 0x7296
 
 static DEFINE_PCI_DEVICE_TABLE(adl_pci7296_pci_table) = {
-	{
-	PCI_VENDOR_ID_ADLINK, PCI_DEVICE_ID_PCI7296, PCI_ANY_ID,
-		    PCI_ANY_ID, 0, 0, 0}, {
-	0}
+	{PCI_VENDOR_ID_ADLINK, PCI_DEVICE_ID_PCI7296, PCI_ANY_ID, PCI_ANY_ID, 0,
+		0, 0},
+	{0}
 };
 
 MODULE_DEVICE_TABLE(pci, adl_pci7296_pci_table);
@@ -62,10 +61,10 @@ struct adl_pci7296_private {
 	struct pci_dev *pci_dev;
 };
 
+
 #define devpriv ((struct adl_pci7296_private *)dev->private)
 
-static int adl_pci7296_attach(struct comedi_device *dev,
-			      struct comedi_devconfig *it);
+static int adl_pci7296_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int adl_pci7296_detach(struct comedi_device *dev);
 static struct comedi_driver driver_adl_pci7296 = {
 	.driver_name = "adl_pci7296",
@@ -74,8 +73,7 @@ static struct comedi_driver driver_adl_pci7296 = {
 	.detach = adl_pci7296_detach,
 };
 
-static int adl_pci7296_attach(struct comedi_device *dev,
-			      struct comedi_devconfig *it)
+static int adl_pci7296_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	struct pci_dev *pcidev;
 	struct comedi_subdevice *s;
@@ -96,23 +94,21 @@ static int adl_pci7296_attach(struct comedi_device *dev,
 		return -ENOMEM;
 
 	for (pcidev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, NULL);
-	     pcidev != NULL;
-	     pcidev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, pcidev)) {
+		pcidev != NULL;
+		pcidev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, pcidev)) {
 
 		if (pcidev->vendor == PCI_VENDOR_ID_ADLINK &&
-		    pcidev->device == PCI_DEVICE_ID_PCI7296) {
+			pcidev->device == PCI_DEVICE_ID_PCI7296) {
 			if (bus || slot) {
 				/* requested particular bus/slot */
 				if (pcidev->bus->number != bus
-				    || PCI_SLOT(pcidev->devfn) != slot) {
+					|| PCI_SLOT(pcidev->devfn) != slot) {
 					continue;
 				}
 			}
 			devpriv->pci_dev = pcidev;
 			if (comedi_pci_enable(pcidev, "adl_pci7296") < 0) {
-				printk
-				    ("comedi%d: Failed to enable PCI device and request regions\n",
-				     dev->minor);
+				printk("comedi%d: Failed to enable PCI device and request regions\n", dev->minor);
 				return -EIO;
 			}
 
@@ -122,26 +118,23 @@ static int adl_pci7296_attach(struct comedi_device *dev,
 			/*  four 8255 digital io subdevices */
 			s = dev->subdevices + 0;
 			subdev_8255_init(dev, s, NULL,
-					 (unsigned long)(dev->iobase));
+				(unsigned long)(dev->iobase));
 
 			s = dev->subdevices + 1;
 			ret = subdev_8255_init(dev, s, NULL,
-					       (unsigned long)(dev->iobase +
-							       PORT2A));
+				(unsigned long)(dev->iobase + PORT2A));
 			if (ret < 0)
 				return ret;
 
 			s = dev->subdevices + 2;
 			ret = subdev_8255_init(dev, s, NULL,
-					       (unsigned long)(dev->iobase +
-							       PORT3A));
+				(unsigned long)(dev->iobase + PORT3A));
 			if (ret < 0)
 				return ret;
 
 			s = dev->subdevices + 3;
 			ret = subdev_8255_init(dev, s, NULL,
-					       (unsigned long)(dev->iobase +
-							       PORT4A));
+				(unsigned long)(dev->iobase + PORT4A));
 			if (ret < 0)
 				return ret;
 
@@ -152,7 +145,7 @@ static int adl_pci7296_attach(struct comedi_device *dev,
 	}
 
 	printk("comedi%d: no supported board found! (req. bus/slot : %d/%d)\n",
-	       dev->minor, bus, slot);
+		dev->minor, bus, slot);
 	return -EIO;
 }
 

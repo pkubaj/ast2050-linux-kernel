@@ -165,8 +165,7 @@ static inline int bnep_net_proto_filter(struct sk_buff *skb, struct bnep_session
 }
 #endif
 
-static netdev_tx_t bnep_net_xmit(struct sk_buff *skb,
-				 struct net_device *dev)
+static int bnep_net_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct bnep_session *s = netdev_priv(dev);
 	struct sock *sk = s->sock->sk;
@@ -176,14 +175,14 @@ static netdev_tx_t bnep_net_xmit(struct sk_buff *skb,
 #ifdef CONFIG_BT_BNEP_MC_FILTER
 	if (bnep_net_mc_filter(skb, s)) {
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 #endif
 
 #ifdef CONFIG_BT_BNEP_PROTO_FILTER
 	if (bnep_net_proto_filter(skb, s)) {
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 #endif
 
@@ -204,7 +203,7 @@ static netdev_tx_t bnep_net_xmit(struct sk_buff *skb,
 		netif_stop_queue(dev);
 	}
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static const struct net_device_ops bnep_netdev_ops = {

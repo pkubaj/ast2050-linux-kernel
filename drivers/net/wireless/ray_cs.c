@@ -104,8 +104,7 @@ static int ray_dev_init(struct net_device *dev);
 static const struct ethtool_ops netdev_ethtool_ops;
 
 static int ray_open(struct net_device *dev);
-static netdev_tx_t ray_dev_start_xmit(struct sk_buff *skb,
-					    struct net_device *dev);
+static int ray_dev_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static void set_multicast_list(struct net_device *dev);
 static void ray_update_multi_list(struct net_device *dev, int all);
 static int translate_frame(ray_dev_t *local, struct tx_msg __iomem *ptx,
@@ -916,19 +915,16 @@ static int ray_dev_config(struct net_device *dev, struct ifmap *map)
 }
 
 /*===========================================================================*/
-static netdev_tx_t ray_dev_start_xmit(struct sk_buff *skb,
-					    struct net_device *dev)
+static int ray_dev_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	ray_dev_t *local = netdev_priv(dev);
 	struct pcmcia_device *link = local->finder;
 	short length = skb->len;
 
-	if (!pcmcia_dev_present(link)) {
+	if (!(pcmcia_dev_present(link))) {
 		DEBUG(2, "ray_dev_start_xmit - device not present\n");
-		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return NETDEV_TX_LOCKED;
 	}
-
 	DEBUG(3, "ray_dev_start_xmit(skb=%p, dev=%p)\n", skb, dev);
 	if (local->authentication_state == NEED_TO_AUTH) {
 		DEBUG(0, "ray_cs Sending authentication request.\n");
@@ -941,7 +937,7 @@ static netdev_tx_t ray_dev_start_xmit(struct sk_buff *skb,
 
 	if (length < ETH_ZLEN) {
 		if (skb_padto(skb, ETH_ZLEN))
-			return NETDEV_TX_OK;
+			return 0;
 		length = ETH_ZLEN;
 	}
 	switch (ray_hw_xmit(skb->data, length, dev, DATA_TYPE)) {
@@ -955,9 +951,9 @@ static netdev_tx_t ray_dev_start_xmit(struct sk_buff *skb,
 	default:
 		dev->trans_start = jiffies;
 		dev_kfree_skb(skb);
+		return 0;
 	}
-
-	return NETDEV_TX_OK;
+	return 0;
 } /* ray_dev_start_xmit */
 
 /*===========================================================================*/
@@ -1514,6 +1510,9 @@ static iw_stats *ray_get_wireless_stats(struct net_device *dev)
 	ray_dev_t *local = netdev_priv(dev);
 	struct pcmcia_device *link = local->finder;
 	struct status __iomem *p = local->sram + STATUS_BASE;
+
+	if (local == (ray_dev_t *) NULL)
+		return (iw_stats *) NULL;
 
 	local->wstats.status = local->card_status;
 #ifdef WIRELESS_SPY

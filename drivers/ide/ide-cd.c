@@ -30,7 +30,6 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/timer.h>
-#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/errno.h>
@@ -506,22 +505,15 @@ int ide_cd_queue_pc(ide_drive_t *drive, const unsigned char *cmd,
 	return (flags & REQ_FAILED) ? -EIO : 0;
 }
 
-/*
- * returns true if rq has been completed
- */
-static bool ide_cd_error_cmd(ide_drive_t *drive, struct ide_cmd *cmd)
+static void ide_cd_error_cmd(ide_drive_t *drive, struct ide_cmd *cmd)
 {
 	unsigned int nr_bytes = cmd->nbytes - cmd->nleft;
 
 	if (cmd->tf_flags & IDE_TFLAG_WRITE)
 		nr_bytes -= cmd->last_xfer_len;
 
-	if (nr_bytes > 0) {
+	if (nr_bytes > 0)
 		ide_complete_rq(drive, 0, nr_bytes);
-		return true;
-	}
-
-	return false;
 }
 
 static ide_startstop_t cdrom_newpc_intr(ide_drive_t *drive)
@@ -686,8 +678,7 @@ out_end:
 		}
 
 		if (uptodate == 0 && rq->bio)
-			if (ide_cd_error_cmd(drive, cmd))
-				return ide_stopped;
+			ide_cd_error_cmd(drive, cmd);
 
 		/* make sure it's fully ended */
 		if (blk_fs_request(rq) == 0) {
@@ -1155,8 +1146,8 @@ void ide_cdrom_update_speed(ide_drive_t *drive, u8 *buf)
 	ide_debug_log(IDE_DBG_PROBE, "curspeed: %u, maxspeed: %u",
 				     curspeed, maxspeed);
 
-	cd->current_speed = DIV_ROUND_CLOSEST(curspeed, 176);
-	cd->max_speed = DIV_ROUND_CLOSEST(maxspeed, 176);
+	cd->current_speed = (curspeed + (176/2)) / 176;
+	cd->max_speed = (maxspeed + (176/2)) / 176;
 }
 
 #define IDE_CD_CAPABILITIES \
@@ -1398,30 +1389,19 @@ static sector_t ide_cdrom_capacity(ide_drive_t *drive)
 	return capacity * sectors_per_frame;
 }
 
-static int idecd_capacity_proc_show(struct seq_file *m, void *v)
+static int proc_idecd_read_capacity(char *page, char **start, off_t off,
+					int count, int *eof, void *data)
 {
-	ide_drive_t *drive = m->private;
+	ide_drive_t *drive = data;
+	int len;
 
-	seq_printf(m, "%llu\n", (long long)ide_cdrom_capacity(drive));
-	return 0;
+	len = sprintf(page, "%llu\n", (long long)ide_cdrom_capacity(drive));
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
-
-static int idecd_capacity_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, idecd_capacity_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations idecd_capacity_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= idecd_capacity_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 static ide_proc_entry_t idecd_proc[] = {
-	{ "capacity", S_IFREG|S_IRUGO, &idecd_capacity_proc_fops },
-	{}
+	{ "capacity", S_IFREG|S_IRUGO, proc_idecd_read_capacity, NULL },
+	{ NULL, 0, NULL, NULL }
 };
 
 static ide_proc_entry_t *ide_cd_proc_entries(ide_drive_t *drive)
@@ -1694,7 +1674,7 @@ static int idecd_revalidate_disk(struct gendisk *disk)
 	return  0;
 }
 
-static const struct block_device_operations idecd_ops = {
+static struct block_device_operations idecd_ops = {
 	.owner			= THIS_MODULE,
 	.open			= idecd_open,
 	.release		= idecd_release,

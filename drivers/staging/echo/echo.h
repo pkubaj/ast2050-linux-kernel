@@ -28,17 +28,13 @@
 #ifndef __ECHO_H
 #define __ECHO_H
 
-/*
-Line echo cancellation for voice
+/*! \page echo_can_page Line echo cancellation for voice
 
-What does it do?
-
+\section echo_can_page_sec_1 What does it do?
 This module aims to provide G.168-2002 compliant echo cancellation, to remove
 electrical echoes (e.g. from 2-4 wire hybrids) from voice calls.
 
-
-How does it work?
-
+\section echo_can_page_sec_2 How does it work?
 The heart of the echo cancellor is FIR filter. This is adapted to match the
 echo impulse response of the telephone line. It must be long enough to
 adequately cover the duration of that impulse response. The signal transmitted
@@ -112,8 +108,7 @@ major mis-convergence in the adaption process. An assessment algorithm is
 needed which produces a fairly accurate result from a very short burst of far
 end energy.
 
-How do I use it?
-
+\section echo_can_page_sec_3 How do I use it?
 The echo cancellor processes both the transmit and receive streams sample by
 sample. The processing function is not declared inline. Unfortunately,
 cancellation requires many operations per sample, so the call overhead is only
@@ -123,7 +118,7 @@ a minor burden.
 #include "fir.h"
 #include "oslec.h"
 
-/*
+/*!
     G.168 echo canceller descriptor. This defines the working state for a line
     echo canceller.
 */

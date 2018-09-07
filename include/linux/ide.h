@@ -258,7 +258,6 @@ enum {
 	IDE_TFLAG_DYN			= (1 << 5),
 	IDE_TFLAG_FS			= (1 << 6),
 	IDE_TFLAG_MULTI_PIO		= (1 << 7),
-	IDE_TFLAG_SET_XFER		= (1 << 8),
 };
 
 enum {
@@ -295,7 +294,7 @@ struct ide_cmd {
 		} out, in;
 	} valid;
 
-	u16			tf_flags;
+	u8			tf_flags;
 	u8			ftf_flags;	/* for TASKFILE ioctl */
 	int			protocol;
 
@@ -919,7 +918,8 @@ __IDE_PROC_DEVSET(_name, _min, _max, NULL, NULL)
 typedef struct {
 	const char	*name;
 	mode_t		mode;
-	const struct file_operations *proc_fops;
+	read_proc_t	*read_proc;
+	write_proc_t	*write_proc;
 } ide_proc_entry_t;
 
 void proc_ide_create(void);
@@ -931,8 +931,24 @@ void ide_proc_unregister_port(ide_hwif_t *);
 void ide_proc_register_driver(ide_drive_t *, struct ide_driver *);
 void ide_proc_unregister_driver(ide_drive_t *, struct ide_driver *);
 
-extern const struct file_operations ide_capacity_proc_fops;
-extern const struct file_operations ide_geometry_proc_fops;
+read_proc_t proc_ide_read_capacity;
+read_proc_t proc_ide_read_geometry;
+
+/*
+ * Standard exit stuff:
+ */
+#define PROC_IDE_READ_RETURN(page,start,off,count,eof,len) \
+{					\
+	len -= off;			\
+	if (len < count) {		\
+		*eof = 1;		\
+		if (len <= 0)		\
+			return 0;	\
+	} else				\
+		len = count;		\
+	*start = page + off;		\
+	return len;			\
+}
 #else
 static inline void proc_ide_create(void) { ; }
 static inline void proc_ide_destroy(void) { ; }
@@ -944,6 +960,7 @@ static inline void ide_proc_register_driver(ide_drive_t *drive,
 					    struct ide_driver *driver) { ; }
 static inline void ide_proc_unregister_driver(ide_drive_t *drive,
 					      struct ide_driver *driver) { ; }
+#define PROC_IDE_READ_RETURN(page,start,off,count,eof,len) return 0;
 #endif
 
 enum {
@@ -1064,7 +1081,6 @@ extern void ide_fixstring(u8 *, const int, const int);
 
 int ide_busy_sleep(ide_drive_t *, unsigned long, int);
 
-int __ide_wait_stat(ide_drive_t *, u8, u8, unsigned long, u8 *);
 int ide_wait_stat(ide_startstop_t *, ide_drive_t *, u8, u8, unsigned long);
 
 ide_startstop_t ide_do_park_unpark(ide_drive_t *, struct request *);
@@ -1153,7 +1169,7 @@ int ide_no_data_taskfile(ide_drive_t *, struct ide_cmd *);
 
 int ide_taskfile_ioctl(ide_drive_t *, unsigned long);
 
-int ide_dev_read_id(ide_drive_t *, u8, u16 *, int);
+int ide_dev_read_id(ide_drive_t *, u8, u16 *);
 
 extern int ide_driveid_update(ide_drive_t *);
 extern int ide_config_drive_speed(ide_drive_t *, u8);

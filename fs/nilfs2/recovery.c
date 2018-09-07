@@ -552,8 +552,7 @@ static int recover_dsync_blocks(struct nilfs_sb_info *sbi,
 		printk(KERN_WARNING
 		       "NILFS warning: error recovering data block "
 		       "(err=%d, ino=%lu, block-offset=%llu)\n",
-		       err, (unsigned long)rb->ino,
-		       (unsigned long long)rb->blkoff);
+		       err, rb->ino, (unsigned long long)rb->blkoff);
 		if (!err2)
 			err2 = err;
  next:

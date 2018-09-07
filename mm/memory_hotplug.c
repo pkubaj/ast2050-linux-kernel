@@ -26,7 +26,6 @@
 #include <linux/migrate.h>
 #include <linux/page-isolation.h>
 #include <linux/pfn.h>
-#include <linux/suspend.h>
 
 #include <asm/tlbflush.h>
 
@@ -340,11 +339,8 @@ EXPORT_SYMBOL_GPL(__remove_pages);
 
 void online_page(struct page *page)
 {
-	unsigned long pfn = page_to_pfn(page);
-
 	totalram_pages++;
-	if (pfn >= num_physpages)
-		num_physpages = pfn + 1;
+	num_physpages++;
 
 #ifdef CONFIG_HIGHMEM
 	if (PageHighMem(page))
@@ -414,7 +410,7 @@ int online_pages(unsigned long pfn, unsigned long nr_pages)
 	if (!populated_zone(zone))
 		need_zonelists_rebuild = 1;
 
-	ret = walk_system_ram_range(pfn, nr_pages, &onlined_pages,
+	ret = walk_memory_resource(pfn, nr_pages, &onlined_pages,
 		online_pages_range);
 	if (ret) {
 		printk(KERN_DEBUG "online_pages %lx at %lx failed\n",
@@ -426,7 +422,6 @@ int online_pages(unsigned long pfn, unsigned long nr_pages)
 	zone->present_pages += onlined_pages;
 	zone->zone_pgdat->node_present_pages += onlined_pages;
 
-	zone_pcp_update(zone);
 	setup_per_zone_wmarks();
 	calculate_zone_inactive_ratio(zone);
 	if (onlined_pages) {
@@ -448,8 +443,7 @@ int online_pages(unsigned long pfn, unsigned long nr_pages)
 }
 #endif /* CONFIG_MEMORY_HOTPLUG_SPARSE */
 
-/* we are OK calling __meminit stuff here - we have CONFIG_MEMORY_HOTPLUG */
-static pg_data_t __ref *hotadd_new_pgdat(int nid, u64 start)
+static pg_data_t *hotadd_new_pgdat(int nid, u64 start)
 {
 	struct pglist_data *pgdat;
 	unsigned long zones_size[MAX_NR_ZONES] = {0};
@@ -486,18 +480,14 @@ int __ref add_memory(int nid, u64 start, u64 size)
 	struct resource *res;
 	int ret;
 
-	lock_system_sleep();
-
 	res = register_memory_resource(start, size);
-	ret = -EEXIST;
 	if (!res)
-		goto out;
+		return -EEXIST;
 
 	if (!node_online(nid)) {
 		pgdat = hotadd_new_pgdat(nid, start);
-		ret = -ENOMEM;
 		if (!pgdat)
-			goto out;
+			return -ENOMEM;
 		new_pgdat = 1;
 	}
 
@@ -520,8 +510,7 @@ int __ref add_memory(int nid, u64 start, u64 size)
 		BUG_ON(ret);
 	}
 
-	goto out;
-
+	return ret;
 error:
 	/* rollback pgdat allocation and others */
 	if (new_pgdat)
@@ -529,8 +518,6 @@ error:
 	if (res)
 		release_memory_resource(res);
 
-out:
-	unlock_system_sleep();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(add_memory);
@@ -551,19 +538,19 @@ static inline int pageblock_free(struct page *page)
 /* Return the start of the next active pageblock after a given page */
 static struct page *next_active_pageblock(struct page *page)
 {
+	int pageblocks_stride;
+
 	/* Ensure the starting page is pageblock-aligned */
 	BUG_ON(page_to_pfn(page) & (pageblock_nr_pages - 1));
 
-	/* If the entire pageblock is free, move to the end of free page */
-	if (pageblock_free(page)) {
-		int order;
-		/* be careful. we don't have locks, page_order can be changed.*/
-		order = page_order(page);
-		if ((order < MAX_ORDER) && (order >= pageblock_order))
-			return page + (1 << order);
-	}
+	/* Move forward by at least 1 * pageblock_nr_pages */
+	pageblocks_stride = 1;
 
-	return page + pageblock_nr_pages;
+	/* If the entire pageblock is free, move to the end of free page */
+	if (pageblock_free(page))
+		pageblocks_stride += page_order(page) - pageblock_order;
+
+	return page + (pageblocks_stride * pageblock_nr_pages);
 }
 
 /* Checks if this range of memory is likely to be hot-removable. */
@@ -601,30 +588,23 @@ int is_mem_section_removable(unsigned long start_pfn, unsigned long nr_pages)
  */
 static int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn)
 {
-	unsigned long pfn, sec_end_pfn;
+	unsigned long pfn;
 	struct zone *zone = NULL;
 	struct page *page;
 	int i;
-	for (pfn = start_pfn, sec_end_pfn = SECTION_ALIGN_UP(start_pfn);
+	for (pfn = start_pfn;
 	     pfn < end_pfn;
-	     pfn = sec_end_pfn + 1, sec_end_pfn += PAGES_PER_SECTION) {
-		/* Make sure the memory section is present first */
-		if (!present_section_nr(pfn_to_section_nr(pfn)))
+	     pfn += MAX_ORDER_NR_PAGES) {
+		i = 0;
+		/* This is just a CONFIG_HOLES_IN_ZONE check.*/
+		while ((i < MAX_ORDER_NR_PAGES) && !pfn_valid_within(pfn + i))
+			i++;
+		if (i == MAX_ORDER_NR_PAGES)
 			continue;
-		for (; pfn < sec_end_pfn && pfn < end_pfn;
-		     pfn += MAX_ORDER_NR_PAGES) {
-			i = 0;
-			/* This is just a CONFIG_HOLES_IN_ZONE check.*/
-			while ((i < MAX_ORDER_NR_PAGES) &&
-				!pfn_valid_within(pfn + i))
-				i++;
-			if (i == MAX_ORDER_NR_PAGES)
-				continue;
-			page = pfn_to_page(pfn + i);
-			if (zone && page_zone(page) != zone)
-				return 0;
-			zone = page_zone(page);
-		}
+		page = pfn_to_page(pfn + i);
+		if (zone && page_zone(page) != zone)
+			return 0;
+		zone = page_zone(page);
 	}
 	return 1;
 }
@@ -633,7 +613,7 @@ static int test_pages_in_a_zone(unsigned long start_pfn, unsigned long end_pfn)
  * Scanning pfn is much easier than scanning lru list.
  * Scan pfn from start to end and Find LRU page.
  */
-unsigned long scan_lru_pages(unsigned long start, unsigned long end)
+int scan_lru_pages(unsigned long start, unsigned long end)
 {
 	unsigned long pfn;
 	struct page *page;
@@ -721,7 +701,7 @@ offline_isolated_pages_cb(unsigned long start, unsigned long nr_pages,
 static void
 offline_isolated_pages(unsigned long start_pfn, unsigned long end_pfn)
 {
-	walk_system_ram_range(start_pfn, end_pfn - start_pfn, NULL,
+	walk_memory_resource(start_pfn, end_pfn - start_pfn, NULL,
 				offline_isolated_pages_cb);
 }
 
@@ -747,7 +727,7 @@ check_pages_isolated(unsigned long start_pfn, unsigned long end_pfn)
 	long offlined = 0;
 	int ret;
 
-	ret = walk_system_ram_range(start_pfn, end_pfn - start_pfn, &offlined,
+	ret = walk_memory_resource(start_pfn, end_pfn - start_pfn, &offlined,
 			check_pages_isolated_cb);
 	if (ret < 0)
 		offlined = (long)ret;
@@ -774,8 +754,6 @@ int offline_pages(unsigned long start_pfn,
 	if (!test_pages_in_a_zone(start_pfn, end_pfn))
 		return -EINVAL;
 
-	lock_system_sleep();
-
 	zone = page_zone(pfn_to_page(start_pfn));
 	node = zone_to_nid(zone);
 	nr_pages = end_pfn - start_pfn;
@@ -783,7 +761,7 @@ int offline_pages(unsigned long start_pfn,
 	/* set above range as isolated */
 	ret = start_isolate_page_range(start_pfn, end_pfn);
 	if (ret)
-		goto out;
+		return ret;
 
 	arg.start_pfn = start_pfn;
 	arg.nr_pages = nr_pages;
@@ -853,6 +831,7 @@ repeat:
 	zone->present_pages -= offlined_pages;
 	zone->zone_pgdat->node_present_pages -= offlined_pages;
 	totalram_pages -= offlined_pages;
+	num_physpages -= offlined_pages;
 
 	setup_per_zone_wmarks();
 	calculate_zone_inactive_ratio(zone);
@@ -861,7 +840,6 @@ repeat:
 	writeback_set_ratelimit();
 
 	memory_notify(MEM_OFFLINE, &arg);
-	unlock_system_sleep();
 	return 0;
 
 failed_removal:
@@ -871,8 +849,6 @@ failed_removal:
 	/* pushback to free area */
 	undo_isolate_page_range(start_pfn, end_pfn);
 
-out:
-	unlock_system_sleep();
 	return ret;
 }
 

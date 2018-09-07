@@ -28,7 +28,6 @@
  */
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/videodev.h>
 #include <media/v4l2-common.h>
@@ -1590,7 +1589,7 @@ static void meye_vm_close(struct vm_area_struct *vma)
 	meye.vma_use_count[idx]--;
 }
 
-static const struct vm_operations_struct meye_vm_ops = {
+static struct vm_operations_struct meye_vm_ops = {
 	.open		= meye_vm_open,
 	.close		= meye_vm_close,
 };
@@ -1916,7 +1915,8 @@ static void __devexit meye_remove(struct pci_dev *pcidev)
 }
 
 static struct pci_device_id meye_pci_tbl[] = {
-	{ PCI_VDEVICE(KAWASAKI, PCI_DEVICE_ID_MCHIP_KL5A72002), 0 },
+	{ PCI_VENDOR_ID_KAWASAKI, PCI_DEVICE_ID_MCHIP_KL5A72002,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ }
 };
 

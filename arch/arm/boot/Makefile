@@ -61,20 +61,13 @@ endif
 
 quiet_cmd_uimage = UIMAGE  $@
       cmd_uimage = $(CONFIG_SHELL) $(MKIMAGE) -A arm -O linux -T kernel \
-		   -C none -a $(LOADADDR) -e $(STARTADDR) \
+		   -C none -a $(LOADADDR) -e $(LOADADDR) \
 		   -n 'Linux-$(KERNELRELEASE)' -d $< $@
 
 ifeq ($(CONFIG_ZBOOT_ROM),y)
 $(obj)/uImage: LOADADDR=$(CONFIG_ZBOOT_ROM_TEXT)
 else
 $(obj)/uImage: LOADADDR=$(ZRELADDR)
-endif
-
-ifeq ($(CONFIG_THUMB2_KERNEL),y)
-# Set bit 0 to 1 so that "mov pc, rx" switches to Thumb-2 mode
-$(obj)/uImage: STARTADDR=$(shell echo $(LOADADDR) | sed -e "s/.$$/1/")
-else
-$(obj)/uImage: STARTADDR=$(LOADADDR)
 endif
 
 $(obj)/uImage:	$(obj)/zImage FORCE

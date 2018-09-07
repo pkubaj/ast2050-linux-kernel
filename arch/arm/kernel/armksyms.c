@@ -186,5 +186,4 @@ EXPORT_SYMBOL(_find_next_bit_be);
 
 #ifdef CONFIG_FUNCTION_TRACER
 EXPORT_SYMBOL(mcount);
-EXPORT_SYMBOL(__gnu_mcount_nc);
 #endif

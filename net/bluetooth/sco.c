@@ -359,9 +359,20 @@ static void sco_sock_kill(struct sock *sk)
 	sock_put(sk);
 }
 
-static void __sco_sock_close(struct sock *sk)
+/* Close socket.
+ * Must be called on unlocked socket.
+ */
+static void sco_sock_close(struct sock *sk)
 {
-	BT_DBG("sk %p state %d socket %p", sk, sk->sk_state, sk->sk_socket);
+	struct sco_conn *conn;
+
+	sco_sock_clear_timer(sk);
+
+	lock_sock(sk);
+
+	conn = sco_pi(sk)->conn;
+
+	BT_DBG("sk %p state %d conn %p socket %p", sk, sk->sk_state, conn, sk->sk_socket);
 
 	switch (sk->sk_state) {
 	case BT_LISTEN:
@@ -379,15 +390,9 @@ static void __sco_sock_close(struct sock *sk)
 		sock_set_flag(sk, SOCK_ZAPPED);
 		break;
 	}
-}
 
-/* Must be called on unlocked socket. */
-static void sco_sock_close(struct sock *sk)
-{
-	sco_sock_clear_timer(sk);
-	lock_sock(sk);
-	__sco_sock_close(sk);
 	release_sock(sk);
+
 	sco_sock_kill(sk);
 }
 
@@ -461,9 +466,6 @@ static int sco_sock_bind(struct socket *sock, struct sockaddr *addr, int addr_le
 	BT_DBG("sk %p %s", sk, batostr(&sa->sco_bdaddr));
 
 	if (!addr || addr->sa_family != AF_BLUETOOTH)
-		return -EINVAL;
-
-	if (addr_len < sizeof(struct sockaddr_sco))
 		return -EINVAL;
 
 	lock_sock(sk);
@@ -647,7 +649,7 @@ static int sco_sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 	return err;
 }
 
-static int sco_sock_setsockopt(struct socket *sock, int level, int optname, char __user *optval, unsigned int optlen)
+static int sco_sock_setsockopt(struct socket *sock, int level, int optname, char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
 	int err = 0;
@@ -703,7 +705,6 @@ static int sco_sock_getsockopt_old(struct socket *sock, int optname, char __user
 			break;
 		}
 
-		memset(&cinfo, 0, sizeof(cinfo));
 		cinfo.hci_handle = sco_pi(sk)->conn->hcon->handle;
 		memcpy(cinfo.dev_class, sco_pi(sk)->conn->hcon->dev_class, 3);
 
@@ -743,30 +744,6 @@ static int sco_sock_getsockopt(struct socket *sock, int level, int optname, char
 		break;
 	}
 
-	release_sock(sk);
-	return err;
-}
-
-static int sco_sock_shutdown(struct socket *sock, int how)
-{
-	struct sock *sk = sock->sk;
-	int err = 0;
-
-	BT_DBG("sock %p, sk %p", sock, sk);
-
-	if (!sk)
-		return 0;
-
-	lock_sock(sk);
-	if (!sk->sk_shutdown) {
-		sk->sk_shutdown = SHUTDOWN_MASK;
-		sco_sock_clear_timer(sk);
-		__sco_sock_close(sk);
-
-		if (sock_flag(sk, SOCK_LINGER) && sk->sk_lingertime)
-			err = bt_sock_wait_state(sk, BT_CLOSED,
-							sk->sk_lingertime);
-	}
 	release_sock(sk);
 	return err;
 }
@@ -961,22 +938,13 @@ static ssize_t sco_sysfs_show(struct class *dev, char *buf)
 	struct sock *sk;
 	struct hlist_node *node;
 	char *str = buf;
-	int size = PAGE_SIZE;
 
 	read_lock_bh(&sco_sk_list.lock);
 
 	sk_for_each(sk, node, &sco_sk_list.head) {
-		int len;
-
-		len = snprintf(str, size, "%s %s %d\n",
+		str += sprintf(str, "%s %s %d\n",
 				batostr(&bt_sk(sk)->src), batostr(&bt_sk(sk)->dst),
 				sk->sk_state);
-
-		size -= len;
-		if (size <= 0)
-			break;
-
-		str += len;
 	}
 
 	read_unlock_bh(&sco_sk_list.lock);
@@ -1001,7 +969,7 @@ static const struct proto_ops sco_sock_ops = {
 	.ioctl		= bt_sock_ioctl,
 	.mmap		= sock_no_mmap,
 	.socketpair	= sock_no_socketpair,
-	.shutdown	= sco_sock_shutdown,
+	.shutdown	= sock_no_shutdown,
 	.setsockopt	= sco_sock_setsockopt,
 	.getsockopt	= sco_sock_getsockopt
 };

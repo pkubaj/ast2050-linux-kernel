@@ -17,7 +17,6 @@
 #include <linux/cpuidle.h>
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
-#include <trace/events/power.h>
 
 #include "cpuidle.h"
 
@@ -95,7 +94,6 @@ static void cpuidle_idle_call(void)
 	/* give the governor an opportunity to reflect on the outcome */
 	if (cpuidle_curr_governor->reflect)
 		cpuidle_curr_governor->reflect(dev);
-	trace_power_end(0);
 }
 
 /**

@@ -49,6 +49,4 @@ void phonet_address_notify(int event, struct net_device *dev, u8 addr);
 
 #define PN_NO_ADDR	0xff
 
-extern const struct file_operations pn_sock_seq_fops;
-
 #endif

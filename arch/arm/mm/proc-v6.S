@@ -32,10 +32,8 @@
 
 #ifndef CONFIG_SMP
 #define TTB_FLAGS	TTB_RGN_WBWA
-#define PMD_FLAGS	PMD_SECT_WB
 #else
 #define TTB_FLAGS	TTB_RGN_WBWA|TTB_S
-#define PMD_FLAGS	PMD_SECT_WBWA|PMD_SECT_S
 #endif
 
 ENTRY(cpu_v6_proc_init)
@@ -193,7 +191,7 @@ v6_crval:
 	.type	v6_processor_functions, #object
 ENTRY(v6_processor_functions)
 	.word	v6_early_abort
-	.word	v6_pabort
+	.word	pabort_noifar
 	.word	cpu_v6_proc_init
 	.word	cpu_v6_proc_fin
 	.word	cpu_v6_reset
@@ -224,9 +222,10 @@ __v6_proc_info:
 	.long	0x0007b000
 	.long	0x0007f000
 	.long   PMD_TYPE_SECT | \
+		PMD_SECT_BUFFERABLE | \
+		PMD_SECT_CACHEABLE | \
 		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_FLAGS
+		PMD_SECT_AP_READ
 	.long   PMD_TYPE_SECT | \
 		PMD_SECT_XN | \
 		PMD_SECT_AP_WRITE | \

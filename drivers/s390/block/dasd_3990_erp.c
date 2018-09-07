@@ -7,7 +7,7 @@
  *
  */
 
-#define KMSG_COMPONENT "dasd-eckd"
+#define KMSG_COMPONENT "dasd"
 
 #include <linux/timer.h>
 #include <linux/slab.h>

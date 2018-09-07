@@ -18,7 +18,6 @@
 #include <linux/input.h>
 #include <linux/kernel.h>
 #include <linux/major.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/miscdevice.h>
@@ -453,79 +452,6 @@ static unsigned int joydev_poll(struct file *file, poll_table *wait)
 		(joydev->exist ?  0 : (POLLHUP | POLLERR));
 }
 
-static int joydev_handle_JSIOCSAXMAP(struct joydev *joydev,
-				     void __user *argp, size_t len)
-{
-	__u8 *abspam;
-	int i;
-	int retval = 0;
-
-	len = min(len, sizeof(joydev->abspam));
-
-	/* Validate the map. */
-	abspam = kmalloc(len, GFP_KERNEL);
-	if (!abspam)
-		return -ENOMEM;
-
-	if (copy_from_user(abspam, argp, len)) {
-		retval = -EFAULT;
-		goto out;
-	}
-
-	for (i = 0; i < joydev->nabs; i++) {
-		if (abspam[i] > ABS_MAX) {
-			retval = -EINVAL;
-			goto out;
-		}
-	}
-
-	memcpy(joydev->abspam, abspam, len);
-
-	for (i = 0; i < joydev->nabs; i++)
-		joydev->absmap[joydev->abspam[i]] = i;
-
- out:
-	kfree(abspam);
-	return retval;
-}
-
-static int joydev_handle_JSIOCSBTNMAP(struct joydev *joydev,
-				      void __user *argp, size_t len)
-{
-	__u16 *keypam;
-	int i;
-	int retval = 0;
-
-	len = min(len, sizeof(joydev->keypam));
-
-	/* Validate the map. */
-	keypam = kmalloc(len, GFP_KERNEL);
-	if (!keypam)
-		return -ENOMEM;
-
-	if (copy_from_user(keypam, argp, len)) {
-		retval = -EFAULT;
-		goto out;
-	}
-
-	for (i = 0; i < joydev->nkey; i++) {
-		if (keypam[i] > KEY_MAX || keypam[i] < BTN_MISC) {
-			retval = -EINVAL;
-			goto out;
-		}
-	}
-
-	memcpy(joydev->keypam, keypam, len);
-
-	for (i = 0; i < joydev->nkey; i++)
-		joydev->keymap[keypam[i] - BTN_MISC] = i;
-
- out:
-	kfree(keypam);
-	return retval;
-}
-
-
 static int joydev_ioctl_common(struct joydev *joydev,
 				unsigned int cmd, void __user *argp)
 {
@@ -586,18 +512,46 @@ static int joydev_ioctl_common(struct joydev *joydev,
 	switch (cmd & ~IOCSIZE_MASK) {
 
 	case (JSIOCSAXMAP & ~IOCSIZE_MASK):
-		return joydev_handle_JSIOCSAXMAP(joydev, argp, _IOC_SIZE(cmd));
+		len = min_t(size_t, _IOC_SIZE(cmd), sizeof(joydev->abspam));
+		/*
+		 * FIXME: we should not copy into our axis map before
+		 * validating the data.
+		 */
+		if (copy_from_user(joydev->abspam, argp, len))
+			return -EFAULT;
+
+		for (i = 0; i < joydev->nabs; i++) {
+			if (joydev->abspam[i] > ABS_MAX)
+				return -EINVAL;
+			joydev->absmap[joydev->abspam[i]] = i;
+		}
+		return 0;
 
 	case (JSIOCGAXMAP & ~IOCSIZE_MASK):
 		len = min_t(size_t, _IOC_SIZE(cmd), sizeof(joydev->abspam));
-		return copy_to_user(argp, joydev->abspam, len) ? -EFAULT : len;
+		return copy_to_user(argp, joydev->abspam, len) ? -EFAULT : 0;
 
 	case (JSIOCSBTNMAP & ~IOCSIZE_MASK):
-		return joydev_handle_JSIOCSBTNMAP(joydev, argp, _IOC_SIZE(cmd));
+		len = min_t(size_t, _IOC_SIZE(cmd), sizeof(joydev->keypam));
+		/*
+		 * FIXME: we should not copy into our keymap before
+		 * validating the data.
+		 */
+		if (copy_from_user(joydev->keypam, argp, len))
+			return -EFAULT;
+
+		for (i = 0; i < joydev->nkey; i++) {
+			if (joydev->keypam[i] > KEY_MAX ||
+			    joydev->keypam[i] < BTN_MISC)
+				return -EINVAL;
+			joydev->keymap[joydev->keypam[i] - BTN_MISC] = i;
+		}
+
+		return 0;
 
 	case (JSIOCGBTNMAP & ~IOCSIZE_MASK):
 		len = min_t(size_t, _IOC_SIZE(cmd), sizeof(joydev->keypam));
-		return copy_to_user(argp, joydev->keypam, len) ? -EFAULT : len;
+		return copy_to_user(argp, joydev->keypam, len) ? -EFAULT : 0;
 
 	case JSIOCGNAME(0):
 		name = dev->name;

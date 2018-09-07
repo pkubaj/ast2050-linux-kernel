@@ -77,6 +77,7 @@ static void ecryptfs_destroy_inode(struct inode *inode)
 	struct ecryptfs_inode_info *inode_info;
 
 	inode_info = ecryptfs_inode_to_private(inode);
+	mutex_lock(&inode_info->lower_file_mutex);
 	if (inode_info->lower_file) {
 		struct dentry *lower_dentry =
 			inode_info->lower_file->f_dentry;
@@ -85,8 +86,10 @@ static void ecryptfs_destroy_inode(struct inode *inode)
 		if (lower_dentry->d_inode) {
 			fput(inode_info->lower_file);
 			inode_info->lower_file = NULL;
+			d_drop(lower_dentry);
 		}
 	}
+	mutex_unlock(&inode_info->lower_file_mutex);
 	ecryptfs_destroy_crypt_stat(&inode_info->crypt_stat);
 	kmem_cache_free(ecryptfs_inode_info_cache, inode_info);
 }

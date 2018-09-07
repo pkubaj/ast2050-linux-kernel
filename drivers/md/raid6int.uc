@@ -15,7 +15,7 @@
  *
  * $#-way unrolled portable integer math RAID-6 instruction set
  *
- * This file is postprocessed using unroll.awk
+ * This file is postprocessed using unroll.pl
  */
 
 #include <linux/raid/pq.h>

@@ -109,9 +109,8 @@ MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, sis_pci_tbl);
 MODULE_VERSION(DRV_VERSION);
 
-static unsigned int get_scr_cfg_addr(struct ata_link *link, unsigned int sc_reg)
+static unsigned int get_scr_cfg_addr(struct ata_port *ap, unsigned int sc_reg)
 {
-	struct ata_port *ap = link->ap;
 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
 	unsigned int addr = SIS_SCR_BASE + (4 * sc_reg);
 	u8 pmr;
@@ -132,9 +131,6 @@ static unsigned int get_scr_cfg_addr(struct ata_link *link, unsigned int sc_reg)
 			break;
 		}
 	}
-	if (link->pmp)
-		addr += 0x10;
-
 	return addr;
 }
 
@@ -142,12 +138,24 @@ static u32 sis_scr_cfg_read(struct ata_link *link,
 			    unsigned int sc_reg, u32 *val)
 {
 	struct pci_dev *pdev = to_pci_dev(link->ap->host->dev);
-	unsigned int cfg_addr = get_scr_cfg_addr(link, sc_reg);
+	unsigned int cfg_addr = get_scr_cfg_addr(link->ap, sc_reg);
+	u32 val2 = 0;
+	u8 pmr;
 
 	if (sc_reg == SCR_ERROR) /* doesn't exist in PCI cfg space */
 		return -EINVAL;
 
+	pci_read_config_byte(pdev, SIS_PMR, &pmr);
+
 	pci_read_config_dword(pdev, cfg_addr, val);
+
+	if ((pdev->device == 0x0182) || (pdev->device == 0x0183) ||
+	    (pdev->device == 0x1182) || (pmr & SIS_PMR_COMBINED))
+		pci_read_config_dword(pdev, cfg_addr+0x10, &val2);
+
+	*val |= val2;
+	*val &= 0xfffffffb;	/* avoid problems with powerdowned ports */
+
 	return 0;
 }
 
@@ -155,16 +163,28 @@ static int sis_scr_cfg_write(struct ata_link *link,
 			     unsigned int sc_reg, u32 val)
 {
 	struct pci_dev *pdev = to_pci_dev(link->ap->host->dev);
-	unsigned int cfg_addr = get_scr_cfg_addr(link, sc_reg);
+	unsigned int cfg_addr = get_scr_cfg_addr(link->ap, sc_reg);
+	u8 pmr;
+
+	if (sc_reg == SCR_ERROR) /* doesn't exist in PCI cfg space */
+		return -EINVAL;
+
+	pci_read_config_byte(pdev, SIS_PMR, &pmr);
 
 	pci_write_config_dword(pdev, cfg_addr, val);
+
+	if ((pdev->device == 0x0182) || (pdev->device == 0x0183) ||
+	    (pdev->device == 0x1182) || (pmr & SIS_PMR_COMBINED))
+		pci_write_config_dword(pdev, cfg_addr+0x10, val);
+
 	return 0;
 }
 
 static int sis_scr_read(struct ata_link *link, unsigned int sc_reg, u32 *val)
 {
 	struct ata_port *ap = link->ap;
-	void __iomem *base = ap->ioaddr.scr_addr + link->pmp * 0x10;
+	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
+	u8 pmr;
 
 	if (sc_reg > SCR_CONTROL)
 		return -EINVAL;
@@ -172,23 +192,39 @@ static int sis_scr_read(struct ata_link *link, unsigned int sc_reg, u32 *val)
 	if (ap->flags & SIS_FLAG_CFGSCR)
 		return sis_scr_cfg_read(link, sc_reg, val);
 
-	*val = ioread32(base + sc_reg * 4);
+	pci_read_config_byte(pdev, SIS_PMR, &pmr);
+
+	*val = ioread32(ap->ioaddr.scr_addr + (sc_reg * 4));
+
+	if ((pdev->device == 0x0182) || (pdev->device == 0x0183) ||
+	    (pdev->device == 0x1182) || (pmr & SIS_PMR_COMBINED))
+		*val |= ioread32(ap->ioaddr.scr_addr + (sc_reg * 4) + 0x10);
+
+	*val &= 0xfffffffb;
+
 	return 0;
 }
 
 static int sis_scr_write(struct ata_link *link, unsigned int sc_reg, u32 val)
 {
 	struct ata_port *ap = link->ap;
-	void __iomem *base = ap->ioaddr.scr_addr + link->pmp * 0x10;
+	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
+	u8 pmr;
 
 	if (sc_reg > SCR_CONTROL)
 		return -EINVAL;
 
+	pci_read_config_byte(pdev, SIS_PMR, &pmr);
+
 	if (ap->flags & SIS_FLAG_CFGSCR)
 		return sis_scr_cfg_write(link, sc_reg, val);
-
-	iowrite32(val, base + (sc_reg * 4));
-	return 0;
+	else {
+		iowrite32(val, ap->ioaddr.scr_addr + (sc_reg * 4));
+		if ((pdev->device == 0x0182) || (pdev->device == 0x0183) ||
+		    (pdev->device == 0x1182) || (pmr & SIS_PMR_COMBINED))
+			iowrite32(val, ap->ioaddr.scr_addr + (sc_reg * 4)+0x10);
+		return 0;
+	}
 }
 
 static int sis_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -200,7 +236,7 @@ static int sis_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	u32 genctl, val;
 	u8 pmr;
 	u8 port2_start = 0x20;
-	int i, rc;
+	int rc;
 
 	if (!printed_version++)
 		dev_printk(KERN_INFO, &pdev->dev, "version " DRV_VERSION "\n");
@@ -282,17 +318,6 @@ static int sis_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	rc = ata_pci_sff_prepare_host(pdev, ppi, &host);
 	if (rc)
 		return rc;
-
-	for (i = 0; i < 2; i++) {
-		struct ata_port *ap = host->ports[i];
-
-		if (ap->flags & ATA_FLAG_SATA &&
-		    ap->flags & ATA_FLAG_SLAVE_POSS) {
-			rc = ata_slave_link_init(ap);
-			if (rc)
-				return rc;
-		}
-	}
 
 	if (!(pi.flags & SIS_FLAG_CFGSCR)) {
 		void __iomem *mmio;

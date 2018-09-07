@@ -89,7 +89,6 @@ extern int acpi_ht;
 extern int acpi_pci_disabled;
 extern int acpi_skip_timer_override;
 extern int acpi_use_timer_override;
-extern int acpi_fix_pin2_polarity;
 
 extern u8 acpi_sci_flags;
 extern int acpi_sci_override_gsi;
@@ -145,6 +144,7 @@ static inline unsigned int acpi_processor_cstate_check(unsigned int max_cstate)
 
 #else /* !CONFIG_ACPI */
 
+#define acpi_disabled 1
 #define acpi_lapic 0
 #define acpi_ioapic 0
 static inline void acpi_noirq_set(void) { }

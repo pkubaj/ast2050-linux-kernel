@@ -20,7 +20,6 @@ static u16 nla_attr_minlen[NLA_TYPE_MAX+1] __read_mostly = {
 	[NLA_U16]	= sizeof(u16),
 	[NLA_U32]	= sizeof(u32),
 	[NLA_U64]	= sizeof(u64),
-	[NLA_MSECS]	= sizeof(u64),
 	[NLA_NESTED]	= NLA_HDRLEN,
 };
 
@@ -299,15 +298,9 @@ int nla_memcmp(const struct nlattr *nla, const void *data,
  */
 int nla_strcmp(const struct nlattr *nla, const char *str)
 {
-	int len = strlen(str);
-	char *buf = nla_data(nla);
-	int attrlen = nla_len(nla);
-	int d;
+	int len = strlen(str) + 1;
+	int d = nla_len(nla) - len;
 
-	if (attrlen > 0 && buf[attrlen - 1] == '\0')
-		attrlen--;
-
-	d = attrlen - len;
 	if (d == 0)
 		d = memcmp(nla_data(nla), str, len);
 

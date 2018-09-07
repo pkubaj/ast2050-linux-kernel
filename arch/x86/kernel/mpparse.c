@@ -45,11 +45,6 @@ static int __init mpf_checksum(unsigned char *mp, int len)
 	return sum & 0xFF;
 }
 
-int __init default_mpc_apic_id(struct mpc_cpu *m)
-{
-	return m->apicid;
-}
-
 static void __init MP_processor_info(struct mpc_cpu *m)
 {
 	int apicid;
@@ -60,7 +55,10 @@ static void __init MP_processor_info(struct mpc_cpu *m)
 		return;
 	}
 
-	apicid = x86_init.mpparse.mpc_apic_id(m);
+	if (x86_quirks->mpc_apic_id)
+		apicid = x86_quirks->mpc_apic_id(m);
+	else
+		apicid = m->apicid;
 
 	if (m->cpuflag & CPU_BOOTPROCESSOR) {
 		bootup_cpu = " (Bootup-CPU)";
@@ -72,18 +70,16 @@ static void __init MP_processor_info(struct mpc_cpu *m)
 }
 
 #ifdef CONFIG_X86_IO_APIC
-void __init default_mpc_oem_bus_info(struct mpc_bus *m, char *str)
-{
-	memcpy(str, m->bustype, 6);
-	str[6] = 0;
-	apic_printk(APIC_VERBOSE, "Bus #%d is %s\n", m->busid, str);
-}
-
 static void __init MP_bus_info(struct mpc_bus *m)
 {
 	char str[7];
+	memcpy(str, m->bustype, 6);
+	str[6] = 0;
 
-	x86_init.mpparse.mpc_oem_bus_info(m, str);
+	if (x86_quirks->mpc_oem_bus_info)
+		x86_quirks->mpc_oem_bus_info(m, str);
+	else
+		apic_printk(APIC_VERBOSE, "Bus #%d is %s\n", m->busid, str);
 
 #if MAX_MP_BUSSES < 256
 	if (m->busid >= MAX_MP_BUSSES) {
@@ -94,14 +90,14 @@ static void __init MP_bus_info(struct mpc_bus *m)
 	}
 #endif
 
-	set_bit(m->busid, mp_bus_not_pci);
 	if (strncmp(str, BUSTYPE_ISA, sizeof(BUSTYPE_ISA) - 1) == 0) {
+		set_bit(m->busid, mp_bus_not_pci);
 #if defined(CONFIG_EISA) || defined(CONFIG_MCA)
 		mp_bus_id_to_type[m->busid] = MP_BUS_ISA;
 #endif
 	} else if (strncmp(str, BUSTYPE_PCI, sizeof(BUSTYPE_PCI) - 1) == 0) {
-		if (x86_init.mpparse.mpc_oem_pci_bus)
-			x86_init.mpparse.mpc_oem_pci_bus(m);
+		if (x86_quirks->mpc_oem_pci_bus)
+			x86_quirks->mpc_oem_pci_bus(m);
 
 		clear_bit(m->busid, mp_bus_not_pci);
 #if defined(CONFIG_EISA) || defined(CONFIG_MCA)
@@ -295,8 +291,6 @@ static void __init smp_dump_mptable(struct mpc_table *mpc, unsigned char *mpt)
 			1, mpc, mpc->length, 1);
 }
 
-void __init default_smp_read_mpc_oem(struct mpc_table *mpc) { }
-
 static int __init smp_read_mpc(struct mpc_table *mpc, unsigned early)
 {
 	char str[16];
@@ -318,13 +312,16 @@ static int __init smp_read_mpc(struct mpc_table *mpc, unsigned early)
 	if (early)
 		return 1;
 
-	if (mpc->oemptr)
-		x86_init.mpparse.smp_read_mpc_oem(mpc);
+	if (mpc->oemptr && x86_quirks->smp_read_mpc_oem) {
+		struct mpc_oemtable *oem_table = (void *)(long)mpc->oemptr;
+		x86_quirks->smp_read_mpc_oem(oem_table, mpc->oemsize);
+	}
 
 	/*
 	 *      Now process the configuration blocks.
 	 */
-	x86_init.mpparse.mpc_record(0);
+	if (x86_quirks->mpc_record)
+		*x86_quirks->mpc_record = 0;
 
 	while (count < mpc->length) {
 		switch (*mpt) {
@@ -356,8 +353,16 @@ static int __init smp_read_mpc(struct mpc_table *mpc, unsigned early)
 			count = mpc->length;
 			break;
 		}
-		x86_init.mpparse.mpc_record(1);
+		if (x86_quirks->mpc_record)
+			(*x86_quirks->mpc_record)++;
 	}
+
+#ifdef CONFIG_X86_BIGSMP
+	generic_bigsmp_probe();
+#endif
+
+	if (apic->setup_apic_routing)
+		apic->setup_apic_routing();
 
 	if (!num_processors)
 		printk(KERN_ERR "MPTABLE: no processors registered!\n");
@@ -477,11 +482,11 @@ static void __init construct_ioapic_table(int mpc_default_type)
 		MP_bus_info(&bus);
 	}
 
-	ioapic.type	= MP_IOAPIC;
-	ioapic.apicid	= 2;
-	ioapic.apicver	= mpc_default_type > 4 ? 0x10 : 0x01;
-	ioapic.flags	= MPC_APIC_USABLE;
-	ioapic.apicaddr	= IO_APIC_DEFAULT_PHYS_BASE;
+	ioapic.type = MP_IOAPIC;
+	ioapic.apicid = 2;
+	ioapic.apicver = mpc_default_type > 4 ? 0x10 : 0x01;
+	ioapic.flags = MPC_APIC_USABLE;
+	ioapic.apicaddr = 0xFEC00000;
 	MP_ioapic_info(&ioapic);
 
 	/*
@@ -603,7 +608,7 @@ static int __init check_physptr(struct mpf_intel *mpf, unsigned int early)
 /*
  * Scan the memory blocks for an SMP configuration block.
  */
-void __init default_get_smp_config(unsigned int early)
+static void __init __get_smp_config(unsigned int early)
 {
 	struct mpf_intel *mpf = mpf_found;
 
@@ -619,6 +624,11 @@ void __init default_get_smp_config(unsigned int early)
 	 */
 	if (acpi_lapic && acpi_ioapic)
 		return;
+
+	if (x86_quirks->mach_get_smp_config) {
+		if (x86_quirks->mach_get_smp_config(early))
+			return;
+	}
 
 	printk(KERN_INFO "Intel MultiProcessor Specification v1.%d\n",
 	       mpf->specification);
@@ -658,6 +668,16 @@ void __init default_get_smp_config(unsigned int early)
 	/*
 	 * Only use the first configuration found.
 	 */
+}
+
+void __init early_get_smp_config(void)
+{
+	__get_smp_config(1);
+}
+
+void __init get_smp_config(void)
+{
+	__get_smp_config(0);
 }
 
 static void __init smp_reserve_bootmem(struct mpf_intel *mpf)
@@ -725,10 +745,14 @@ static int __init smp_scan_config(unsigned long base, unsigned long length,
 	return 0;
 }
 
-void __init default_find_smp_config(unsigned int reserve)
+static void __init __find_smp_config(unsigned int reserve)
 {
 	unsigned int address;
 
+	if (x86_quirks->mach_find_smp_config) {
+		if (x86_quirks->mach_find_smp_config(reserve))
+			return;
+	}
 	/*
 	 * FIXME: Linux assumes you have 640K of base ram..
 	 * this continues the error...
@@ -761,6 +785,16 @@ void __init default_find_smp_config(unsigned int reserve)
 	address = get_bios_ebda();
 	if (address)
 		smp_scan_config(address, 0x400, reserve);
+}
+
+void __init early_find_smp_config(void)
+{
+	__find_smp_config(0);
+}
+
+void __init find_smp_config(void)
+{
+	__find_smp_config(1);
 }
 
 #ifdef CONFIG_X86_IO_APIC

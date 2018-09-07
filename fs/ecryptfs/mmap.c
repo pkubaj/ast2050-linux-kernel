@@ -372,11 +372,6 @@ static int ecryptfs_write_begin(struct file *file,
 	    && (pos != 0))
 		zero_user(page, 0, PAGE_CACHE_SIZE);
 out:
-	if (unlikely(rc)) {
-		unlock_page(page);
-		page_cache_release(page);
-		*pagep = NULL;
-	}
 	return rc;
 }
 
@@ -401,11 +396,9 @@ static int ecryptfs_write_inode_size_to_header(struct inode *ecryptfs_inode)
 	rc = ecryptfs_write_lower(ecryptfs_inode, file_size_virt, 0,
 				  sizeof(u64));
 	kfree(file_size_virt);
-	if (rc < 0)
+	if (rc)
 		printk(KERN_ERR "%s: Error writing file size to header; "
 		       "rc = [%d]\n", __func__, rc);
-	else
-		rc = 0;
 out:
 	return rc;
 }
@@ -552,7 +545,7 @@ static sector_t ecryptfs_bmap(struct address_space *mapping, sector_t block)
 	return rc;
 }
 
-const struct address_space_operations ecryptfs_aops = {
+struct address_space_operations ecryptfs_aops = {
 	.writepage = ecryptfs_writepage,
 	.readpage = ecryptfs_readpage,
 	.write_begin = ecryptfs_write_begin,

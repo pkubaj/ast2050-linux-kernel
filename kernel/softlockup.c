@@ -90,11 +90,11 @@ void touch_all_softlockup_watchdogs(void)
 EXPORT_SYMBOL(touch_all_softlockup_watchdogs);
 
 int proc_dosoftlockup_thresh(struct ctl_table *table, int write,
-			     void __user *buffer,
+			     struct file *filp, void __user *buffer,
 			     size_t *lenp, loff_t *ppos)
 {
 	touch_all_softlockup_watchdogs();
-	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	return proc_dointvec_minmax(table, write, filp, buffer, lenp, ppos);
 }
 
 /*
@@ -140,11 +140,11 @@ void softlockup_tick(void)
 	 * Wake up the high-prio watchdog task twice per
 	 * threshold timespan.
 	 */
-	if (time_after(now - softlockup_thresh/2, touch_timestamp))
+	if (now > touch_timestamp + softlockup_thresh/2)
 		wake_up_process(per_cpu(watchdog_task, this_cpu));
 
 	/* Warn about unreasonable delays: */
-	if (time_before_eq(now - softlockup_thresh, touch_timestamp))
+	if (now <= (touch_timestamp + softlockup_thresh))
 		return;
 
 	per_cpu(print_timestamp, this_cpu) = touch_timestamp;

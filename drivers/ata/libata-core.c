@@ -159,10 +159,6 @@ int libata_allow_tpm = 0;
 module_param_named(allow_tpm, libata_allow_tpm, int, 0444);
 MODULE_PARM_DESC(allow_tpm, "Permit the use of TPM commands (0=off [default], 1=on)");
 
-static int atapi_an;
-module_param(atapi_an, int, 0444);
-MODULE_PARM_DESC(atapi_an, "Enable ATAPI AN media presence notification (0=0ff [default], 1=on)");
-
 MODULE_AUTHOR("Jeff Garzik");
 MODULE_DESCRIPTION("Library module for ATA devices");
 MODULE_LICENSE("GPL");
@@ -2309,49 +2305,29 @@ static inline u8 ata_dev_knobble(struct ata_device *dev)
 	return ((ap->cbl == ATA_CBL_SATA) && (!ata_id_is_sata(dev->id)));
 }
 
-static int ata_dev_config_ncq(struct ata_device *dev,
+static void ata_dev_config_ncq(struct ata_device *dev,
 			       char *desc, size_t desc_sz)
 {
 	struct ata_port *ap = dev->link->ap;
 	int hdepth = 0, ddepth = ata_id_queue_depth(dev->id);
-	unsigned int err_mask;
-	char *aa_desc = "";
 
 	if (!ata_id_has_ncq(dev->id)) {
 		desc[0] = '\0';
-		return 0;
+		return;
 	}
 	if (dev->horkage & ATA_HORKAGE_NONCQ) {
 		snprintf(desc, desc_sz, "NCQ (not used)");
-		return 0;
+		return;
 	}
 	if (ap->flags & ATA_FLAG_NCQ) {
 		hdepth = min(ap->scsi_host->can_queue, ATA_MAX_QUEUE - 1);
 		dev->flags |= ATA_DFLAG_NCQ;
 	}
 
-	if (!(dev->horkage & ATA_HORKAGE_BROKEN_FPDMA_AA) &&
-		(ap->flags & ATA_FLAG_FPDMA_AA) &&
-		ata_id_has_fpdma_aa(dev->id)) {
-		err_mask = ata_dev_set_feature(dev, SETFEATURES_SATA_ENABLE,
-			SATA_FPDMA_AA);
-		if (err_mask) {
-			ata_dev_printk(dev, KERN_ERR, "failed to enable AA"
-				"(error_mask=0x%x)\n", err_mask);
-			if (err_mask != AC_ERR_DEV) {
-				dev->horkage |= ATA_HORKAGE_BROKEN_FPDMA_AA;
-				return -EIO;
-			}
-		} else
-			aa_desc = ", AA";
-	}
-
 	if (hdepth >= ddepth)
-		snprintf(desc, desc_sz, "NCQ (depth %d)%s", ddepth, aa_desc);
+		snprintf(desc, desc_sz, "NCQ (depth %d)", ddepth);
 	else
-		snprintf(desc, desc_sz, "NCQ (depth %d/%d)%s", hdepth,
-			ddepth, aa_desc);
-	return 0;
+		snprintf(desc, desc_sz, "NCQ (depth %d/%d)", hdepth, ddepth);
 }
 
 /**
@@ -2491,7 +2467,7 @@ int ata_dev_configure(struct ata_device *dev)
 
 		if (ata_id_has_lba(id)) {
 			const char *lba_desc;
-			char ncq_desc[24];
+			char ncq_desc[20];
 
 			lba_desc = "LBA";
 			dev->flags |= ATA_DFLAG_LBA;
@@ -2505,9 +2481,7 @@ int ata_dev_configure(struct ata_device *dev)
 			}
 
 			/* config NCQ */
-			rc = ata_dev_config_ncq(dev, ncq_desc, sizeof(ncq_desc));
-			if (rc)
-				return rc;
+			ata_dev_config_ncq(dev, ncq_desc, sizeof(ncq_desc));
 
 			/* print device info to dmesg */
 			if (ata_msg_drv(ap) && print_info) {
@@ -2574,8 +2548,7 @@ int ata_dev_configure(struct ata_device *dev)
 		 * to enable ATAPI AN to discern between PHY status
 		 * changed notifications and ATAPI ANs.
 		 */
-		if (atapi_an &&
-		    (ap->flags & ATA_FLAG_AN) && ata_id_has_atapi_AN(id) &&
+		if ((ap->flags & ATA_FLAG_AN) && ata_id_has_atapi_AN(id) &&
 		    (!sata_pmp_attached(ap) ||
 		     sata_scr_read(&ap->link, SCR_NOTIFICATION, &sntf) == 0)) {
 			unsigned int err_mask;
@@ -3795,45 +3768,21 @@ int sata_link_debounce(struct ata_link *link, const unsigned long *params,
 int sata_link_resume(struct ata_link *link, const unsigned long *params,
 		     unsigned long deadline)
 {
-	int tries = ATA_LINK_RESUME_TRIES;
 	u32 scontrol, serror;
 	int rc;
 
 	if ((rc = sata_scr_read(link, SCR_CONTROL, &scontrol)))
 		return rc;
 
-	/*
-	 * Writes to SControl sometimes get ignored under certain
-	 * controllers (ata_piix SIDPR).  Make sure DET actually is
-	 * cleared.
+	scontrol = (scontrol & 0x0f0) | 0x300;
+
+	if ((rc = sata_scr_write(link, SCR_CONTROL, scontrol)))
+		return rc;
+
+	/* Some PHYs react badly if SStatus is pounded immediately
+	 * after resuming.  Delay 200ms before debouncing.
 	 */
-	do {
-		scontrol = (scontrol & 0x0f0) | 0x300;
-		if ((rc = sata_scr_write(link, SCR_CONTROL, scontrol)))
-			return rc;
-		/*
-		 * Some PHYs react badly if SStatus is pounded
-		 * immediately after resuming.  Delay 200ms before
-		 * debouncing.
-		 */
-		msleep(200);
-
-		/* is SControl restored correctly? */
-		if ((rc = sata_scr_read(link, SCR_CONTROL, &scontrol)))
-			return rc;
-	} while ((scontrol & 0xf0f) != 0x300 && --tries);
-
-	if ((scontrol & 0xf0f) != 0x300) {
-		ata_link_printk(link, KERN_ERR,
-				"failed to resume link (SControl %X)\n",
-				scontrol);
-		return 0;
-	}
-
-	if (tries < ATA_LINK_RESUME_TRIES)
-		ata_link_printk(link, KERN_WARNING,
-				"link resume succeeded after %d retries\n",
-				ATA_LINK_RESUME_TRIES - tries);
+	msleep(200);
 
 	if ((rc = sata_link_debounce(link, params, deadline)))
 		return rc;
@@ -4353,9 +4302,6 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	{ "HTS541080G9SA00",    "MB4OC60D",     ATA_HORKAGE_NONCQ, },
 	{ "HTS541010G9SA00",    "MBZOC60D",     ATA_HORKAGE_NONCQ, },
 
-	/* https://bugzilla.kernel.org/show_bug.cgi?id=15573 */
-	{ "C300-CTFDDAC128MAG",	"0001",		ATA_HORKAGE_NONCQ, },
-
 	/* devices which puke on READ_NATIVE_MAX */
 	{ "HDS724040KLSA80",	"KFAOA20N",	ATA_HORKAGE_BROKEN_HPA, },
 	{ "WDC WD3200JD-00KLB0", "WD-WCAMR1130137", ATA_HORKAGE_BROKEN_HPA },
@@ -4635,8 +4581,7 @@ static unsigned int ata_dev_set_xfermode(struct ata_device *dev)
 	else /* In the ancient relic department - skip all of this */
 		return 0;
 
-	/* On some disks, this command causes spin-up, so we need longer timeout */
-	err_mask = ata_exec_internal(dev, &tf, NULL, DMA_NONE, NULL, 0, 15000);
+	err_mask = ata_exec_internal(dev, &tf, NULL, DMA_NONE, NULL, 0, 0);
 
 	DPRINTK("EXIT, err_mask=%x\n", err_mask);
 	return err_mask;
@@ -4952,11 +4897,10 @@ struct ata_queued_cmd *ata_qc_new_init(struct ata_device *dev)
  */
 void ata_qc_free(struct ata_queued_cmd *qc)
 {
-	struct ata_port *ap;
+	struct ata_port *ap = qc->ap;
 	unsigned int tag;
 
 	WARN_ON_ONCE(qc == NULL); /* ata_qc_from_tag _might_ return NULL */
-	ap = qc->ap;
 
 	qc->flags = 0;
 	tag = qc->tag;
@@ -4968,13 +4912,11 @@ void ata_qc_free(struct ata_queued_cmd *qc)
 
 void __ata_qc_complete(struct ata_queued_cmd *qc)
 {
-	struct ata_port *ap;
-	struct ata_link *link;
+	struct ata_port *ap = qc->ap;
+	struct ata_link *link = qc->dev->link;
 
 	WARN_ON_ONCE(qc == NULL); /* ata_qc_from_tag _might_ return NULL */
 	WARN_ON_ONCE(!(qc->flags & ATA_QCFLAG_ACTIVE));
-	ap = qc->ap;
-	link = qc->dev->link;
 
 	if (likely(qc->flags & ATA_QCFLAG_DMAMAP))
 		ata_sg_clean(qc);
@@ -5017,6 +4959,9 @@ static void ata_verify_xfer(struct ata_queued_cmd *qc)
 {
 	struct ata_device *dev = qc->dev;
 
+	if (ata_tag_internal(qc->tag))
+		return;
+
 	if (ata_is_nodata(qc->tf.protocol))
 		return;
 
@@ -5057,30 +5002,21 @@ void ata_qc_complete(struct ata_queued_cmd *qc)
 		struct ata_device *dev = qc->dev;
 		struct ata_eh_info *ehi = &dev->link->eh_info;
 
+		WARN_ON_ONCE(ap->pflags & ATA_PFLAG_FROZEN);
+
 		if (unlikely(qc->err_mask))
 			qc->flags |= ATA_QCFLAG_FAILED;
 
-		/*
-		 * Finish internal commands without any further processing
-		 * and always with the result TF filled.
-		 */
-		if (unlikely(ata_tag_internal(qc->tag))) {
-			fill_result_tf(qc);
-			__ata_qc_complete(qc);
-			return;
-		}
-
-		/*
-		 * Non-internal qc has failed.  Fill the result TF and
-		 * summon EH.
-		 */
 		if (unlikely(qc->flags & ATA_QCFLAG_FAILED)) {
+			/* always fill result TF for failed qc */
 			fill_result_tf(qc);
-			ata_qc_schedule_eh(qc);
+
+			if (!ata_tag_internal(qc->tag))
+				ata_qc_schedule_eh(qc);
+			else
+				__ata_qc_complete(qc);
 			return;
 		}
-
-		WARN_ON_ONCE(ap->pflags & ATA_PFLAG_FROZEN);
 
 		/* read result TF if requested */
 		if (qc->flags & ATA_QCFLAG_RESULT_TF)
@@ -5511,7 +5447,6 @@ static int ata_host_request_pm(struct ata_host *host, pm_message_t mesg,
  */
 int ata_host_suspend(struct ata_host *host, pm_message_t mesg)
 {
-	unsigned int ehi_flags = ATA_EHI_QUIET;
 	int rc;
 
 	/*
@@ -5520,18 +5455,7 @@ int ata_host_suspend(struct ata_host *host, pm_message_t mesg)
 	 */
 	ata_lpm_enable(host);
 
-	/*
-	 * On some hardware, device fails to respond after spun down
-	 * for suspend.  As the device won't be used before being
-	 * resumed, we don't need to touch the device.  Ask EH to skip
-	 * the usual stuff and proceed directly to suspend.
-	 *
-	 * http://thread.gmane.org/gmane.linux.ide/46764
-	 */
-	if (mesg.event == PM_EVENT_SUSPEND)
-		ehi_flags |= ATA_EHI_NO_AUTOPSY | ATA_EHI_NO_RECOVERY;
-
-	rc = ata_host_request_pm(host, mesg, 0, ehi_flags, 1);
+	rc = ata_host_request_pm(host, mesg, 0, ATA_EHI_QUIET, 1);
 	if (rc == 0)
 		host->dev->power.power_state = mesg;
 	return rc;
@@ -5647,9 +5571,6 @@ void ata_link_init(struct ata_port *ap, struct ata_link *link, int pmp)
 
 		dev->link = link;
 		dev->devno = dev - link->device;
-#ifdef CONFIG_ATA_ACPI
-		dev->gtf_filter = ata_acpi_gtf_filter;
-#endif
 		ata_dev_init(dev);
 	}
 }

@@ -4,7 +4,6 @@
 #include "module.h"
 
 #include <libelf.h>
-#include <libgen.h>
 #include <gelf.h>
 #include <elf.h>
 #include <dirent.h>
@@ -410,82 +409,53 @@ out_failure:
 static int mod_dso__load_module_paths(struct mod_dso *self)
 {
 	struct utsname uts;
-	int count = 0, len, err = -1;
+	int count = 0, len;
 	char *line = NULL;
 	FILE *file;
-	char *dpath, *dir;
+	char *path;
 	size_t n;
 
 	if (uname(&uts) < 0)
-		return err;
+		goto out_failure;
 
 	len = strlen("/lib/modules/");
 	len += strlen(uts.release);
 	len += strlen("/modules.dep");
 
-	dpath = calloc(1, len + 1);
-	if (dpath == NULL)
-		return err;
+	path = calloc(1, len + 1);
+	if (path == NULL)
+		goto out_failure;
 
-	strcat(dpath, "/lib/modules/");
-	strcat(dpath, uts.release);
-	strcat(dpath, "/modules.dep");
+	strcat(path, "/lib/modules/");
+	strcat(path, uts.release);
+	strcat(path, "/modules.dep");
 
-	file = fopen(dpath, "r");
+	file = fopen(path, "r");
+	free(path);
 	if (file == NULL)
 		goto out_failure;
 
-	dir = dirname(dpath);
-	if (!dir)
-		goto out_failure;
-	strcat(dir, "/");
-
 	while (!feof(file)) {
+		char *path, *name, *tmp;
 		struct module *module;
-		char *name, *path, *tmp;
-		FILE *modfile;
-		int line_len;
+		int line_len, len;
 
 		line_len = getline(&line, &n, file);
 		if (line_len < 0)
 			break;
 
 		if (!line)
-			break;
+			goto out_failure;
 
 		line[--line_len] = '\0'; /* \n */
 
-		path = strchr(line, ':');
+		path = strtok(line, ":");
 		if (!path)
-			break;
-		*path = '\0';
-
-		path = strdup(line);
-		if (!path)
-			break;
-
-		if (!strstr(path, dir)) {
-			if (strncmp(path, "kernel/", 7))
-				break;
-
-			free(path);
-			path = calloc(1, strlen(dir) + strlen(line) + 1);
-			if (!path)
-				break;
-			strcat(path, dir);
-			strcat(path, line);
-		}
-
-		modfile = fopen(path, "r");
-		if (modfile == NULL)
-			break;
-		fclose(modfile);
+			goto out_failure;
 
 		name = strdup(path);
-		if (!name)
-			break;
-
 		name = strtok(name, "/");
+
 		tmp = name;
 
 		while (tmp) {
@@ -493,25 +463,26 @@ static int mod_dso__load_module_paths(struct mod_dso *self)
 			if (tmp)
 				name = tmp;
 		}
-
 		name = strsep(&name, ".");
-		if (!name)
-			break;
 
-		/* Quirk: replace '-' with '_' in all modules */
+		/* Quirk: replace '-' with '_' in sound modules */
 		for (len = strlen(name); len; len--) {
 			if (*(name+len) == '-')
 				*(name+len) = '_';
 		}
 
 		module = module__new(name, path);
-		if (!module)
-			break;
+		if (!module) {
+			fprintf(stderr, "load_module_paths: allocation error\n");
+			goto out_failure;
+		}
 		mod_dso__insert_module(self, module);
 
 		module->sections = sec_dso__new_dso("sections");
-		if (!module->sections)
-			break;
+		if (!module->sections) {
+			fprintf(stderr, "load_module_paths: allocation error\n");
+			goto out_failure;
+		}
 
 		module->active = mod_dso__load_sections(module);
 
@@ -519,20 +490,13 @@ static int mod_dso__load_module_paths(struct mod_dso *self)
 			count++;
 	}
 
-	if (feof(file))
-		err = count;
-	else
-		fprintf(stderr, "load_module_paths: modules.dep parsing failure!\n");
+	free(line);
+	fclose(file);
+
+	return count;
 
 out_failure:
-	if (dpath)
-		free(dpath);
-	if (file)
-		fclose(file);
-	if (line)
-		free(line);
-
-	return err;
+	return -1;
 }
 
 int mod_dso__load_modules(struct mod_dso *dso)

@@ -429,7 +429,8 @@ read_rio(struct file *file, char __user *buffer, size_t count, loff_t * ppos)
 	return read_count;
 }
 
-static const struct file_operations usb_rio_fops = {
+static struct
+file_operations usb_rio_fops = {
 	.owner =	THIS_MODULE,
 	.read =		read_rio,
 	.write =	write_rio,

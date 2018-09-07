@@ -49,7 +49,6 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/delay.h>
-#include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/ethtool.h>
 #include <linux/timer.h>
@@ -2138,7 +2137,7 @@ static void nv_gear_backoff_reseed(struct net_device *dev)
  * nv_start_xmit: dev->hard_start_xmit function
  * Called with netif_tx_lock held.
  */
-static netdev_tx_t nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct fe_priv *np = netdev_priv(dev);
 	u32 tx_flags = 0;
@@ -2258,8 +2257,7 @@ static netdev_tx_t nv_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 }
 
-static netdev_tx_t nv_start_xmit_optimized(struct sk_buff *skb,
-					   struct net_device *dev)
+static int nv_start_xmit_optimized(struct sk_buff *skb, struct net_device *dev)
 {
 	struct fe_priv *np = netdev_priv(dev);
 	u32 tx_flags = 0;
@@ -5821,7 +5819,10 @@ static int __devinit nv_probe(struct pci_dev *pci_dev, const struct pci_device_i
 		        dev->dev_addr);
 		dev_printk(KERN_ERR, &pci_dev->dev,
 			"Please complain to your hardware vendor. Switching to a random MAC.\n");
-		random_ether_addr(dev->dev_addr);
+		dev->dev_addr[0] = 0x00;
+		dev->dev_addr[1] = 0x00;
+		dev->dev_addr[2] = 0x6c;
+		get_random_bytes(&dev->dev_addr[3], 3);
 	}
 
 	dprintk(KERN_DEBUG "%s: MAC Address %pM\n",
@@ -5900,7 +5901,7 @@ static int __devinit nv_probe(struct pci_dev *pci_dev, const struct pci_device_i
 	/* Limit the number of tx's outstanding for hw bug */
 	if (id->driver_data & DEV_NEED_TX_LIMIT) {
 		np->tx_limit = 1;
-		if (((id->driver_data & DEV_NEED_TX_LIMIT2) == DEV_NEED_TX_LIMIT2) &&
+		if ((id->driver_data & DEV_NEED_TX_LIMIT2) &&
 		    pci_dev->revision >= 0xA2)
 			np->tx_limit = 0;
 	}

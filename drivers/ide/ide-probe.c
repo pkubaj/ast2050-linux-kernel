@@ -238,7 +238,6 @@ static void do_identify(ide_drive_t *drive, u8 cmd, u16 *id)
  *	@drive: drive to identify
  *	@cmd: command to use
  *	@id: buffer for IDENTIFY data
- *	@irq_ctx: flag set when called from the IRQ context
  *
  *	Sends an ATA(PI) IDENTIFY request to a drive and waits for a response.
  *
@@ -247,7 +246,7 @@ static void do_identify(ide_drive_t *drive, u8 cmd, u16 *id)
  *			2  device aborted the command (refused to identify itself)
  */
 
-int ide_dev_read_id(ide_drive_t *drive, u8 cmd, u16 *id, int irq_ctx)
+int ide_dev_read_id(ide_drive_t *drive, u8 cmd, u16 *id)
 {
 	ide_hwif_t *hwif = drive->hwif;
 	struct ide_io_ports *io_ports = &hwif->io_ports;
@@ -264,10 +263,7 @@ int ide_dev_read_id(ide_drive_t *drive, u8 cmd, u16 *id, int irq_ctx)
 		tp_ops->write_devctl(hwif, ATA_NIEN | ATA_DEVCTL_OBS);
 
 	/* take a deep breath */
-	if (irq_ctx)
-		mdelay(50);
-	else
-		msleep(50);
+	msleep(50);
 
 	if (io_ports->ctl_addr &&
 	    (hwif->host_flags & IDE_HFLAG_BROKEN_ALTSTATUS) == 0) {
@@ -299,19 +295,12 @@ int ide_dev_read_id(ide_drive_t *drive, u8 cmd, u16 *id, int irq_ctx)
 
 	timeout = ((cmd == ATA_CMD_ID_ATA) ? WAIT_WORSTCASE : WAIT_PIDENTIFY) / 2;
 
-	/* wait for IRQ and ATA_DRQ */
-	if (irq_ctx) {
-		rc = __ide_wait_stat(drive, ATA_DRQ, BAD_R_STAT, timeout, &s);
-		if (rc)
-			return 1;
-	} else {
-		rc = ide_busy_sleep(drive, timeout, use_altstatus);
-		if (rc)
-			return 1;
+	if (ide_busy_sleep(drive, timeout, use_altstatus))
+		return 1;
 
-		msleep(50);
-		s = tp_ops->read_status(hwif);
-	}
+	/* wait for IRQ and ATA_DRQ */
+	msleep(50);
+	s = tp_ops->read_status(hwif);
 
 	if (OK_STAT(s, ATA_DRQ, BAD_R_STAT)) {
 		/* drive returned ID */
@@ -417,10 +406,10 @@ static int do_probe (ide_drive_t *drive, u8 cmd)
 
 	if (OK_STAT(stat, ATA_DRDY, ATA_BUSY) ||
 	    present || cmd == ATA_CMD_ID_ATAPI) {
-		rc = ide_dev_read_id(drive, cmd, id, 0);
+		rc = ide_dev_read_id(drive, cmd, id);
 		if (rc)
 			/* failed: try again */
-			rc = ide_dev_read_id(drive, cmd, id, 0);
+			rc = ide_dev_read_id(drive, cmd, id);
 
 		stat = tp_ops->read_status(hwif);
 
@@ -435,7 +424,7 @@ static int do_probe (ide_drive_t *drive, u8 cmd)
 			msleep(50);
 			tp_ops->exec_command(hwif, ATA_CMD_DEV_RESET);
 			(void)ide_busy_sleep(drive, WAIT_WORSTCASE, 0);
-			rc = ide_dev_read_id(drive, cmd, id, 0);
+			rc = ide_dev_read_id(drive, cmd, id);
 		}
 
 		/* ensure drive IRQ is clear */
@@ -1203,7 +1192,7 @@ static int ide_find_port_slot(const struct ide_port_info *d)
 {
 	int idx = -ENOENT;
 	u8 bootable = (d && (d->host_flags & IDE_HFLAG_NON_BOOTABLE)) ? 0 : 1;
-	u8 i = (d && (d->host_flags & IDE_HFLAG_QD_2ND_PORT)) ? 1 : 0;
+	u8 i = (d && (d->host_flags & IDE_HFLAG_QD_2ND_PORT)) ? 1 : 0;;
 
 	/*
 	 * Claim an unassigned slot.

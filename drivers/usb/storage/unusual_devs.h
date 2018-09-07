@@ -66,6 +66,13 @@ UNUSUAL_DEV(  0x03eb, 0x2002, 0x0100, 0x0100,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE),
 
+/* modified by Tobias Lorenz <tobias.lorenz@gmx.net> */
+UNUSUAL_DEV(  0x03ee, 0x6901, 0x0000, 0x0200,
+		"Mitsumi",
+		"USB FDD",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_SINGLE_LUN ),
+
 /* Reported by Rodolfo Quesada <rquesada@roqz.net> */
 UNUSUAL_DEV(  0x03ee, 0x6906, 0x0003, 0x0003,
 		"VIA Technologies Inc.",
@@ -225,6 +232,13 @@ UNUSUAL_DEV(  0x0421, 0x0495, 0x0370, 0x0370,
 		"6234",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_MAX_SECTORS_64 ),
+
+/* Reported by Olaf Hering <olh@suse.de> from novell bug #105878 */
+UNUSUAL_DEV(  0x0424, 0x0fdc, 0x0210, 0x0210,
+		"SMSC",
+		"FDC GOLD-2.30",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_SINGLE_LUN ),
 
 #ifdef NO_SDDR09
 UNUSUAL_DEV(  0x0436, 0x0005, 0x0100, 0x0100,
@@ -481,13 +495,6 @@ UNUSUAL_DEV(  0x04e8, 0x507c, 0x0220, 0x0220,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_MAX_SECTORS_64),
 
-/* Reported by Vitaly Kuznetsov <vitty@altlinux.ru> */
-UNUSUAL_DEV(  0x04e8, 0x5122, 0x0000, 0x9999,
-		"Samsung",
-		"YP-CP3",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_MAX_SECTORS_64 | US_FL_BULK_IGNORE_TAG),
-
 /* Entry and supporting patch by Theodore Kilgore <kilgota@auburn.edu>.
  * Device uses standards-violating 32-byte Bulk Command Block Wrappers and
  * reports itself as "Proprietary SCSI Bulk." Cf. device entry 0x084d:0x0011.
@@ -657,11 +664,17 @@ UNUSUAL_DEV(  0x055d, 0x2020, 0x0000, 0x0210,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_SINGLE_LUN ),
 
-/* We keep this entry to force the transport; firmware 3.00 and later is ok. */
+		
 UNUSUAL_DEV(  0x057b, 0x0000, 0x0000, 0x0299,
 		"Y-E Data",
 		"Flashbuster-U",
 		US_SC_DEVICE,  US_PR_CB, NULL,
+		US_FL_SINGLE_LUN),
+
+UNUSUAL_DEV(  0x057b, 0x0000, 0x0300, 0x9999,
+		"Y-E Data",
+		"Flashbuster-U",
+		US_SC_DEVICE,  US_PR_DEVICE, NULL,
 		US_FL_SINGLE_LUN),
 
 /* Reported by Johann Cardon <johann.cardon@free.fr>
@@ -1043,15 +1056,6 @@ UNUSUAL_DEV(  0x084d, 0x0011, 0x0110, 0x0110,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_BULK32),
 
-/* Reported by <ttkspam@free.fr>
- * The device reports a vendor-specific device class, requiring an
- * explicit vendor/product match.
- */
-UNUSUAL_DEV(  0x0851, 0x1542, 0x0002, 0x0002,
-		"MagicPixel",
-		"FW_Omega2",
-		US_SC_DEVICE, US_PR_DEVICE, NULL, 0),
-
 /* Andrew Lunn <andrew@lunn.ch>
  * PanDigital Digital Picture Frame. Does not like ALLOW_MEDIUM_REMOVAL
  * on LUN 4.
@@ -1163,96 +1167,12 @@ UNUSUAL_DEV( 0x0af0, 0x7401, 0x0000, 0x0000,
 		0 ),
 
 /* Reported by Jan Dumon <j.dumon@option.com>
- * These devices (wrongly) have a vendor-specific device descriptor.
- * These entries are needed so usb-storage can bind to their mass-storage
+ * This device (wrongly) has a vendor-specific device descriptor.
+ * The entry is needed so usb-storage can bind to it's mass-storage
  * interface as an interface driver */
 UNUSUAL_DEV( 0x0af0, 0x7501, 0x0000, 0x0000,
 		"Option",
 		"GI 0431 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x7701, 0x0000, 0x0000,
-		"Option",
-		"GI 0451 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x7706, 0x0000, 0x0000,
-		"Option",
-		"GI 0451 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x7901, 0x0000, 0x0000,
-		"Option",
-		"GI 0452 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x7A01, 0x0000, 0x0000,
-		"Option",
-		"GI 0461 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x7A05, 0x0000, 0x0000,
-		"Option",
-		"GI 0461 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x8300, 0x0000, 0x0000,
-		"Option",
-		"GI 033x SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x8302, 0x0000, 0x0000,
-		"Option",
-		"GI 033x SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0x8304, 0x0000, 0x0000,
-		"Option",
-		"GI 033x SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0xc100, 0x0000, 0x0000,
-		"Option",
-		"GI 070x SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0xd057, 0x0000, 0x0000,
-		"Option",
-		"GI 1505 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0xd058, 0x0000, 0x0000,
-		"Option",
-		"GI 1509 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0xd157, 0x0000, 0x0000,
-		"Option",
-		"GI 1515 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0xd257, 0x0000, 0x0000,
-		"Option",
-		"GI 1215 SD-Card",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		0 ),
-
-UNUSUAL_DEV( 0x0af0, 0xd357, 0x0000, 0x0000,
-		"Option",
-		"GI 1505 SD-Card",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		0 ),
 
@@ -1409,13 +1329,6 @@ UNUSUAL_DEV(  0x0fca, 0x0006, 0x0001, 0x0001,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_DEVICE ),
 #endif
-
-/* Submitted by Nick Holloway */
-UNUSUAL_DEV( 0x0f88, 0x042e, 0x0100, 0x0100,
-		"VTech",
-		"Kidizoom",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_FIX_CAPACITY ),
 
 /* Reported by Michael Stattmann <michael@stattmann.com> */
 UNUSUAL_DEV(  0x0fce, 0xd008, 0x0000, 0x0000,
@@ -1857,13 +1770,6 @@ UNUSUAL_DEV(  0x1370, 0x6828, 0x0110, 0x0110,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE ),
 
-/* Reported by Qinglin Ye <yestyle@gmail.com> */
-UNUSUAL_DEV(  0x13fe, 0x3600, 0x0100, 0x0100,
-		"Kingston",
-		"DT 101 G2",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_BULK_IGNORE_TAG ),
-
 /* Reported by Francesco Foresti <frafore@tiscali.it> */
 UNUSUAL_DEV(  0x14cd, 0x6600, 0x0201, 0x0201,
 		"Super Top",
@@ -1887,37 +1793,6 @@ UNUSUAL_DEV(  0x1652, 0x6600, 0x0201, 0x0201,
 		"HD-35PUK-B",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE ),
-
-/* Reported by Hans de Goede <hdegoede@redhat.com>
- * These Appotech controllers are found in Picture Frames, they provide a
- * (buggy) emulation of a cdrom drive which contains the windows software
- * Uploading of pictures happens over the corresponding /dev/sg device. */
-UNUSUAL_DEV( 0x1908, 0x1315, 0x0000, 0x0000,
-		"BUILDWIN",
-		"Photo Frame",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_BAD_SENSE ),
-UNUSUAL_DEV( 0x1908, 0x1320, 0x0000, 0x0000,
-		"BUILDWIN",
-		"Photo Frame",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_BAD_SENSE ),
-
-/* Patch by Richard Schütz <r.schtz@t-online.de>
- * This external hard drive enclosure uses a JMicron chip which
- * needs the US_FL_IGNORE_RESIDUE flag to work properly. */
-UNUSUAL_DEV(  0x1e68, 0x001b, 0x0000, 0x0000,
-		"TrekStor GmbH & Co. KG",
-		"DataStation maxi g.u",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_IGNORE_RESIDUE | US_FL_SANE_SENSE ),
-
-/* Reported by Jasper Mackenzie <scarletpimpernal@hotmail.com> */
-UNUSUAL_DEV( 0x1e74, 0x4621, 0x0000, 0x0000,
-		"Coby Electronics",
-		"MP3 Player",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_BULK_IGNORE_TAG | US_FL_MAX_SECTORS_64 ),
 
 UNUSUAL_DEV( 0x2116, 0x0320, 0x0001, 0x0001,
 		"ST",
@@ -1968,13 +1843,6 @@ UNUSUAL_DEV(  0x4102, 0x1020, 0x0100,  0x0100,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE ),
 
-/* Reported by Sergey Pinaev <dfo@antex.ru> */
-UNUSUAL_DEV(  0x4102, 0x1059, 0x0000,  0x0000,
-               "iRiver",
-               "P7K",
-               US_SC_DEVICE, US_PR_DEVICE, NULL,
-               US_FL_MAX_SECTORS_64 ),
-
 /*
  * David HÃ¤rdeman <david@2gen.com>
  * The key makes the SCSI stack print confusing (but harmless) messages
@@ -1983,16 +1851,6 @@ UNUSUAL_DEV(  0x4146, 0xba01, 0x0100, 0x0100,
 		"Iomega",
 		"Micro Mini 1GB",
 		US_SC_DEVICE, US_PR_DEVICE, NULL, US_FL_NOT_LOCKABLE ),
-
-/*
- * Nick Bowler <nbowler@elliptictech.com>
- * SCSI stack spams (otherwise harmless) error messages.
- */
-UNUSUAL_DEV(  0xc251, 0x4003, 0x0100, 0x0100,
-		"Keil Software, Inc.",
-		"V2M MotherBoard",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_NOT_LOCKABLE),
 
 /* Reported by Andrew Simmons <andrew.simmons@gmail.com> */
 UNUSUAL_DEV(  0xed06, 0x4500, 0x0001, 0x0001,

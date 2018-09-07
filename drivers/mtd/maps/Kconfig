@@ -74,7 +74,7 @@ config MTD_PHYSMAP_BANKWIDTH
 
 config MTD_PHYSMAP_OF
 	tristate "Flash device in physical memory map based on OF description"
-	depends on (MICROBLAZE || PPC_OF) && (MTD_CFI || MTD_JEDECPROBE || MTD_ROM)
+	depends on PPC_OF && (MTD_CFI || MTD_JEDECPROBE || MTD_ROM)
 	help
 	  This provides a 'mapping' driver which allows the NOR Flash and
 	  ROM driver code to communicate with chips which are mapped
@@ -346,6 +346,10 @@ config MTD_ARM_INTEGRATOR
 	tristate "CFI Flash device mapped on ARM Integrator/P720T"
 	depends on ARM && MTD_CFI
 
+config MTD_AST
+        tristate "CFI Flash device mapped on ASPEED"
+        depends on ARCH_ASPEED && MTD_CFI
+
 config MTD_CDB89712
 	tristate "Cirrus CDB89712 evaluation board mappings"
 	depends on MTD_CFI && ARCH_CDB89712
@@ -484,20 +488,9 @@ config MTD_BFIN_ASYNC
 
 	  If compiled as a module, it will be called bfin-async-flash.
 
-config MTD_GPIO_ADDR
-	tristate "GPIO-assisted Flash Chip Support"
-	depends on GENERIC_GPIO || GPIOLIB
-	depends on MTD_COMPLEX_MAPPINGS
-	select MTD_PARTITIONS
-	help
-	  Map driver which allows flashes to be partially physically addressed
-	  and assisted by GPIOs.
-
-	  If compiled as a module, it will be called gpio-addr-flash.
-
 config MTD_UCLINUX
 	bool "Generic uClinux RAM/ROM filesystem support"
-	depends on MTD_PARTITIONS && MTD_RAM=y && !MMU
+	depends on MTD_PARTITIONS && MTD_RAM && !MMU
 	help
 	  Map driver to support image based filesystems for uClinux.
 

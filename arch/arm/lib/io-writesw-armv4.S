@@ -75,10 +75,7 @@ ENTRY(__raw_writesw)
 #endif
 
 .Loutsw_noalign:
- ARM(		ldr	r3, [r1, -r3]!	)
- THUMB(		rsb	r3, r3, #0	)
- THUMB(		ldr	r3, [r1, r3]	)
- THUMB(		sub	r1, r3		)
+		ldr	r3, [r1, -r3]!
 		subcs	r2, r2, #1
 		bcs	2f
 		subs	r2, r2, #2

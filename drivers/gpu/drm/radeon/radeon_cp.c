@@ -36,24 +36,9 @@
 #include "radeon_drv.h"
 #include "r300_reg.h"
 
+#include "radeon_microcode.h"
+
 #define RADEON_FIFO_DEBUG	0
-
-/* Firmware Names */
-#define FIRMWARE_R100		"radeon/R100_cp.bin"
-#define FIRMWARE_R200		"radeon/R200_cp.bin"
-#define FIRMWARE_R300		"radeon/R300_cp.bin"
-#define FIRMWARE_R420		"radeon/R420_cp.bin"
-#define FIRMWARE_RS690		"radeon/RS690_cp.bin"
-#define FIRMWARE_RS600		"radeon/RS600_cp.bin"
-#define FIRMWARE_R520		"radeon/R520_cp.bin"
-
-MODULE_FIRMWARE(FIRMWARE_R100);
-MODULE_FIRMWARE(FIRMWARE_R200);
-MODULE_FIRMWARE(FIRMWARE_R300);
-MODULE_FIRMWARE(FIRMWARE_R420);
-MODULE_FIRMWARE(FIRMWARE_RS690);
-MODULE_FIRMWARE(FIRMWARE_RS600);
-MODULE_FIRMWARE(FIRMWARE_R520);
 
 static int radeon_do_cleanup_cp(struct drm_device * dev);
 static void radeon_do_cp_start(drm_radeon_private_t * dev_priv);
@@ -417,9 +402,8 @@ static int radeon_do_wait_for_idle(drm_radeon_private_t * dev_priv)
 	return -EBUSY;
 }
 
-static void radeon_init_pipes(struct drm_device *dev)
+static void radeon_init_pipes(drm_radeon_private_t *dev_priv)
 {
-	drm_radeon_private_t *dev_priv = dev->dev_private;
 	uint32_t gb_tile_config, gb_pipe_sel = 0;
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV530) {
@@ -437,12 +421,11 @@ static void radeon_init_pipes(struct drm_device *dev)
 		dev_priv->num_gb_pipes = ((gb_pipe_sel >> 12) & 0x3) + 1;
 	} else {
 		/* R3xx */
-		if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R300 &&
-		     dev->pdev->device != 0x4144) ||
+		if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R300) ||
 		    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R350)) {
 			dev_priv->num_gb_pipes = 2;
 		} else {
-			/* RV3xx/R300 AD */
+			/* R3Vxx */
 			dev_priv->num_gb_pipes = 1;
 		}
 	}
@@ -477,34 +460,37 @@ static void radeon_init_pipes(struct drm_device *dev)
  */
 
 /* Load the microcode for the CP */
-static int radeon_cp_init_microcode(drm_radeon_private_t *dev_priv)
+static void radeon_cp_load_microcode(drm_radeon_private_t * dev_priv)
 {
-	struct platform_device *pdev;
-	const char *fw_name = NULL;
-	int err;
-
+	int i;
 	DRM_DEBUG("\n");
 
-	pdev = platform_device_register_simple("radeon_cp", 0, NULL, 0);
-	err = IS_ERR(pdev);
-	if (err) {
-		printk(KERN_ERR "radeon_cp: Failed to register firmware\n");
-		return -EINVAL;
-	}
+	radeon_do_wait_for_idle(dev_priv);
 
+	RADEON_WRITE(RADEON_CP_ME_RAM_ADDR, 0);
 	if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R100) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV100) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV200) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS100) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS200)) {
 		DRM_INFO("Loading R100 Microcode\n");
-		fw_name = FIRMWARE_R100;
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				     R100_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				     R100_cp_microcode[i][0]);
+		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R200) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV250) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV280) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS300)) {
 		DRM_INFO("Loading R200 Microcode\n");
-		fw_name = FIRMWARE_R200;
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				     R200_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				     R200_cp_microcode[i][0]);
+		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R300) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R350) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV350) ||
@@ -512,19 +498,39 @@ static int radeon_cp_init_microcode(drm_radeon_private_t *dev_priv)
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS400) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS480)) {
 		DRM_INFO("Loading R300 Microcode\n");
-		fw_name = FIRMWARE_R300;
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				     R300_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				     R300_cp_microcode[i][0]);
+		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R423) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV410)) {
 		DRM_INFO("Loading R400 Microcode\n");
-		fw_name = FIRMWARE_R420;
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				     R420_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				     R420_cp_microcode[i][0]);
+		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS690) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS740)) {
 		DRM_INFO("Loading RS690/RS740 Microcode\n");
-		fw_name = FIRMWARE_RS690;
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				     RS690_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				     RS690_cp_microcode[i][0]);
+		}
 	} else if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS600) {
 		DRM_INFO("Loading RS600 Microcode\n");
-		fw_name = FIRMWARE_RS600;
+		for (i = 0; i < 256; i++) {
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
+				     RS600_cp_microcode[i][1]);
+			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
+				     RS600_cp_microcode[i][0]);
+		}
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV515) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R520) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV530) ||
@@ -532,41 +538,11 @@ static int radeon_cp_init_microcode(drm_radeon_private_t *dev_priv)
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV560) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV570)) {
 		DRM_INFO("Loading R500 Microcode\n");
-		fw_name = FIRMWARE_R520;
-	}
-
-	err = request_firmware(&dev_priv->me_fw, fw_name, &pdev->dev);
-	platform_device_unregister(pdev);
-	if (err) {
-		printk(KERN_ERR "radeon_cp: Failed to load firmware \"%s\"\n",
-		       fw_name);
-	} else if (dev_priv->me_fw->size % 8) {
-		printk(KERN_ERR
-		       "radeon_cp: Bogus length %zu in firmware \"%s\"\n",
-		       dev_priv->me_fw->size, fw_name);
-		err = -EINVAL;
-		release_firmware(dev_priv->me_fw);
-		dev_priv->me_fw = NULL;
-	}
-	return err;
-}
-
-static void radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
-{
-	const __be32 *fw_data;
-	int i, size;
-
-	radeon_do_wait_for_idle(dev_priv);
-
-	if (dev_priv->me_fw) {
-		size = dev_priv->me_fw->size / 4;
-		fw_data = (const __be32 *)&dev_priv->me_fw->data[0];
-		RADEON_WRITE(RADEON_CP_ME_RAM_ADDR, 0);
-		for (i = 0; i < size; i += 2) {
+		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
-				     be32_to_cpup(&fw_data[i]));
+				     R520_cp_microcode[i][1]);
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAL,
-				     be32_to_cpup(&fw_data[i + 1]));
+				     R520_cp_microcode[i][0]);
 		}
 	}
 }
@@ -618,18 +594,6 @@ static void radeon_do_cp_start(drm_radeon_private_t * dev_priv)
 
 	dev_priv->cp_running = 1;
 
-	/* on r420, any DMA from CP to system memory while 2D is active
-	 * can cause a hang.  workaround is to queue a CP RESYNC token
-	 */
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) {
-		BEGIN_RING(3);
-		OUT_RING(CP_PACKET0(R300_CP_RESYNC_ADDR, 1));
-		OUT_RING(5); /* scratch reg 5 */
-		OUT_RING(0xdeadbeef);
-		ADVANCE_RING();
-		COMMIT_RING();
-	}
-
 	BEGIN_RING(8);
 	/* isync can only be written through cp on r5xx write it here */
 	OUT_RING(CP_PACKET0(RADEON_ISYNC_CNTL, 0));
@@ -667,18 +631,7 @@ static void radeon_do_cp_reset(drm_radeon_private_t * dev_priv)
  */
 static void radeon_do_cp_stop(drm_radeon_private_t * dev_priv)
 {
-	RING_LOCALS;
 	DRM_DEBUG("\n");
-
-	/* finish the pending CP_RESYNC token */
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) {
-		BEGIN_RING(2);
-		OUT_RING(CP_PACKET0(R300_RB3D_DSTCACHE_CTLSTAT, 0));
-		OUT_RING(R300_RB3D_DC_FINISH);
-		ADVANCE_RING();
-		COMMIT_RING();
-		radeon_do_wait_for_idle(dev_priv);
-	}
 
 	RADEON_WRITE(RADEON_CP_CSQ_CNTL, RADEON_CSQ_PRIDIS_INDDIS);
 
@@ -738,7 +691,7 @@ static int radeon_do_engine_reset(struct drm_device * dev)
 
 	/* setup the raster pipes */
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R300)
-	    radeon_init_pipes(dev);
+	    radeon_init_pipes(dev_priv);
 
 	/* Reset the CP ring */
 	radeon_do_cp_reset(dev_priv);
@@ -1542,14 +1495,6 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		radeon_set_pcigart(dev_priv, 1);
 	}
 
-	if (!dev_priv->me_fw) {
-		int err = radeon_cp_init_microcode(dev_priv);
-		if (err) {
-			DRM_ERROR("Failed to load firmware!\n");
-			radeon_do_cleanup_cp(dev);
-			return err;
-		}
-	}
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
@@ -1646,7 +1591,6 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
-	dev_priv->have_z_offset = 0;
 	radeon_do_engine_reset(dev);
 	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
 
@@ -1820,14 +1764,6 @@ void radeon_do_release(struct drm_device * dev)
 			r600_do_cleanup_cp(dev);
 		else
 			radeon_do_cleanup_cp(dev);
-		if (dev_priv->me_fw) {
-			release_firmware(dev_priv->me_fw);
-			dev_priv->me_fw = NULL;
-		}
-		if (dev_priv->pfp_fw) {
-			release_firmware(dev_priv->pfp_fw);
-			dev_priv->pfp_fw = NULL;
-		}
 	}
 }
 

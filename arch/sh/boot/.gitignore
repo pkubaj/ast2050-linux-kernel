@@ -1,3 +1,4 @@
 zImage
-vmlinux*
-uImage*
+vmlinux.srec
+uImage
+uImage.srec

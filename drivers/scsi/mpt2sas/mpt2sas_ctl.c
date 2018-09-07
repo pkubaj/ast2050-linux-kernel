@@ -3,7 +3,7 @@
  * controllers
  *
  * This code is based on drivers/scsi/mpt2sas/mpt2_ctl.c
- * Copyright (C) 2007-2009  LSI Corporation
+ * Copyright (C) 2007-2008  LSI Corporation
  *  (mailto:DL-MPTFusionLinux@lsi.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -219,25 +219,23 @@ _ctl_display_some_debug(struct MPT2SAS_ADAPTER *ioc, u16 smid,
  * mpt2sas_ctl_done - ctl module completion routine
  * @ioc: per adapter object
  * @smid: system request message index
- * @msix_index: MSIX table index supplied by the OS
+ * @VF_ID: virtual function id
  * @reply: reply message frame(lower 32bit addr)
  * Context: none.
  *
  * The callback handler when using ioc->ctl_cb_idx.
  *
- * Return 1 meaning mf should be freed from _base_interrupt
- *        0 means the mf is freed from this function.
+ * Return nothing.
  */
-u8
-mpt2sas_ctl_done(struct MPT2SAS_ADAPTER *ioc, u16 smid, u8 msix_index,
-	u32 reply)
+void
+mpt2sas_ctl_done(struct MPT2SAS_ADAPTER *ioc, u16 smid, u8 VF_ID, u32 reply)
 {
 	MPI2DefaultReply_t *mpi_reply;
 
 	if (ioc->ctl_cmds.status == MPT2_CMD_NOT_USED)
-		return 1;
+		return;
 	if (ioc->ctl_cmds.smid != smid)
-		return 1;
+		return;
 	ioc->ctl_cmds.status |= MPT2_CMD_COMPLETE;
 	mpi_reply = mpt2sas_base_get_reply_virt_addr(ioc, reply);
 	if (mpi_reply) {
@@ -249,7 +247,6 @@ mpt2sas_ctl_done(struct MPT2SAS_ADAPTER *ioc, u16 smid, u8 msix_index,
 #endif
 	ioc->ctl_cmds.status &= ~MPT2_CMD_PENDING;
 	complete(&ioc->ctl_cmds.done);
-	return 1;
 }
 
 /**
@@ -331,25 +328,22 @@ mpt2sas_ctl_add_to_event_log(struct MPT2SAS_ADAPTER *ioc,
 /**
  * mpt2sas_ctl_event_callback - firmware event handler (called at ISR time)
  * @ioc: per adapter object
- * @msix_index: MSIX table index supplied by the OS
+ * @VF_ID: virtual function id
  * @reply: reply message frame(lower 32bit addr)
  * Context: interrupt.
  *
  * This function merely adds a new work task into ioc->firmware_event_thread.
  * The tasks are worked from _firmware_event_work in user context.
  *
- * Return 1 meaning mf should be freed from _base_interrupt
- *        0 means the mf is freed from this function.
+ * Return nothing.
  */
-u8
-mpt2sas_ctl_event_callback(struct MPT2SAS_ADAPTER *ioc, u8 msix_index,
-	u32 reply)
+void
+mpt2sas_ctl_event_callback(struct MPT2SAS_ADAPTER *ioc, u8 VF_ID, u32 reply)
 {
 	Mpi2EventNotificationReply_t *mpi_reply;
 
 	mpi_reply = mpt2sas_base_get_reply_virt_addr(ioc, reply);
 	mpt2sas_ctl_add_to_event_log(ioc, mpi_reply);
-	return 1;
 }
 
 /**
@@ -513,7 +507,7 @@ _ctl_set_task_mid(struct MPT2SAS_ADAPTER *ioc, struct mpt2_ioctl_command *karg,
 
 	handle = le16_to_cpu(tm_request->DevHandle);
 	spin_lock_irqsave(&ioc->scsi_lookup_lock, flags);
-	for (i = ioc->scsiio_depth; i && !found; i--) {
+	for (i = ioc->request_depth; i && !found; i--) {
 		scmd = ioc->scsi_lookup[i - 1].scmd;
 		if (scmd == NULL || scmd->device == NULL ||
 		    scmd->device->hostdata == NULL)
@@ -620,7 +614,7 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 		printk(MPT2SAS_INFO_FMT "%s: ioc is operational\n",
 		    ioc->name, __func__);
 
-	smid = mpt2sas_base_get_smid_scsiio(ioc, ioc->ctl_cb_idx, NULL);
+	smid = mpt2sas_base_get_smid(ioc, ioc->ctl_cb_idx);
 	if (!smid) {
 		printk(MPT2SAS_ERR_FMT "%s: failed obtaining a smid\n",
 		    ioc->name, __func__);
@@ -635,13 +629,6 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 	ioc->ctl_cmds.smid = smid;
 	data_out_sz = karg.data_out_size;
 	data_in_sz = karg.data_in_size;
-
-	/* Check for overflow and wraparound */
-	if (karg.data_sge_offset * 4 > ioc->request_sz ||
-	    karg.data_sge_offset > (UINT_MAX / 4)) {
-		ret = -EINVAL;
-		goto out;
-	}
 
 	/* copy in request message frame from user */
 	if (copy_from_user(mpi_request, mf, karg.data_sge_offset*4)) {
@@ -750,11 +737,8 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 		    (u32)mpt2sas_base_get_sense_buffer_dma(ioc, smid);
 		priv_sense = mpt2sas_base_get_sense_buffer(ioc, smid);
 		memset(priv_sense, 0, SCSI_SENSE_BUFFERSIZE);
-		if (mpi_request->Function == MPI2_FUNCTION_SCSI_IO_REQUEST)
-			mpt2sas_base_put_smid_scsi_io(ioc, smid,
-			    le16_to_cpu(mpi_request->FunctionDependent1));
-		else
-			mpt2sas_base_put_smid_default(ioc, smid);
+		mpt2sas_base_put_smid_scsi_io(ioc, smid, 0,
+		    le16_to_cpu(mpi_request->FunctionDependent1));
 		break;
 	}
 	case MPI2_FUNCTION_SCSI_TASK_MGMT:
@@ -775,7 +759,8 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 		mutex_lock(&ioc->tm_cmds.mutex);
 		mpt2sas_scsih_set_tm_flag(ioc, le16_to_cpu(
 		    tm_request->DevHandle));
-		mpt2sas_base_put_smid_hi_priority(ioc, smid);
+		mpt2sas_base_put_smid_hi_priority(ioc, smid,
+		    mpi_request->VF_ID);
 		break;
 	}
 	case MPI2_FUNCTION_SMP_PASSTHROUGH:
@@ -796,7 +781,7 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 			ioc->ioc_link_reset_in_progress = 1;
 			ioc->ignore_loginfos = 1;
 		}
-		mpt2sas_base_put_smid_default(ioc, smid);
+		mpt2sas_base_put_smid_default(ioc, smid, mpi_request->VF_ID);
 		break;
 	}
 	case MPI2_FUNCTION_SAS_IO_UNIT_CONTROL:
@@ -810,11 +795,11 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 			ioc->ioc_link_reset_in_progress = 1;
 			ioc->ignore_loginfos = 1;
 		}
-		mpt2sas_base_put_smid_default(ioc, smid);
+		mpt2sas_base_put_smid_default(ioc, smid, mpi_request->VF_ID);
 		break;
 	}
 	default:
-		mpt2sas_base_put_smid_default(ioc, smid);
+		mpt2sas_base_put_smid_default(ioc, smid, mpi_request->VF_ID);
 		break;
 	}
 
@@ -822,7 +807,6 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc,
 		timeout = MPT2_IOCTL_DEFAULT_TIMEOUT;
 	else
 		timeout = karg.timeout;
-	init_completion(&ioc->ctl_cmds.done);
 	timeleft = wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    timeout*HZ);
 	if (mpi_request->Function == MPI2_FUNCTION_SCSI_TASK_MGMT) {
@@ -1387,8 +1371,6 @@ _ctl_diag_register(void __user *arg, enum block_state state)
 	mpi_request->Flags = cpu_to_le32(karg.diagnostic_flags);
 	mpi_request->BufferAddress = cpu_to_le64(request_data_dma);
 	mpi_request->BufferLength = cpu_to_le32(request_data_sz);
-	mpi_request->VF_ID = 0; /* TODO */
-	mpi_request->VP_ID = 0;
 
 	dctlprintk(ioc, printk(MPT2SAS_DEBUG_FMT "%s: diag_buffer(0x%p), "
 	    "dma(0x%llx), sz(%d)\n", ioc->name, __func__, request_data,
@@ -1398,8 +1380,7 @@ _ctl_diag_register(void __user *arg, enum block_state state)
 		mpi_request->ProductSpecific[i] =
 			cpu_to_le32(ioc->product_specific[buffer_type][i]);
 
-	mpt2sas_base_put_smid_default(ioc, smid);
-	init_completion(&ioc->ctl_cmds.done);
+	mpt2sas_base_put_smid_default(ioc, smid, mpi_request->VF_ID);
 	timeleft = wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    MPT2_IOCTL_DEFAULT_TIMEOUT*HZ);
 
@@ -1662,11 +1643,8 @@ _ctl_send_release(struct MPT2SAS_ADAPTER *ioc, u8 buffer_type, u8 *issue_reset)
 
 	mpi_request->Function = MPI2_FUNCTION_DIAG_RELEASE;
 	mpi_request->BufferType = buffer_type;
-	mpi_request->VF_ID = 0; /* TODO */
-	mpi_request->VP_ID = 0;
 
-	mpt2sas_base_put_smid_default(ioc, smid);
-	init_completion(&ioc->ctl_cmds.done);
+	mpt2sas_base_put_smid_default(ioc, smid, mpi_request->VF_ID);
 	timeleft = wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    MPT2_IOCTL_DEFAULT_TIMEOUT*HZ);
 
@@ -1819,7 +1797,7 @@ _ctl_diag_read_buffer(void __user *arg, enum block_state state)
 	Mpi2DiagBufferPostReply_t *mpi_reply;
 	int rc, i;
 	u8 buffer_type;
-	unsigned long timeleft, request_size, copy_size;
+	unsigned long timeleft;
 	u16 smid;
 	u16 ioc_status;
 	u8 issue_reset = 0;
@@ -1855,8 +1833,6 @@ _ctl_diag_read_buffer(void __user *arg, enum block_state state)
 		return -ENOMEM;
 	}
 
-	request_size = ioc->diag_buffer_sz[buffer_type];
-
 	if ((karg.starting_offset % 4) || (karg.bytes_to_read % 4)) {
 		printk(MPT2SAS_ERR_FMT "%s: either the starting_offset "
 		    "or bytes_to_read are not 4 byte aligned\n", ioc->name,
@@ -1864,23 +1840,13 @@ _ctl_diag_read_buffer(void __user *arg, enum block_state state)
 		return -EINVAL;
 	}
 
-	if (karg.starting_offset > request_size)
-		return -EINVAL;
-
 	diag_data = (void *)(request_data + karg.starting_offset);
 	dctlprintk(ioc, printk(MPT2SAS_DEBUG_FMT "%s: diag_buffer(%p), "
 	    "offset(%d), sz(%d)\n", ioc->name, __func__,
 	    diag_data, karg.starting_offset, karg.bytes_to_read));
 
-	/* Truncate data on requests that are too large */
-	if ((diag_data + karg.bytes_to_read < diag_data) ||
-	    (diag_data + karg.bytes_to_read > request_data + request_size))
-		copy_size = request_size - karg.starting_offset;
-	else
-		copy_size = karg.bytes_to_read;
-
 	if (copy_to_user((void __user *)uarg->diagnostic_data,
-	    diag_data, copy_size)) {
+	    diag_data, karg.bytes_to_read)) {
 		printk(MPT2SAS_ERR_FMT "%s: Unable to write "
 		    "mpt_diag_read_buffer_t data @ %p\n", ioc->name,
 		    __func__, diag_data);
@@ -1936,11 +1902,8 @@ _ctl_diag_read_buffer(void __user *arg, enum block_state state)
 	for (i = 0; i < MPT2_PRODUCT_SPECIFIC_DWORDS; i++)
 		mpi_request->ProductSpecific[i] =
 			cpu_to_le32(ioc->product_specific[buffer_type][i]);
-	mpi_request->VF_ID = 0; /* TODO */
-	mpi_request->VP_ID = 0;
 
-	mpt2sas_base_put_smid_default(ioc, smid);
-	init_completion(&ioc->ctl_cmds.done);
+	mpt2sas_base_put_smid_default(ioc, smid, mpi_request->VF_ID);
 	timeleft = wait_for_completion_timeout(&ioc->ctl_cmds.done,
 	    MPT2_IOCTL_DEFAULT_TIMEOUT*HZ);
 
@@ -2106,7 +2069,6 @@ static long
 _ctl_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	long ret;
-
 	lock_kernel();
 	ret = _ctl_ioctl_main(file, cmd, (void __user *)arg);
 	unlock_kernel();
@@ -2181,7 +2143,6 @@ static long
 _ctl_ioctl_compat(struct file *file, unsigned cmd, unsigned long arg)
 {
 	long ret;
-
 	lock_kernel();
 	if (cmd == MPT2COMMAND32)
 		ret = _ctl_compat_mpt_command(file, cmd, arg);

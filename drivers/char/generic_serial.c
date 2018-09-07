@@ -22,7 +22,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/tty.h>
-#include <linux/sched.h>
 #include <linux/serial.h>
 #include <linux/mm.h>
 #include <linux/generic_serial.h>

@@ -166,8 +166,9 @@ static irqreturn_t hpet_interrupt(int irq, void *data)
 		unsigned long m, t;
 
 		t = devp->hd_ireqfreq;
-		m = read_counter(&devp->hd_timer->hpet_compare);
-		write_counter(t + m, &devp->hd_timer->hpet_compare);
+		m = read_counter(&devp->hd_hpet->hpet_mc);
+		write_counter(t + m + devp->hd_hpets->hp_delta,
+			      &devp->hd_timer->hpet_compare);
 	}
 
 	if (devp->hd_flags & HPET_SHARED_IRQ)
@@ -476,21 +477,6 @@ static int hpet_ioctl_ieon(struct hpet_dev *devp)
 	if (irq) {
 		unsigned long irq_flags;
 
-		if (devp->hd_flags & HPET_SHARED_IRQ) {
-			/*
-			 * To prevent the interrupt handler from seeing an
-			 * unwanted interrupt status bit, program the timer
-			 * so that it will not fire in the near future ...
-			 */
-			writel(readl(&timer->hpet_config) & ~Tn_TYPE_CNF_MASK,
-			       &timer->hpet_config);
-			write_counter(read_counter(&hpet->hpet_mc),
-				      &timer->hpet_compare);
-			/* ... and clear any left-over status. */
-			isr = 1 << (devp - devp->hd_hpets->hp_dev);
-			writel(isr, &hpet->hpet_isr);
-		}
-
 		sprintf(devp->hd_name, "hpet%d", (int)(devp - hpetp->hp_dev));
 		irq_flags = devp->hd_flags & HPET_SHARED_IRQ
 						? IRQF_SHARED : IRQF_DISABLED;
@@ -518,25 +504,21 @@ static int hpet_ioctl_ieon(struct hpet_dev *devp)
 	g = v | Tn_32MODE_CNF_MASK | Tn_INT_ENB_CNF_MASK;
 
 	if (devp->hd_flags & HPET_PERIODIC) {
+		write_counter(t, &timer->hpet_compare);
 		g |= Tn_TYPE_CNF_MASK;
-		v |= Tn_TYPE_CNF_MASK | Tn_VAL_SET_CNF_MASK;
+		v |= Tn_TYPE_CNF_MASK;
+		writeq(v, &timer->hpet_config);
+		v |= Tn_VAL_SET_CNF_MASK;
 		writeq(v, &timer->hpet_config);
 		local_irq_save(flags);
 
-		/*
-		 * NOTE: First we modify the hidden accumulator
+		/* NOTE:  what we modify here is a hidden accumulator
 		 * register supported by periodic-capable comparators.
 		 * We never want to modify the (single) counter; that
-		 * would affect all the comparators. The value written
-		 * is the counter value when the first interrupt is due.
+		 * would affect all the comparators.
 		 */
 		m = read_counter(&hpet->hpet_mc);
 		write_counter(t + m + hpetp->hp_delta, &timer->hpet_compare);
-		/*
-		 * Then we modify the comparator, indicating the period
-		 * for subsequent interrupt.
-		 */
-		write_counter(t, &timer->hpet_compare);
 	} else {
 		local_irq_save(flags);
 		m = read_counter(&hpet->hpet_mc);
@@ -985,8 +967,6 @@ static int hpet_acpi_add(struct acpi_device *device)
 		return -ENODEV;
 
 	if (!data.hd_address || !data.hd_nirqs) {
-		if (data.hd_address)
-			iounmap(data.hd_address);
 		printk("%s: no address or irqs in _CRS\n", __func__);
 		return -ENODEV;
 	}

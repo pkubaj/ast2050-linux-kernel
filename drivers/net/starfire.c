@@ -595,7 +595,7 @@ static int	netdev_open(struct net_device *dev);
 static void	check_duplex(struct net_device *dev);
 static void	tx_timeout(struct net_device *dev);
 static void	init_ring(struct net_device *dev);
-static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev);
+static int	start_tx(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t intr_handler(int irq, void *dev_instance);
 static void	netdev_error(struct net_device *dev, int intr_status);
 static int	__netdev_rx(struct net_device *dev, int *quota);
@@ -1063,7 +1063,7 @@ static int netdev_open(struct net_device *dev)
 	if (retval) {
 		printk(KERN_ERR "starfire: Failed to load firmware \"%s\"\n",
 		       FIRMWARE_RX);
-		goto out_init;
+		return retval;
 	}
 	if (fw_rx->size % 4) {
 		printk(KERN_ERR "starfire: bogus length %zu in \"%s\"\n",
@@ -1108,9 +1108,6 @@ out_tx:
 	release_firmware(fw_tx);
 out_rx:
 	release_firmware(fw_rx);
-out_init:
-	if (retval)
-		netdev_close(dev);
 	return retval;
 }
 
@@ -1226,7 +1223,7 @@ static void init_ring(struct net_device *dev)
 }
 
 
-static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
+static int start_tx(struct sk_buff *skb, struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	unsigned int entry;
@@ -1314,7 +1311,7 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 
 	dev->trans_start = jiffies;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 

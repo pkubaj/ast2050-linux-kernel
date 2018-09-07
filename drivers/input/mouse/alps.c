@@ -62,8 +62,6 @@ static const struct alps_model_info alps_model_data[] = {
 	{ { 0x62, 0x02, 0x14 }, 0xcf, 0xcf,
 		ALPS_PASS | ALPS_DUALPOINT | ALPS_PS2_INTERLEAVED },
 	{ { 0x73, 0x02, 0x50 }, 0xcf, 0xcf, ALPS_FW_BK_1 },		  /* Dell Vostro 1400 */
-	{ { 0x52, 0x01, 0x14 }, 0xff, 0xff,
-		ALPS_PASS | ALPS_DUALPOINT | ALPS_PS2_INTERLEAVED },	  /* Toshiba Tecra A11-11L */
 };
 
 /*
@@ -480,7 +478,7 @@ static const struct alps_model_info *alps_get_model(struct psmouse *psmouse, int
  * subsequent commands. It looks like glidepad is behind stickpointer,
  * I'd thought it would be other way around...
  */
-static int alps_passthrough_mode(struct psmouse *psmouse, bool enable)
+static int alps_passthrough_mode(struct psmouse *psmouse, int enable)
 {
 	struct ps2dev *ps2dev = &psmouse->ps2dev;
 	int cmd = enable ? PSMOUSE_CMD_SETSCALE21 : PSMOUSE_CMD_SETSCALE11;
@@ -568,16 +566,16 @@ static int alps_poll(struct psmouse *psmouse)
 {
 	struct alps_data *priv = psmouse->private;
 	unsigned char buf[6];
-	bool poll_failed;
+	int poll_failed;
 
 	if (priv->i->flags & ALPS_PASS)
-		alps_passthrough_mode(psmouse, true);
+		alps_passthrough_mode(psmouse, 1);
 
 	poll_failed = ps2_command(&psmouse->ps2dev, buf,
 				  PSMOUSE_CMD_POLL | (psmouse->pktsize << 8)) < 0;
 
 	if (priv->i->flags & ALPS_PASS)
-		alps_passthrough_mode(psmouse, false);
+		alps_passthrough_mode(psmouse, 0);
 
 	if (poll_failed || (buf[0] & priv->i->mask0) != priv->i->byte0)
 		return -1;
@@ -602,12 +600,10 @@ static int alps_hw_init(struct psmouse *psmouse, int *version)
 	if (!priv->i)
 		return -1;
 
-	if ((priv->i->flags & ALPS_PASS) &&
-	    alps_passthrough_mode(psmouse, true)) {
+	if ((priv->i->flags & ALPS_PASS) && alps_passthrough_mode(psmouse, 1))
 		return -1;
-	}
 
-	if (alps_tap_mode(psmouse, true)) {
+	if (alps_tap_mode(psmouse, 1)) {
 		printk(KERN_WARNING "alps.c: Failed to enable hardware tapping\n");
 		return -1;
 	}
@@ -617,10 +613,8 @@ static int alps_hw_init(struct psmouse *psmouse, int *version)
 		return -1;
 	}
 
-	if ((priv->i->flags & ALPS_PASS) &&
-	    alps_passthrough_mode(psmouse, false)) {
+	if ((priv->i->flags & ALPS_PASS) && alps_passthrough_mode(psmouse, 0))
 		return -1;
-	}
 
 	/* ALPS needs stream mode, otherwise it won't report any data */
 	if (ps2_command(&psmouse->ps2dev, NULL, PSMOUSE_CMD_SETSTREAM)) {
@@ -727,7 +721,7 @@ init_fail:
 	return -1;
 }
 
-int alps_detect(struct psmouse *psmouse, bool set_properties)
+int alps_detect(struct psmouse *psmouse, int set_properties)
 {
 	int version;
 	const struct alps_model_info *model;

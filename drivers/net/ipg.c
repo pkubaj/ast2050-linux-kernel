@@ -88,6 +88,7 @@ static const char *ipg_brand_name[] = {
 	"Sundance Technology ST2021 based NIC",
 	"Tamarack Microelectronics TC9020/9021 based NIC",
 	"Tamarack Microelectronics TC9020/9021 based NIC",
+	"D-Link NIC",
 	"D-Link NIC IP1000A"
 };
 
@@ -96,7 +97,8 @@ static struct pci_device_id ipg_pci_tbl[] __devinitdata = {
 	{ PCI_VDEVICE(SUNDANCE,	0x2021), 1 },
 	{ PCI_VDEVICE(SUNDANCE,	0x1021), 2 },
 	{ PCI_VDEVICE(DLINK,	0x9021), 3 },
-	{ PCI_VDEVICE(DLINK,	0x4020), 4 },
+	{ PCI_VDEVICE(DLINK,	0x4000), 4 },
+	{ PCI_VDEVICE(DLINK,	0x4020), 5 },
 	{ 0, }
 };
 
@@ -1856,8 +1858,7 @@ static int ipg_nic_stop(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t ipg_nic_hard_start_xmit(struct sk_buff *skb,
-					   struct net_device *dev)
+static int ipg_nic_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ipg_nic_private *sp = netdev_priv(dev);
 	void __iomem *ioaddr = sp->ioaddr;
@@ -2184,7 +2185,7 @@ static int ipg_nway_reset(struct net_device *dev)
 	return rc;
 }
 
-static const struct ethtool_ops ipg_ethtool_ops = {
+static struct ethtool_ops ipg_ethtool_ops = {
 	.get_settings = ipg_get_settings,
 	.set_settings = ipg_set_settings,
 	.nway_reset   = ipg_nway_reset,

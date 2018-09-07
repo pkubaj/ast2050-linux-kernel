@@ -56,7 +56,16 @@ inline void __do_tlb_refill(unsigned long address,
 	/*
 	 * Set PTEH register
 	 */
-	pteh = neff_sign_extend(address & MMU_VPN_MASK);
+	pteh = address & MMU_VPN_MASK;
+
+	/* Sign extend based on neff. */
+#if (NEFF == 32)
+	/* Faster sign extension */
+	pteh = (unsigned long long)(signed long long)(signed long)pteh;
+#else
+	/* General case */
+	pteh = (pteh & NEFF_SIGN) ? (pteh | NEFF_MASK) : pteh;
+#endif
 
 	/* Set the ASID. */
 	pteh |= get_asid() << PTEH_ASID_SHIFT;

@@ -37,7 +37,7 @@ typedef __u16 __bitwise __hc16;
 #define __hc16	__le16
 #endif
 
-/* statistics can be kept for tuning/monitoring */
+/* statistics can be kept for for tuning/monitoring */
 struct ehci_stats {
 	/* irq usage */
 	unsigned long		normal;
@@ -74,7 +74,6 @@ struct ehci_hcd {			/* one per controller */
 	/* async schedule support */
 	struct ehci_qh		*async;
 	struct ehci_qh		*reclaim;
-	struct ehci_qh		*qh_scan_next;
 	unsigned		scanning : 1;
 
 	/* periodic schedule support */
@@ -88,9 +87,8 @@ struct ehci_hcd {			/* one per controller */
 	int			next_uframe;	/* scan periodic, start here */
 	unsigned		periodic_sched;	/* periodic activity count */
 
-	/* list of itds & sitds completed while clock_frame was still active */
+	/* list of itds completed while clock_frame was still active */
 	struct list_head	cached_itd_list;
-	struct list_head	cached_sitd_list;
 	unsigned		clock_frame;
 
 	/* per root hub port */
@@ -117,6 +115,7 @@ struct ehci_hcd {			/* one per controller */
 	struct timer_list	iaa_watchdog;
 	struct timer_list	watchdog;
 	unsigned long		actions;
+	unsigned		stamp;
 	unsigned		random_frame;
 	unsigned long		next_statechange;
 	ktime_t			last_periodic_enable;
@@ -128,9 +127,7 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		big_endian_mmio:1;
 	unsigned		big_endian_desc:1;
 	unsigned		has_amcc_usb23:1;
-	unsigned		need_io_watchdog:1;
 	unsigned		broken_periodic:1;
-	unsigned		amd_l1_fix:1;
 
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
@@ -140,7 +137,6 @@ struct ehci_hcd {			/* one per controller */
 	#define OHCI_HCCTRL_OFFSET      0x4
 	#define OHCI_HCCTRL_LEN         0x4
 	__hc32			*ohci_hcctrl_reg;
-	unsigned		has_hostpc:1;
 
 	u8			sbrn;		/* packed release number */
 
@@ -197,7 +193,7 @@ timer_action_done (struct ehci_hcd *ehci, enum ehci_timer_action action)
 	clear_bit (action, &ehci->actions);
 }
 
-static void free_cached_lists(struct ehci_hcd *ehci);
+static void free_cached_itd_list(struct ehci_hcd *ehci);
 
 /*-------------------------------------------------------------------------*/
 
@@ -304,8 +300,8 @@ union ehci_shadow {
  * These appear in both the async and (for interrupt) periodic schedules.
  */
 
-/* first part defined by EHCI spec */
-struct ehci_qh_hw {
+struct ehci_qh {
+	/* first part defined by EHCI spec */
 	__hc32			hw_next;	/* see EHCI 3.6.1 */
 	__hc32			hw_info1;       /* see EHCI 3.6.2 */
 #define	QH_HEAD		0x00008000
@@ -323,10 +319,7 @@ struct ehci_qh_hw {
 	__hc32			hw_token;
 	__hc32			hw_buf [5];
 	__hc32			hw_buf_hi [5];
-} __attribute__ ((aligned(32)));
 
-struct ehci_qh {
-	struct ehci_qh_hw	*hw;
 	/* the rest is HCD-private */
 	dma_addr_t		qh_dma;		/* address of qh */
 	union ehci_shadow	qh_next;	/* ptr to qh; or periodic */
@@ -335,7 +328,6 @@ struct ehci_qh {
 	struct ehci_qh		*reclaim;	/* next to reclaim */
 
 	struct ehci_hcd		*ehci;
-	unsigned long		unlink_time;
 
 	/*
 	 * Do NOT use atomic operations for QH refcounting. On some CPUs
@@ -346,7 +338,6 @@ struct ehci_qh {
 	u32			refcount;
 	unsigned		stamp;
 
-	u8			needs_rescan;	/* Dequeue during giveback */
 	u8			qh_state;
 #define	QH_STATE_LINKED		1		/* HC sees this */
 #define	QH_STATE_UNLINK		2		/* HC may still see this */
@@ -367,9 +358,8 @@ struct ehci_qh {
 #define NO_FRAME ((unsigned short)~0)			/* pick new start */
 
 	struct usb_device	*dev;		/* access to TT */
-	unsigned		is_out:1;	/* bulk or intr OUT */
 	unsigned		clearing_tt:1;	/* Clear-TT-Buf in progress */
-};
+} __attribute__ ((aligned (32)));
 
 /*-------------------------------------------------------------------------*/
 
@@ -398,8 +388,9 @@ struct ehci_iso_sched {
  * acts like a qh would, if EHCI had them for ISO.
  */
 struct ehci_iso_stream {
-	/* first field matches ehci_hq, but is NULL */
-	struct ehci_qh_hw	*hw;
+	/* first two fields match QH, but info1 == 0 */
+	__hc32			hw_next;
+	__hc32			hw_info1;
 
 	u32			refcount;
 	u8			bEndpointAddress;
@@ -555,7 +546,7 @@ static inline unsigned int
 ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 {
 	if (ehci_is_TDI(ehci)) {
-		switch ((portsc >> (ehci->has_hostpc ? 25 : 26)) & 3) {
+		switch ((portsc>>26)&3) {
 		case 0:
 			return 0;
 		case 1:

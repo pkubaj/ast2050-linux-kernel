@@ -99,7 +99,7 @@ static int isight_decode(struct uvc_video_queue *queue, struct uvc_buffer *buf,
 	return 0;
 }
 
-void uvc_video_decode_isight(struct urb *urb, struct uvc_streaming *stream,
+void uvc_video_decode_isight(struct urb *urb, struct uvc_video_device *video,
 		struct uvc_buffer *buf)
 {
 	int ret, i;
@@ -120,7 +120,7 @@ void uvc_video_decode_isight(struct urb *urb, struct uvc_streaming *stream,
 		 * processes the data of the first payload of the new frame.
 		 */
 		do {
-			ret = isight_decode(&stream->queue, buf,
+			ret = isight_decode(&video->queue, buf,
 					urb->transfer_buffer +
 					urb->iso_frame_desc[i].offset,
 					urb->iso_frame_desc[i].actual_length);
@@ -130,8 +130,7 @@ void uvc_video_decode_isight(struct urb *urb, struct uvc_streaming *stream,
 
 			if (buf->state == UVC_BUF_STATE_DONE ||
 			    buf->state == UVC_BUF_STATE_ERROR)
-				buf = uvc_queue_next_buffer(&stream->queue,
-							buf);
+				buf = uvc_queue_next_buffer(&video->queue, buf);
 		} while (ret == -EAGAIN);
 	}
 }

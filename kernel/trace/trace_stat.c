@@ -49,8 +49,7 @@ static struct dentry		*stat_dir;
  * but it will at least advance closer to the next one
  * to be released.
  */
-static struct rb_node *release_next(struct tracer_stat *ts,
-				    struct rb_node *node)
+static struct rb_node *release_next(struct rb_node *node)
 {
 	struct stat_node *snode;
 	struct rb_node *parent = rb_parent(node);
@@ -68,8 +67,6 @@ static struct rb_node *release_next(struct tracer_stat *ts,
 			parent->rb_right = NULL;
 
 		snode = container_of(node, struct stat_node, node);
-		if (ts->stat_release)
-			ts->stat_release(snode->stat);
 		kfree(snode);
 
 		return parent;
@@ -81,7 +78,7 @@ static void __reset_stat_session(struct stat_session *session)
 	struct rb_node *node = session->stat_root.rb_node;
 
 	while (node)
-		node = release_next(session->ts, node);
+		node = release_next(node);
 
 	session->stat_root = RB_ROOT;
 }
@@ -203,21 +200,17 @@ static void *stat_seq_start(struct seq_file *s, loff_t *pos)
 {
 	struct stat_session *session = s->private;
 	struct rb_node *node;
-	int n = *pos;
 	int i;
 
 	/* Prevent from tracer switch or rbtree modification */
 	mutex_lock(&session->stat_mutex);
 
 	/* If we are in the beginning of the file, print the headers */
-	if (session->ts->stat_headers) {
-		if (n == 0)
-			return SEQ_START_TOKEN;
-		n--;
-	}
+	if (!*pos && session->ts->stat_headers)
+		return SEQ_START_TOKEN;
 
 	node = rb_first(&session->stat_root);
-	for (i = 0; node && i < n; i++)
+	for (i = 0; node && i < *pos; i++)
 		node = rb_next(node);
 
 	return node;

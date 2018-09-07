@@ -25,7 +25,7 @@
 static void sp_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int rsize)
 {
-	if (rsize >= 112 && rdesc[104] == 0x26 && rdesc[105] == 0x80 &&
+	if (rsize >= 107 && rdesc[104] == 0x26 && rdesc[105] == 0x80 &&
 			rdesc[106] == 0x03) {
 		dev_info(&hdev->dev, "fixing up Sunplus Wireless Desktop "
 				"report descriptor\n");
@@ -65,12 +65,12 @@ static struct hid_driver sp_driver = {
 	.input_mapping = sp_input_mapping,
 };
 
-static int __init sp_init(void)
+static int sp_init(void)
 {
 	return hid_register_driver(&sp_driver);
 }
 
-static void __exit sp_exit(void)
+static void sp_exit(void)
 {
 	hid_unregister_driver(&sp_driver);
 }

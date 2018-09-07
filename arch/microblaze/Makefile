@@ -37,12 +37,12 @@ CPUFLAGS-$(CONFIG_XILINX_MICROBLAZE0_USE_PCMP_INSTR) += -mxl-pattern-compare
 CPUFLAGS-1 += $(call cc-option,-mcpu=v$(CPU_VER))
 
 # r31 holds current when in kernel mode
-KBUILD_CFLAGS += -ffixed-r31 $(CPUFLAGS-1) $(CPUFLAGS-2)
+KBUILD_KERNEL += -ffixed-r31 $(CPUFLAGS-1) $(CPUFLAGS-2)
 
 LDFLAGS		:=
 LDFLAGS_vmlinux	:=
 
-LIBGCC := $(shell $(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
+LIBGCC := $(shell $(CC) $(KBUILD_KERNEL) -print-libgcc-file-name)
 
 head-y := arch/microblaze/kernel/head.o
 libs-y += arch/microblaze/lib/
@@ -53,45 +53,22 @@ core-y += arch/microblaze/platform/
 
 boot := arch/microblaze/boot
 
-# Are we making a simpleImage.<boardname> target? If so, crack out the boardname
-DTB:=$(subst simpleImage.,,$(filter simpleImage.%, $(MAKECMDGOALS)))
-
-ifneq ($(DTB),)
-	core-y	+= $(boot)/
-endif
-
 # defines filename extension depending memory management type
 ifeq ($(CONFIG_MMU),)
 MMU := -nommu
 endif
 
-export MMU DTB
+export MMU
 
 all: linux.bin
-
-# With make 3.82 we cannot mix normal and wildcard targets
-BOOT_TARGETS1 = linux.bin linux.bin.gz
-BOOT_TARGETS2 = simpleImage.%
 
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
 
-$(BOOT_TARGETS1): vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
-$(BOOT_TARGETS2): vmlinux
+linux.bin linux.bin.gz: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 define archhelp
-  echo '* linux.bin    - Create raw binary'
-  echo '  linux.bin.gz - Create compressed raw binary'
-  echo '  simpleImage.<dt> - ELF image with $(arch)/boot/dts/<dt>.dts linked in'
-  echo '                   - stripped elf with fdt blob
-  echo '  simpleImage.<dt>.unstrip - full ELF image with fdt blob'
-  echo '  *_defconfig      - Select default config from arch/microblaze/configs'
-  echo ''
-  echo '  Targets with <dt> embed a device tree blob inside the image'
-  echo '  These targets support board with firmware that does not'
-  echo '  support passing a device tree directly. Replace <dt> with the'
-  echo '  name of a dts file from the arch/microblaze/boot/dts/ directory'
-  echo '  (minus the .dts extension).'
+  echo  '* linux.bin    - Create raw binary'
+  echo  '  linux.bin.gz - Create compressed raw binary'
 endef

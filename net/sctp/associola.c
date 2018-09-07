@@ -112,7 +112,6 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 	asoc->cookie_life.tv_usec = (sp->assocparams.sasoc_cookie_life % 1000)
 					* 1000;
 	asoc->frag_point = 0;
-	asoc->user_frag = sp->user_frag;
 
 	/* Set the association max_retrans and RTO values from the
 	 * socket values.
@@ -203,7 +202,6 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 	asoc->a_rwnd = asoc->rwnd;
 
 	asoc->rwnd_over = 0;
-	asoc->rwnd_press = 0;
 
 	/* Use my own max window until I learn something better.  */
 	asoc->peer.rwnd = SCTP_DEFAULT_MAXWINDOW;
@@ -380,7 +378,7 @@ void sctp_association_free(struct sctp_association *asoc)
 	/* Only real associations count against the endpoint, so
 	 * don't bother for if this is a temporary association.
 	 */
-	if (!list_empty(&asoc->asocs)) {
+	if (!asoc->temp) {
 		list_del(&asoc->asocs);
 
 		/* Decrement the backlog value for a TCP-style listening
@@ -584,33 +582,6 @@ void sctp_assoc_rm_peer(struct sctp_association *asoc,
 	    asoc->addip_last_asconf->transport == peer)
 		asoc->addip_last_asconf->transport = NULL;
 
-	/* If we have something on the transmitted list, we have to
-	 * save it off.  The best place is the active path.
-	 */
-	if (!list_empty(&peer->transmitted)) {
-		struct sctp_transport *active = asoc->peer.active_path;
-		struct sctp_chunk *ch;
-
-		/* Reset the transport of each chunk on this list */
-		list_for_each_entry(ch, &peer->transmitted,
-					transmitted_list) {
-			ch->transport = NULL;
-			ch->rtt_in_progress = 0;
-		}
-
-		list_splice_tail_init(&peer->transmitted,
-					&active->transmitted);
-
-		/* Start a T3 timer here in case it wasn't running so
-		 * that these migrated packets have a chance to get
-		 * retrnasmitted.
-		 */
-		if (!timer_pending(&active->T3_rtx_timer))
-			if (!mod_timer(&active->T3_rtx_timer,
-					jiffies + active->rto))
-				sctp_transport_hold(active);
-	}
-
 	asoc->peer.transport_count--;
 
 	sctp_transport_free(peer);
@@ -680,15 +651,13 @@ struct sctp_transport *sctp_assoc_add_peer(struct sctp_association *asoc,
 	 */
 	peer->param_flags = asoc->param_flags;
 
-	sctp_transport_route(peer, NULL, sp);
-
 	/* Initialize the pmtu of the transport. */
-	if (peer->param_flags & SPP_PMTUD_DISABLE) {
-		if (asoc->pathmtu)
-			peer->pathmtu = asoc->pathmtu;
-		else
-			peer->pathmtu = SCTP_DEFAULT_MAXSEGMENT;
-	}
+	if (peer->param_flags & SPP_PMTUD_ENABLE)
+		sctp_transport_pmtu(peer);
+	else if (asoc->pathmtu)
+		peer->pathmtu = asoc->pathmtu;
+	else
+		peer->pathmtu = SCTP_DEFAULT_MAXSEGMENT;
 
 	/* If this is the first transport addr on this association,
 	 * initialize the association PMTU to the peer's PMTU.
@@ -704,7 +673,7 @@ struct sctp_transport *sctp_assoc_add_peer(struct sctp_association *asoc,
 			  "%d\n", asoc, asoc->pathmtu);
 	peer->pmtu_pending = 0;
 
-	asoc->frag_point = sctp_frag_point(asoc, asoc->pathmtu);
+	asoc->frag_point = sctp_frag_point(sp, asoc->pathmtu);
 
 	/* The asoc->peer.port might not be meaningful yet, but
 	 * initialize the packet structure anyway.
@@ -824,7 +793,6 @@ void sctp_assoc_control_transport(struct sctp_association *asoc,
 	struct sctp_ulpevent *event;
 	struct sockaddr_storage addr;
 	int spc_state = 0;
-	bool ulp_notify = true;
 
 	/* Record the transition on the transport.  */
 	switch (command) {
@@ -842,17 +810,11 @@ void sctp_assoc_control_transport(struct sctp_association *asoc,
 		break;
 
 	case SCTP_TRANSPORT_DOWN:
-		/* If the transport was never confirmed, do not transition it
-		 * to inactive state.  Also, release the cached route since
-		 * there may be a better route next time.
+		/* if the transort was never confirmed, do not transition it
+		 * to inactive state.
 		 */
 		if (transport->state != SCTP_UNCONFIRMED)
 			transport->state = SCTP_INACTIVE;
-		else {
-			dst_release(transport->dst);
-			transport->dst = NULL;
-			ulp_notify = false;
-		}
 
 		spc_state = SCTP_ADDR_UNREACHABLE;
 		break;
@@ -864,14 +826,12 @@ void sctp_assoc_control_transport(struct sctp_association *asoc,
 	/* Generate and send a SCTP_PEER_ADDR_CHANGE notification to the
 	 * user.
 	 */
-	if (ulp_notify) {
-		memset(&addr, 0, sizeof(struct sockaddr_storage));
-		memcpy(&addr, &transport->ipaddr, transport->af_specific->sockaddr_len);
-		event = sctp_ulpevent_make_peer_addr_change(asoc, &addr,
+	memset(&addr, 0, sizeof(struct sockaddr_storage));
+	memcpy(&addr, &transport->ipaddr, transport->af_specific->sockaddr_len);
+	event = sctp_ulpevent_make_peer_addr_change(asoc, &addr,
 				0, spc_state, error, GFP_ATOMIC);
-		if (event)
-			sctp_ulpq_tail_event(&asoc->ulpq, event);
-	}
+	if (event)
+		sctp_ulpq_tail_event(&asoc->ulpq, event);
 
 	/* Select new active and retran paths. */
 
@@ -1178,7 +1138,6 @@ void sctp_assoc_update(struct sctp_association *asoc,
 	asoc->c = new->c;
 	asoc->peer.rwnd = new->peer.rwnd;
 	asoc->peer.sack_needed = new->peer.sack_needed;
-	asoc->peer.auth_capable = new->peer.auth_capable;
 	asoc->peer.i = new->peer.i;
 	sctp_tsnmap_init(&asoc->peer.tsn_map, SCTP_TSN_MAP_INITIAL,
 			 asoc->peer.i.initial_tsn, GFP_ATOMIC);
@@ -1260,6 +1219,7 @@ void sctp_assoc_update(struct sctp_association *asoc,
 	asoc->peer.peer_hmacs = new->peer.peer_hmacs;
 	new->peer.peer_hmacs = NULL;
 
+	sctp_auth_key_put(asoc->asoc_shared_key);
 	sctp_auth_asoc_init_active_key(asoc, GFP_ATOMIC);
 }
 
@@ -1364,8 +1324,9 @@ void sctp_assoc_sync_pmtu(struct sctp_association *asoc)
 	}
 
 	if (pmtu) {
+		struct sctp_sock *sp = sctp_sk(asoc->base.sk);
 		asoc->pathmtu = pmtu;
-		asoc->frag_point = sctp_frag_point(asoc, pmtu);
+		asoc->frag_point = sctp_frag_point(sp, pmtu);
 	}
 
 	SCTP_DEBUG_PRINTK("%s: asoc:%p, pmtu:%d, frag_point:%d\n",
@@ -1408,17 +1369,6 @@ void sctp_assoc_rwnd_increase(struct sctp_association *asoc, unsigned len)
 		asoc->rwnd += len;
 	}
 
-	/* If we had window pressure, start recovering it
-	 * once our rwnd had reached the accumulated pressure
-	 * threshold.  The idea is to recover slowly, but up
-	 * to the initial advertised window.
-	 */
-	if (asoc->rwnd_press && asoc->rwnd >= asoc->rwnd_press) {
-		int change = min(asoc->pathmtu, asoc->rwnd_press);
-		asoc->rwnd += change;
-		asoc->rwnd_press -= change;
-	}
-
 	SCTP_DEBUG_PRINTK("%s: asoc %p rwnd increased by %d to (%u, %u) "
 			  "- %u\n", __func__, asoc, len, asoc->rwnd,
 			  asoc->rwnd_over, asoc->a_rwnd);
@@ -1451,51 +1401,32 @@ void sctp_assoc_rwnd_increase(struct sctp_association *asoc, unsigned len)
 /* Decrease asoc's rwnd by len. */
 void sctp_assoc_rwnd_decrease(struct sctp_association *asoc, unsigned len)
 {
-	int rx_count;
-	int over = 0;
-
 	SCTP_ASSERT(asoc->rwnd, "rwnd zero", return);
 	SCTP_ASSERT(!asoc->rwnd_over, "rwnd_over not zero", return);
-
-	if (asoc->ep->rcvbuf_policy)
-		rx_count = atomic_read(&asoc->rmem_alloc);
-	else
-		rx_count = atomic_read(&asoc->base.sk->sk_rmem_alloc);
-
-	/* If we've reached or overflowed our receive buffer, announce
-	 * a 0 rwnd if rwnd would still be positive.  Store the
-	 * the pottential pressure overflow so that the window can be restored
-	 * back to original value.
-	 */
-	if (rx_count >= asoc->base.sk->sk_rcvbuf)
-		over = 1;
-
 	if (asoc->rwnd >= len) {
 		asoc->rwnd -= len;
-		if (over) {
-			asoc->rwnd_press = asoc->rwnd;
-			asoc->rwnd = 0;
-		}
 	} else {
 		asoc->rwnd_over = len - asoc->rwnd;
 		asoc->rwnd = 0;
 	}
-	SCTP_DEBUG_PRINTK("%s: asoc %p rwnd decreased by %d to (%u, %u, %u)\n",
+	SCTP_DEBUG_PRINTK("%s: asoc %p rwnd decreased by %d to (%u, %u)\n",
 			  __func__, asoc, len, asoc->rwnd,
-			  asoc->rwnd_over, asoc->rwnd_press);
+			  asoc->rwnd_over);
 }
 
 /* Build the bind address list for the association based on info from the
  * local endpoint and the remote peer.
  */
 int sctp_assoc_set_bind_addr_from_ep(struct sctp_association *asoc,
-				     sctp_scope_t scope, gfp_t gfp)
+				     gfp_t gfp)
 {
+	sctp_scope_t scope;
 	int flags;
 
 	/* Use scoping rules to determine the subset of addresses from
 	 * the endpoint.
 	 */
+	scope = sctp_scope(&asoc->peer.active_path->ipaddr);
 	flags = (PF_INET6 == asoc->base.sk->sk_family) ? SCTP_ADDR6_ALLOWED : 0;
 	if (asoc->peer.ipv4_address)
 		flags |= SCTP_ADDR4_PEERSUPP;
@@ -1604,8 +1535,6 @@ struct sctp_chunk *sctp_assoc_lookup_asconf_ack(
 	 * ack chunk whose serial number matches that of the request.
 	 */
 	list_for_each_entry(ack, &asoc->asconf_ack_list, transmitted_list) {
-		if (sctp_chunk_pending(ack))
-			continue;
 		if (ack->subh.addip_hdr->serial == serial) {
 			sctp_chunk_hold(ack);
 			return ack;

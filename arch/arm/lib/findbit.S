@@ -25,10 +25,7 @@ ENTRY(_find_first_zero_bit_le)
 		teq	r1, #0	
 		beq	3f
 		mov	r2, #0
-1:
- ARM(		ldrb	r3, [r0, r2, lsr #3]	)
- THUMB(		lsr	r3, r2, #3		)
- THUMB(		ldrb	r3, [r0, r3]		)
+1:		ldrb	r3, [r0, r2, lsr #3]
 		eors	r3, r3, #0xff		@ invert bits
 		bne	.L_found		@ any now set - found zero bit
 		add	r2, r2, #8		@ next bit pointer
@@ -47,9 +44,7 @@ ENTRY(_find_next_zero_bit_le)
 		beq	3b
 		ands	ip, r2, #7
 		beq	1b			@ If new byte, goto old routine
- ARM(		ldrb	r3, [r0, r2, lsr #3]	)
- THUMB(		lsr	r3, r2, #3		)
- THUMB(		ldrb	r3, [r0, r3]		)
+		ldrb	r3, [r0, r2, lsr #3]
 		eor	r3, r3, #0xff		@ now looking for a 1 bit
 		movs	r3, r3, lsr ip		@ shift off unused bits
 		bne	.L_found
@@ -66,10 +61,7 @@ ENTRY(_find_first_bit_le)
 		teq	r1, #0	
 		beq	3f
 		mov	r2, #0
-1:
- ARM(		ldrb	r3, [r0, r2, lsr #3]	)
- THUMB(		lsr	r3, r2, #3		)
- THUMB(		ldrb	r3, [r0, r3]		)
+1:		ldrb	r3, [r0, r2, lsr #3]
 		movs	r3, r3
 		bne	.L_found		@ any now set - found zero bit
 		add	r2, r2, #8		@ next bit pointer
@@ -88,9 +80,7 @@ ENTRY(_find_next_bit_le)
 		beq	3b
 		ands	ip, r2, #7
 		beq	1b			@ If new byte, goto old routine
- ARM(		ldrb	r3, [r0, r2, lsr #3]	)
- THUMB(		lsr	r3, r2, #3		)
- THUMB(		ldrb	r3, [r0, r3]		)
+		ldrb	r3, [r0, r2, lsr #3]
 		movs	r3, r3, lsr ip		@ shift off unused bits
 		bne	.L_found
 		orr	r2, r2, #7		@ if zero, then no bits here
@@ -105,9 +95,7 @@ ENTRY(_find_first_zero_bit_be)
 		beq	3f
 		mov	r2, #0
 1:		eor	r3, r2, #0x18		@ big endian byte ordering
- ARM(		ldrb	r3, [r0, r3, lsr #3]	)
- THUMB(		lsr	r3, #3			)
- THUMB(		ldrb	r3, [r0, r3]		)
+		ldrb	r3, [r0, r3, lsr #3]
 		eors	r3, r3, #0xff		@ invert bits
 		bne	.L_found		@ any now set - found zero bit
 		add	r2, r2, #8		@ next bit pointer
@@ -123,9 +111,7 @@ ENTRY(_find_next_zero_bit_be)
 		ands	ip, r2, #7
 		beq	1b			@ If new byte, goto old routine
 		eor	r3, r2, #0x18		@ big endian byte ordering
- ARM(		ldrb	r3, [r0, r3, lsr #3]	)
- THUMB(		lsr	r3, #3			)
- THUMB(		ldrb	r3, [r0, r3]		)
+		ldrb	r3, [r0, r3, lsr #3]
 		eor	r3, r3, #0xff		@ now looking for a 1 bit
 		movs	r3, r3, lsr ip		@ shift off unused bits
 		bne	.L_found
@@ -139,9 +125,7 @@ ENTRY(_find_first_bit_be)
 		beq	3f
 		mov	r2, #0
 1:		eor	r3, r2, #0x18		@ big endian byte ordering
- ARM(		ldrb	r3, [r0, r3, lsr #3]	)
- THUMB(		lsr	r3, #3			)
- THUMB(		ldrb	r3, [r0, r3]		)
+		ldrb	r3, [r0, r3, lsr #3]
 		movs	r3, r3
 		bne	.L_found		@ any now set - found zero bit
 		add	r2, r2, #8		@ next bit pointer
@@ -157,9 +141,7 @@ ENTRY(_find_next_bit_be)
 		ands	ip, r2, #7
 		beq	1b			@ If new byte, goto old routine
 		eor	r3, r2, #0x18		@ big endian byte ordering
- ARM(		ldrb	r3, [r0, r3, lsr #3]	)
- THUMB(		lsr	r3, #3			)
- THUMB(		ldrb	r3, [r0, r3]		)
+		ldrb	r3, [r0, r3, lsr #3]
 		movs	r3, r3, lsr ip		@ shift off unused bits
 		bne	.L_found
 		orr	r2, r2, #7		@ if zero, then no bits here
@@ -174,8 +156,8 @@ ENDPROC(_find_next_bit_be)
  */
 .L_found:
 #if __LINUX_ARM_ARCH__ >= 5
-		rsb	r0, r3, #0
-		and	r3, r3, r0
+		rsb	r1, r3, #0
+		and	r3, r3, r1
 		clz	r3, r3
 		rsb	r3, r3, #31
 		add	r0, r2, r3
@@ -190,7 +172,5 @@ ENDPROC(_find_next_bit_be)
 		addeq	r2, r2, #1
 		mov	r0, r2
 #endif
-		cmp	r1, r0			@ Clamp to maxbit
-		movlo	r0, r1
 		mov	pc, lr
 

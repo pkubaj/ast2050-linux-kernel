@@ -451,16 +451,12 @@ static void fat_write_super(struct super_block *sb)
 
 static int fat_sync_fs(struct super_block *sb, int wait)
 {
-	int err = 0;
+	lock_super(sb);
+	fat_clusters_flush(sb);
+	sb->s_dirt = 0;
+	unlock_super(sb);
 
-	if (sb->s_dirt) {
-		lock_super(sb);
-		sb->s_dirt = 0;
-		err = fat_clusters_flush(sb);
-		unlock_super(sb);
-	}
-
-	return err;
+	return 0;
 }
 
 static void fat_put_super(struct super_block *sb)
@@ -474,11 +470,19 @@ static void fat_put_super(struct super_block *sb)
 
 	iput(sbi->fat_inode);
 
-	unload_nls(sbi->nls_disk);
-	unload_nls(sbi->nls_io);
-
-	if (sbi->options.iocharset != fat_default_iocharset)
+	if (sbi->nls_disk) {
+		unload_nls(sbi->nls_disk);
+		sbi->nls_disk = NULL;
+		sbi->options.codepage = fat_default_codepage;
+	}
+	if (sbi->nls_io) {
+		unload_nls(sbi->nls_io);
+		sbi->nls_io = NULL;
+	}
+	if (sbi->options.iocharset != fat_default_iocharset) {
 		kfree(sbi->options.iocharset);
+		sbi->options.iocharset = fat_default_iocharset;
+	}
 
 	sb->s_fs_info = NULL;
 	kfree(sbi);
@@ -558,7 +562,7 @@ static int fat_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_bavail = sbi->free_clusters;
 	buf->f_fsid.val[0] = (u32)id;
 	buf->f_fsid.val[1] = (u32)(id >> 32);
-	buf->f_namelen = sbi->options.isvfat ? FAT_LFN_LEN : 12;
+	buf->f_namelen = sbi->options.isvfat ? 260 : 12;
 
 	return 0;
 }
@@ -816,7 +820,7 @@ static int fat_show_options(struct seq_file *m, struct vfsmount *mnt)
 			seq_puts(m, ",shortname=mixed");
 			break;
 		case VFAT_SFN_DISPLAY_LOWER | VFAT_SFN_CREATE_WIN95:
-			seq_puts(m, ",shortname=lower");
+			/* seq_puts(m, ",shortname=lower"); */
 			break;
 		default:
 			seq_puts(m, ",shortname=unknown");
@@ -967,7 +971,7 @@ static int parse_options(char *options, int is_vfat, int silent, int *debug,
 	opts->codepage = fat_default_codepage;
 	opts->iocharset = fat_default_iocharset;
 	if (is_vfat) {
-		opts->shortname = VFAT_SFN_DISPLAY_WINNT|VFAT_SFN_CREATE_WIN95;
+		opts->shortname = VFAT_SFN_DISPLAY_LOWER|VFAT_SFN_CREATE_WIN95;
 		opts->rodir = 0;
 	} else {
 		opts->shortname = 0;

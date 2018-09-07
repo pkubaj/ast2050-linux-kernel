@@ -15,7 +15,7 @@
  * 			Save more value for the resume function! Support
  * 			Bitsy/Assabet/Freebird board
  *
- * 2001-08-29:	Nicolas Pitre <nico@fluxnic.net>
+ * 2001-08-29:	Nicolas Pitre <nico@cam.org>
  * 			Cleaned up, pushed platform dependent stuff
  * 			in the platform specific files.
  *

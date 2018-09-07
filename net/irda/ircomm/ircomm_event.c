@@ -49,7 +49,7 @@ static int ircomm_state_waitr(struct ircomm_cb *self, IRCOMM_EVENT event,
 static int ircomm_state_conn(struct ircomm_cb *self, IRCOMM_EVENT event,
 			     struct sk_buff *skb, struct ircomm_info *info);
 
-const char *const ircomm_state[] = {
+char *ircomm_state[] = {
 	"IRCOMM_IDLE",
 	"IRCOMM_WAITI",
 	"IRCOMM_WAITR",
@@ -57,7 +57,7 @@ const char *const ircomm_state[] = {
 };
 
 #ifdef CONFIG_IRDA_DEBUG
-static const char *const ircomm_event[] = {
+static char *ircomm_event[] = {
 	"IRCOMM_CONNECT_REQUEST",
 	"IRCOMM_CONNECT_RESPONSE",
 	"IRCOMM_TTP_CONNECT_INDICATION",

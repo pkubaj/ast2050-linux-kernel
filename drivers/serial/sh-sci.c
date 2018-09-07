@@ -272,8 +272,7 @@ static inline void sci_init_pins(struct uart_port *port, unsigned int cflag)
 		__raw_writew(data, PSCR);
 	}
 }
-#elif defined(CONFIG_CPU_SUBTYPE_SH7757) || \
-      defined(CONFIG_CPU_SUBTYPE_SH7763) || \
+#elif defined(CONFIG_CPU_SUBTYPE_SH7763) || \
       defined(CONFIG_CPU_SUBTYPE_SH7780) || \
       defined(CONFIG_CPU_SUBTYPE_SH7785) || \
       defined(CONFIG_CPU_SUBTYPE_SH7786) || \
@@ -361,7 +360,7 @@ static inline int sci_rxroom(struct uart_port *port)
 
 static void sci_transmit_chars(struct uart_port *port)
 {
-	struct circ_buf *xmit = &port->state->xmit;
+	struct circ_buf *xmit = &port->info->xmit;
 	unsigned int stopped = uart_tx_stopped(port);
 	unsigned short status;
 	unsigned short ctrl;
@@ -426,7 +425,7 @@ static void sci_transmit_chars(struct uart_port *port)
 static inline void sci_receive_chars(struct uart_port *port)
 {
 	struct sci_port *sci_port = to_sci_port(port);
-	struct tty_struct *tty = port->state->port.tty;
+	struct tty_struct *tty = port->info->port.tty;
 	int i, count, copied = 0;
 	unsigned short status;
 	unsigned char flag;
@@ -546,7 +545,7 @@ static inline int sci_handle_errors(struct uart_port *port)
 {
 	int copied = 0;
 	unsigned short status = sci_in(port, SCxSR);
-	struct tty_struct *tty = port->state->port.tty;
+	struct tty_struct *tty = port->info->port.tty;
 
 	if (status & SCxSR_ORER(port)) {
 		/* overrun error */
@@ -600,7 +599,7 @@ static inline int sci_handle_errors(struct uart_port *port)
 
 static inline int sci_handle_fifo_overrun(struct uart_port *port)
 {
-	struct tty_struct *tty = port->state->port.tty;
+	struct tty_struct *tty = port->info->port.tty;
 	int copied = 0;
 
 	if (port->type != PORT_SCIF)
@@ -623,7 +622,7 @@ static inline int sci_handle_breaks(struct uart_port *port)
 {
 	int copied = 0;
 	unsigned short status = sci_in(port, SCxSR);
-	struct tty_struct *tty = port->state->port.tty;
+	struct tty_struct *tty = port->info->port.tty;
 	struct sci_port *s = to_sci_port(port);
 
 	if (uart_handle_break(port))
@@ -663,11 +662,10 @@ static irqreturn_t sci_rx_interrupt(int irq, void *port)
 static irqreturn_t sci_tx_interrupt(int irq, void *ptr)
 {
 	struct uart_port *port = ptr;
-	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
+	spin_lock_irq(&port->lock);
 	sci_transmit_chars(port);
-	spin_unlock_irqrestore(&port->lock, flags);
+	spin_unlock_irq(&port->lock);
 
 	return IRQ_HANDLED;
 }
@@ -1143,7 +1141,7 @@ static void serial_console_write(struct console *co, const char *s,
 	while ((sci_in(port, SCxSR) & bits) != bits)
 		cpu_relax();
 
-	if (sci_port->disable)
+	if (sci_port->disable);
 		sci_port->disable(port);
 }
 

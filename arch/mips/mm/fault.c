@@ -58,17 +58,11 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long write,
 	 * only copy the information from the master page table,
 	 * nothing more.
 	 */
-#ifdef CONFIG_64BIT
-# define VMALLOC_FAULT_TARGET no_context
-#else
-# define VMALLOC_FAULT_TARGET vmalloc_fault
-#endif
-
 	if (unlikely(address >= VMALLOC_START && address <= VMALLOC_END))
-		goto VMALLOC_FAULT_TARGET;
+		goto vmalloc_fault;
 #ifdef MODULE_START
 	if (unlikely(address >= MODULE_START && address < MODULE_END))
-		goto VMALLOC_FAULT_TARGET;
+		goto vmalloc_fault;
 #endif
 
 	/*
@@ -209,7 +203,6 @@ do_sigbus:
 	force_sig_info(SIGBUS, &info, tsk);
 
 	return;
-#ifndef CONFIG_64BIT
 vmalloc_fault:
 	{
 		/*
@@ -248,5 +241,4 @@ vmalloc_fault:
 			goto no_context;
 		return;
 	}
-#endif
 }

@@ -87,7 +87,7 @@
 
 /* These identify the driver base version and may not be removed. */
 static char version[] =
-DRV_NAME ": 10/100 PCI Ethernet driver v" DRV_VERSION " (" DRV_RELDATE ")\n";
+KERN_INFO DRV_NAME ": 10/100 PCI Ethernet driver v" DRV_VERSION " (" DRV_RELDATE ")\n";
 
 MODULE_AUTHOR("Jeff Garzik <jgarzik@pobox.com>");
 MODULE_DESCRIPTION("RealTek RTL-8139C+ series 10/100 PCI Ethernet driver");
@@ -736,8 +736,7 @@ static void cp_tx (struct cp_private *cp)
 		netif_wake_queue(cp->dev);
 }
 
-static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
-					struct net_device *dev)
+static int cp_start_xmit (struct sk_buff *skb, struct net_device *dev)
 {
 	struct cp_private *cp = netdev_priv(dev);
 	unsigned entry;
@@ -891,7 +890,7 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 	cpw8(TxPoll, NormalTxPoll);
 	dev->trans_start = jiffies;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* Set or clear the multicast filter for this adaptor.

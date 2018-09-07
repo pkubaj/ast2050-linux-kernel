@@ -148,10 +148,9 @@ unsigned int h3600_flite_power(struct input_dev *dev, enum flite_pwr pwr)
 	struct h3600_dev *ts = input_get_drvdata(dev);
 
 	/* Must be in this order */
-	serio_write(ts->serio, 1);
-	serio_write(ts->serio, pwr);
-	serio_write(ts->serio, brightness);
-
+	ts->serio->write(ts->serio, 1);
+	ts->serio->write(ts->serio, pwr);
+	ts->serio->write(ts->serio, brightness);
 	return 0;
 }
 
@@ -263,7 +262,7 @@ static int h3600ts_event(struct input_dev *dev, unsigned int type,
 
 	switch (type) {
 		case EV_LED: {
-		//	serio_write(ts->serio, SOME_CMD);
+		//	ts->serio->write(ts->serio, SOME_CMD);
 			return 0;
 		}
 	}

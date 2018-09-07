@@ -278,7 +278,7 @@ static int omfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	return 0;
 }
 
-static const struct super_operations omfs_sops = {
+static struct super_operations omfs_sops = {
 	.write_inode	= omfs_write_inode,
 	.delete_inode	= omfs_delete_inode,
 	.put_super	= omfs_put_super,
@@ -347,7 +347,7 @@ nomem:
 }
 
 enum {
-	Opt_uid, Opt_gid, Opt_umask, Opt_dmask, Opt_fmask, Opt_err
+	Opt_uid, Opt_gid, Opt_umask, Opt_dmask, Opt_fmask
 };
 
 static const match_table_t tokens = {
@@ -356,7 +356,6 @@ static const match_table_t tokens = {
 	{Opt_umask, "umask=%o"},
 	{Opt_dmask, "dmask=%o"},
 	{Opt_fmask, "fmask=%o"},
-	{Opt_err, NULL},
 };
 
 static int parse_options(char *options, struct omfs_sb_info *sbi)

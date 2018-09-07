@@ -51,27 +51,70 @@ SECTIONS
 	_etext = .;
 
 	RO_DATA(PAGE_SIZE)
+	.data :	{
+		DATA_DATA
+		CONSTRUCTORS
+	}
 	.data1 : {
 		*(.data1)
 	}
-	RW_DATA_SECTION(SMP_CACHE_BYTES, 0, THREAD_SIZE)
-
+	. = ALIGN(SMP_CACHE_BYTES);
+	.data.cacheline_aligned : {
+		*(.data.cacheline_aligned)
+	}
+	. = ALIGN(SMP_CACHE_BYTES);
+	.data.read_mostly : {
+		*(.data.read_mostly)
+	}
 	/* End of data section */
 	_edata = .;
 
+	/* init_task */
+	. = ALIGN(THREAD_SIZE);
+	.data.init_task : {
+		*(.data.init_task)
+	}
 	.fixup : {
 		__start___fixup = .;
 		*(.fixup)
 		__stop___fixup = .;
 	}
-	EXCEPTION_TABLE(16)
+	. = ALIGN(16);
+	__ex_table : {
+		__start___ex_table = .;
+		*(__ex_table)
+		__stop___ex_table = .;
+	}
 	NOTES
 
 	. = ALIGN(PAGE_SIZE);
-	__init_begin = ALIGN(PAGE_SIZE);
-	INIT_TEXT_SECTION(PAGE_SIZE)
+	.init.text : {
+		__init_begin = .;
+		_sinittext = .;
+		INIT_TEXT
+		_einittext = .;
+	}
 	__init_text_end = .;
-	INIT_DATA_SECTION(16)
+	.init.data : {
+		INIT_DATA
+	}
+	. = ALIGN(16);
+	.init.setup : {
+		__setup_start = .;
+		*(.init.setup)
+		__setup_end = .;
+	}
+	.initcall.init : {
+		__initcall_start = .;
+		INITCALLS
+		__initcall_end = .;
+	}
+	.con_initcall.init : {
+		__con_initcall_start = .;
+		*(.con_initcall.init)
+		__con_initcall_end = .;
+	}
+	SECURITY_INIT
 
 	. = ALIGN(4);
 	.tsb_ldquad_phys_patch : {
@@ -103,15 +146,37 @@ SECTIONS
 		__sun4v_2insn_patch_end = .;
 	}
 
+#ifdef CONFIG_BLK_DEV_INITRD
+	. = ALIGN(PAGE_SIZE);
+	.init.ramfs : {
+		__initramfs_start = .;
+		*(.init.ramfs)
+		__initramfs_end = .;
+	}
+#endif
+
 	PERCPU(PAGE_SIZE)
 
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;
-	BSS_SECTION(0, 0, 0)
+	__bss_start = .;
+	.sbss : {
+		*(.sbss)
+		*(.scommon)
+	}
+	.bss : {
+		*(.dynbss)
+		*(.bss)
+		*(COMMON)
+	}
 	_end = . ;
+
+	/DISCARD/ : {
+		EXIT_TEXT
+		EXIT_DATA
+		*(.exitcall.exit)
+	}
 
 	STABS_DEBUG
 	DWARF_DEBUG
-
-	DISCARDS
 }

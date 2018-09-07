@@ -82,14 +82,6 @@
 #define PSR_ENDSTATE	0
 #endif
 
-/* 
- * These are 'magic' values for PTRACE_PEEKUSR that return info about where a
- * process is located in memory.
- */
-#define PT_TEXT_ADDR		0x10000
-#define PT_DATA_ADDR		0x10004
-#define PT_TEXT_END_ADDR	0x10008
-
 #ifndef __ASSEMBLY__
 
 /*
@@ -150,24 +142,15 @@ struct pt_regs {
  */
 static inline int valid_user_regs(struct pt_regs *regs)
 {
-	unsigned long mode = regs->ARM_cpsr & MODE_MASK;
-
-	/*
-	 * Always clear the F (FIQ) and A (delayed abort) bits
-	 */
-	regs->ARM_cpsr &= ~(PSR_F_BIT | PSR_A_BIT);
-
-	if ((regs->ARM_cpsr & PSR_I_BIT) == 0) {
-		if (mode == USR_MODE)
-			return 1;
-		if (elf_hwcap & HWCAP_26BIT && mode == USR26_MODE)
-			return 1;
+	if (user_mode(regs) && (regs->ARM_cpsr & PSR_I_BIT) == 0) {
+		regs->ARM_cpsr &= ~(PSR_F_BIT | PSR_A_BIT);
+		return 1;
 	}
 
 	/*
 	 * Force CPSR to something logical...
 	 */
-	regs->ARM_cpsr &= PSR_f | PSR_s | PSR_x | PSR_T_BIT | MODE32_BIT;
+	regs->ARM_cpsr &= PSR_f | PSR_s | (PSR_x & ~PSR_A_BIT) | PSR_T_BIT | MODE32_BIT;
 	if (!(elf_hwcap & HWCAP_26BIT))
 		regs->ARM_cpsr |= USR_MODE;
 

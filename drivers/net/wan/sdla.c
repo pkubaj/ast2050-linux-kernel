@@ -651,8 +651,7 @@ static int sdla_dlci_conf(struct net_device *slave, struct net_device *master, i
  **************************/
 
 /* NOTE: the DLCI driver deals with freeing the SKB!! */
-static netdev_tx_t sdla_transmit(struct sk_buff *skb,
-				 struct net_device *dev)
+static int sdla_transmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct frad_local *flp;
 	int               ret, addr, accept, i;
@@ -712,21 +711,23 @@ static netdev_tx_t sdla_transmit(struct sk_buff *skb,
 				}
 				break;
 		}
-
 		switch (ret)
 		{
 			case SDLA_RET_OK:
 				dev->stats.tx_packets++;
+				ret = DLCI_RET_OK;
 				break;
 
 			case SDLA_RET_CIR_OVERFLOW:
 			case SDLA_RET_BUF_OVERSIZE:
 			case SDLA_RET_NO_BUFS:
 				dev->stats.tx_dropped++;
+				ret = DLCI_RET_DROP;
 				break;
 
 			default:
 				dev->stats.tx_errors++;
+				ret = DLCI_RET_ERR;
 				break;
 		}
 	}
@@ -736,9 +737,7 @@ static netdev_tx_t sdla_transmit(struct sk_buff *skb,
 		if(flp->master[i]!=NULL)
 			netif_wake_queue(flp->master[i]);
 	}		
-
-	dev_kfree_skb(skb);
-	return NETDEV_TX_OK;
+	return(ret);
 }
 
 static void sdla_receive(struct net_device *dev)

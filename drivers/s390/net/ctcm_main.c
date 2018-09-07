@@ -164,6 +164,7 @@ void ctcm_unpack_skb(struct channel *ch, struct sk_buff *pskb)
 		priv->stats.rx_packets++;
 		priv->stats.rx_bytes += skblen;
 		netif_rx_ni(skb);
+		dev->last_rx = jiffies;
 		if (len > 0) {
 			skb_pull(pskb, header->length);
 			if (skb_tailroom(pskb) < LL_HEADER_LENGTH) {
@@ -879,7 +880,7 @@ static int ctcm_tx(struct sk_buff *skb, struct net_device *dev)
 				"%s(%s): NULL sk_buff passed",
 					CTCM_FUNTAIL, dev->name);
 		priv->stats.tx_dropped++;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	if (skb_headroom(skb) < (LL_HEADER_LENGTH + 2)) {
 		CTCM_DBF_TEXT_(ERROR, CTC_DBF_ERROR,
@@ -887,7 +888,7 @@ static int ctcm_tx(struct sk_buff *skb, struct net_device *dev)
 			CTCM_FUNTAIL, dev->name, LL_HEADER_LENGTH + 2);
 		dev_kfree_skb(skb);
 		priv->stats.tx_dropped++;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	/*
@@ -900,7 +901,7 @@ static int ctcm_tx(struct sk_buff *skb, struct net_device *dev)
 		priv->stats.tx_dropped++;
 		priv->stats.tx_errors++;
 		priv->stats.tx_carrier_errors++;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	if (ctcm_test_and_set_busy(dev))
@@ -909,7 +910,7 @@ static int ctcm_tx(struct sk_buff *skb, struct net_device *dev)
 	dev->trans_start = jiffies;
 	if (ctcm_transmit_skb(priv->channel[WRITE], skb) != 0)
 		return NETDEV_TX_BUSY;
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* unmerged MPC variant of ctcm_tx */
@@ -1007,7 +1008,7 @@ done:
 	if (do_debug)
 		MPC_DBF_DEV_NAME(TRACE, dev, "exit");
 
-	return NETDEV_TX_OK;	/* handle freeing of skb here */
+	return 0;	/* handle freeing of skb here */
 }
 
 

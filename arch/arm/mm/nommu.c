@@ -12,7 +12,6 @@
 #include <asm/cacheflush.h>
 #include <asm/sections.h>
 #include <asm/page.h>
-#include <asm/setup.h>
 #include <asm/mach/arch.h>
 
 #include "mm.h"

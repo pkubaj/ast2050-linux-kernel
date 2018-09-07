@@ -134,7 +134,6 @@ extern void	udp_err(struct sk_buff *, u32);
 
 extern int	udp_sendmsg(struct kiocb *iocb, struct sock *sk,
 			    struct msghdr *msg, size_t len);
-extern int udp_push_pending_frames(struct sock *sk);
 extern void	udp_flush_pending_frames(struct sock *sk);
 
 extern int	udp_rcv(struct sk_buff *skb);
@@ -145,7 +144,7 @@ extern unsigned int udp_poll(struct file *file, struct socket *sock,
 extern int 	udp_lib_getsockopt(struct sock *sk, int level, int optname,
 			           char __user *optval, int __user *optlen);
 extern int 	udp_lib_setsockopt(struct sock *sk, int level, int optname,
-				   char __user *optval, unsigned int optlen,
+				   char __user *optval, int optlen,
 				   int (*push_pending_frames)(struct sock *));
 
 extern struct sock *udp4_lib_lookup(struct net *net, __be32 saddr, __be16 sport,
@@ -208,7 +207,4 @@ extern void udp4_proc_exit(void);
 #endif
 
 extern void udp_init(void);
-
-extern int udp4_ufo_send_check(struct sk_buff *skb);
-extern struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb, int features);
 #endif	/* _UDP_H */

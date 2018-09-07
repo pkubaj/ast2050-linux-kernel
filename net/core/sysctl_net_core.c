@@ -14,12 +14,6 @@
 #include <net/ip.h>
 #include <net/sock.h>
 
-static int zero = 0;
-static int ushort_max = 65535;
-
-static int min_sndbuf = SOCK_MIN_SNDBUF;
-static int min_rcvbuf = SOCK_MIN_RCVBUF;
-
 static struct ctl_table net_core_table[] = {
 #ifdef CONFIG_NET
 	{
@@ -28,9 +22,7 @@ static struct ctl_table net_core_table[] = {
 		.data		= &sysctl_wmem_max,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.strategy	= sysctl_intvec,
-		.extra1		= &min_sndbuf,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.ctl_name	= NET_CORE_RMEM_MAX,
@@ -38,9 +30,7 @@ static struct ctl_table net_core_table[] = {
 		.data		= &sysctl_rmem_max,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.strategy	= sysctl_intvec,
-		.extra1		= &min_rcvbuf,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.ctl_name	= NET_CORE_WMEM_DEFAULT,
@@ -48,9 +38,7 @@ static struct ctl_table net_core_table[] = {
 		.data		= &sysctl_wmem_default,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.strategy	= sysctl_intvec,
-		.extra1		= &min_sndbuf,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.ctl_name	= NET_CORE_RMEM_DEFAULT,
@@ -58,9 +46,7 @@ static struct ctl_table net_core_table[] = {
 		.data		= &sysctl_rmem_default,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.strategy	= sysctl_intvec,
-		.extra1		= &min_rcvbuf,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.ctl_name	= NET_CORE_DEV_WEIGHT,
@@ -130,10 +116,7 @@ static struct ctl_table netns_core_table[] = {
 		.data		= &init_net.core.sysctl_somaxconn,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.extra1		= &zero,
-		.extra2		= &ushort_max,
-		.proc_handler	= proc_dointvec_minmax,
-		.strategy	= &sysctl_intvec
+		.proc_handler	= proc_dointvec
 	},
 	{ .ctl_name = 0 }
 };

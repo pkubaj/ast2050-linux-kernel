@@ -30,7 +30,10 @@
 
 #include <linux/netlink.h>
 
+#if WIRELESS_EXT > 12
 #include <net/iw_handler.h>
+#endif
+
 
 
 /* Called to allocate buffer, must return a continue buffer space */

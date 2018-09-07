@@ -67,8 +67,6 @@ int putback_lru_pages(struct list_head *l)
 
 	list_for_each_entry_safe(page, page2, l, lru) {
 		list_del(&page->lru);
-		dec_zone_page_state(page, NR_ISOLATED_ANON +
-				page_is_file_cache(page));
 		putback_lru_page(page);
 		count++;
 	}
@@ -149,7 +147,7 @@ out:
 static void remove_file_migration_ptes(struct page *old, struct page *new)
 {
 	struct vm_area_struct *vma;
-	struct address_space *mapping = new->mapping;
+	struct address_space *mapping = page_mapping(new);
 	struct prio_tree_iter iter;
 	pgoff_t pgoff = new->index << (PAGE_CACHE_SHIFT - PAGE_SHIFT);
 
@@ -272,7 +270,7 @@ static int migrate_page_move_mapping(struct address_space *mapping,
 	pslot = radix_tree_lookup_slot(&mapping->page_tree,
  					page_index(page));
 
-	expected_count = 2 + page_has_private(page);
+	expected_count = 2 + !!page_has_private(page);
 	if (page_count(page) != expected_count ||
 			(struct page *)radix_tree_deref_slot(pslot) != page) {
 		spin_unlock_irq(&mapping->tree_lock);
@@ -314,10 +312,7 @@ static int migrate_page_move_mapping(struct address_space *mapping,
 	 */
 	__dec_zone_page_state(page, NR_FILE_PAGES);
 	__inc_zone_page_state(newpage, NR_FILE_PAGES);
-	if (!PageSwapCache(page) && PageSwapBacked(page)) {
-		__dec_zone_page_state(page, NR_SHMEM);
-		__inc_zone_page_state(newpage, NR_SHMEM);
-	}
+
 	spin_unlock_irq(&mapping->tree_lock);
 
 	return 0;
@@ -669,15 +664,13 @@ static int unmap_and_move(new_page_t get_new_page, unsigned long private,
 			 *    needs to be effective.
 			 */
 			try_to_free_buffers(page);
-			goto rcu_unlock;
 		}
-		goto skip_unmap;
+		goto rcu_unlock;
 	}
 
 	/* Establish migration ptes or remove ptes */
-	try_to_unmap(page, TTU_MIGRATION|TTU_IGNORE_MLOCK|TTU_IGNORE_ACCESS);
+	try_to_unmap(page, 1);
 
-skip_unmap:
 	if (!page_mapped(page))
 		rc = move_to_new_page(newpage, page);
 
@@ -700,8 +693,6 @@ unlock:
  		 * restored.
  		 */
  		list_del(&page->lru);
-		dec_zone_page_state(page, NR_ISOLATED_ANON +
-				page_is_file_cache(page));
 		putback_lru_page(page);
 	}
 
@@ -746,13 +737,6 @@ int migrate_pages(struct list_head *from,
 	struct page *page2;
 	int swapwrite = current->flags & PF_SWAPWRITE;
 	int rc;
-	unsigned long flags;
-
-	local_irq_save(flags);
-	list_for_each_entry(page, from, lru)
-		__inc_zone_page_state(page, NR_ISOLATED_ANON +
-				page_is_file_cache(page));
-	local_irq_restore(flags);
 
 	if (!swapwrite)
 		current->flags |= PF_SWAPWRITE;

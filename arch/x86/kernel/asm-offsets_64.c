@@ -3,7 +3,6 @@
  * This code generates raw asm output which is post-processed to extract
  * and format the required data.
  */
-#define COMPILE_OFFSETS
 
 #include <linux/crypto.h>
 #include <linux/sched.h> 

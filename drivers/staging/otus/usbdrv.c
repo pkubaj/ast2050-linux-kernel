@@ -39,7 +39,9 @@
 #include "linux/netlink.h"
 #include "linux/rtnetlink.h"
 
+#if WIRELESS_EXT > 12
 #include <net/iw_handler.h>
+#endif
 
 #ifdef ZM_HOSTAPD_SUPPORT
 #include "athr_common.h"
@@ -111,6 +113,9 @@ extern u8_t zfLnxCreateThread(zdev_t *dev);
 
 /* Definition of Wireless Extension */
 
+#if WIRELESS_EXT > 12
+#include <net/iw_handler.h>
+#endif
 //wireless extension helper functions
 extern int usbdrv_ioctl_setessid(struct net_device *dev, struct iw_point *erq);
 extern int usbdrv_ioctl_setrts(struct net_device *dev, struct iw_param *rrq);
@@ -198,6 +203,7 @@ struct iw_priv_args usbdrv_private_args[] = {
 //    { SIOCIWFIRSTPRIV + 0xC, 0, IW_PRIV_TYPE_CHAR | 12, "get_mac_mode" },
 };
 
+#if WIRELESS_EXT > 12
 static iw_handler usbdrvwext_handler[] = {
     (iw_handler) NULL,                              /* SIOCSIWCOMMIT */
     (iw_handler) usbdrvwext_giwname,                /* SIOCGIWNAME */
@@ -223,8 +229,13 @@ static iw_handler usbdrvwext_handler[] = {
     (iw_handler) usbdrvwext_giwap,                  /* SIOCGIWAP */
     (iw_handler) NULL,              /* -- hole -- */
     (iw_handler) usbdrvwext_iwaplist,               /* SIOCGIWAPLIST */
+#if WIRELESS_EXT > 13
     (iw_handler) usbdrvwext_siwscan,                /* SIOCSIWSCAN */
     (iw_handler) usbdrvwext_giwscan,                /* SIOCGIWSCAN */
+#else /* WIRELESS_EXT > 13 */
+    (iw_handler) NULL, /* null */                   /* SIOCSIWSCAN */
+    (iw_handler) NULL, /* null */                   /* SIOCGIWSCAN */
+#endif /* WIRELESS_EXT > 13 */
     (iw_handler) usbdrvwext_siwessid,               /* SIOCSIWESSID */
     (iw_handler) usbdrvwext_giwessid,               /* SIOCGIWESSID */
 
@@ -280,6 +291,7 @@ static struct iw_handler_def p80211wext_handler_def = {
     .private = (iw_handler *) usbdrv_private_handler,
     .private_args = (struct iw_priv_args *) usbdrv_private_args
 };
+#endif
 
 /* WDS */
 //struct zsWdsStruct wds[ZM_WDS_PORT_NUMBER];
@@ -647,7 +659,7 @@ int usbdrv_xmit_frame(struct sk_buff *skb, struct net_device *dev)
         netif_stop_queue(dev);
     }
 
-    return NETDEV_TX_OK;
+    return 0;
 }
 
 
@@ -784,13 +796,13 @@ int zfLnxVapXmitFrame(struct sk_buff *skb, struct net_device *dev)
     if (vapId >= ZM_VAP_PORT_NUMBER)
     {
         dev_kfree_skb_irq(skb);
-        return NETDEV_TX_OK;
+        return 0;
     }
 #if 1
     if (vap[vapId].openFlag == 0)
     {
         dev_kfree_skb_irq(skb);
-        return NETDEV_TX_OK;
+        return 0;
     }
 #endif
 
@@ -807,7 +819,7 @@ int zfLnxVapXmitFrame(struct sk_buff *skb, struct net_device *dev)
         netif_stop_queue(dev);
     }
 
-    return NETDEV_TX_OK;
+    return 0;
 }
 
 static const struct net_device_ops vap_netdev_ops = {
@@ -1094,7 +1106,9 @@ u8_t zfLnxInitSetup(struct net_device *dev, struct usbdrv_private *macp)
     dev->dev_addr[4] = addr[4];
     dev->dev_addr[5] = addr[5];
 #endif
+#if WIRELESS_EXT > 12
     dev->wireless_handlers = (struct iw_handler_def *)&p80211wext_handler_def;
+#endif
 
     dev->netdev_ops = &otus_netdev_ops;
 

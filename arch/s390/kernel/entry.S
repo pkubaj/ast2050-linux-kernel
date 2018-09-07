@@ -54,7 +54,7 @@ _TIF_WORK_SVC = (_TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_NEED_RESCHED | \
 _TIF_WORK_INT = (_TIF_SIGPENDING | _TIF_NOTIFY_RESUME | _TIF_NEED_RESCHED | \
 		 _TIF_MCCK_PENDING)
 _TIF_SYSCALL = (_TIF_SYSCALL_TRACE>>8 | _TIF_SYSCALL_AUDIT>>8 | \
-		_TIF_SECCOMP>>8 | _TIF_SYSCALL_TRACEPOINT>>8)
+		_TIF_SECCOMP>>8 | _TIF_SYSCALL_FTRACE>>8)
 
 STACK_SHIFT = PAGE_SHIFT + THREAD_ORDER
 STACK_SIZE  = 1 << STACK_SHIFT
@@ -278,8 +278,7 @@ sysc_return:
 	bnz	BASED(sysc_work)  # there is work to do (signals etc.)
 sysc_restore:
 #ifdef CONFIG_TRACE_IRQFLAGS
-	la	%r1,BASED(sysc_restore_trace_psw_addr)
-	l	%r1,0(%r1)
+	la	%r1,BASED(sysc_restore_trace_psw)
 	lpsw	0(%r1)
 sysc_restore_trace:
 	TRACE_IRQS_CHECK
@@ -290,15 +289,10 @@ sysc_leave:
 sysc_done:
 
 #ifdef CONFIG_TRACE_IRQFLAGS
-sysc_restore_trace_psw_addr:
-	.long sysc_restore_trace_psw
-
-	.section .data,"aw",@progbits
 	.align	8
 	.globl	sysc_restore_trace_psw
 sysc_restore_trace_psw:
 	.long	0, sysc_restore_trace + 0x80000000
-	.previous
 #endif
 
 #
@@ -565,13 +559,12 @@ pgm_svcper:
 	lh	%r7,0x8a		# get svc number from lowcore
 	l	%r9,__LC_THREAD_INFO	# load pointer to thread_info struct
 	TRACE_IRQS_OFF
-	l	%r8,__TI_task(%r9)
-	mvc	__THREAD_per+__PER_atmid(2,%r8),__LC_PER_ATMID
-	mvc	__THREAD_per+__PER_address(4,%r8),__LC_PER_ADDRESS
-	mvc	__THREAD_per+__PER_access_id(1,%r8),__LC_PER_ACCESS_ID
+	l	%r1,__TI_task(%r9)
+	mvc	__THREAD_per+__PER_atmid(2,%r1),__LC_PER_ATMID
+	mvc	__THREAD_per+__PER_address(4,%r1),__LC_PER_ADDRESS
+	mvc	__THREAD_per+__PER_access_id(1,%r1),__LC_PER_ACCESS_ID
 	oi	__TI_flags+3(%r9),_TIF_SINGLE_STEP # set TIF_SINGLE_STEP
 	TRACE_IRQS_ON
-	lm	%r2,%r6,SP_R2(%r15)	# load svc arguments
 	stosm	__SF_EMPTY(%r15),0x03	# reenable interrupts
 	b	BASED(sysc_do_svc)
 
@@ -613,8 +606,7 @@ io_return:
 	bnz	BASED(io_work)		# there is work to do (signals etc.)
 io_restore:
 #ifdef CONFIG_TRACE_IRQFLAGS
-	la	%r1,BASED(io_restore_trace_psw_addr)
-	l	%r1,0(%r1)
+	la	%r1,BASED(io_restore_trace_psw)
 	lpsw	0(%r1)
 io_restore_trace:
 	TRACE_IRQS_CHECK
@@ -625,15 +617,10 @@ io_leave:
 io_done:
 
 #ifdef CONFIG_TRACE_IRQFLAGS
-io_restore_trace_psw_addr:
-	.long io_restore_trace_psw
-
-	.section .data,"aw",@progbits
 	.align	8
 	.globl	io_restore_trace_psw
 io_restore_trace_psw:
 	.long	0, io_restore_trace + 0x80000000
-	.previous
 #endif
 
 #

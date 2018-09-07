@@ -81,7 +81,9 @@ extern int panic_on_unrecovered_nmi;
 
 void math_error(void __user *);
 void math_emulate(struct math_emu_info *);
-#ifndef CONFIG_X86_32
+#ifdef CONFIG_X86_32
+unsigned long patch_espfix_desc(unsigned long, unsigned long);
+#else
 asmlinkage void smp_thermal_interrupt(void);
 asmlinkage void mce_threshold_interrupt(void);
 #endif

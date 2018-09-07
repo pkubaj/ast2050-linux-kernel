@@ -415,7 +415,7 @@ static const struct tv_mode tv_modes[] = {
 	{
 		.name		= "NTSC-M",
 		.clock		= 108000,
-		.refresh	= 59940,
+		.refresh	= 29970,
 		.oversample	= TV_OVERSAMPLE_8X,
 		.component_only = 0,
 		/* 525 Lines, 60 Fields, 15.734KHz line, Sub-Carrier 3.580MHz */
@@ -458,7 +458,7 @@ static const struct tv_mode tv_modes[] = {
 	{
 		.name		= "NTSC-443",
 		.clock		= 108000,
-		.refresh	= 59940,
+		.refresh	= 29970,
 		.oversample	= TV_OVERSAMPLE_8X,
 		.component_only = 0,
 		/* 525 Lines, 60 Fields, 15.734KHz line, Sub-Carrier 4.43MHz */
@@ -500,7 +500,7 @@ static const struct tv_mode tv_modes[] = {
 	{
 		.name		= "NTSC-J",
 		.clock		= 108000,
-		.refresh	= 59940,
+		.refresh	= 29970,
 		.oversample	= TV_OVERSAMPLE_8X,
 		.component_only = 0,
 
@@ -543,7 +543,7 @@ static const struct tv_mode tv_modes[] = {
 	{
 		.name		= "PAL-M",
 		.clock		= 108000,
-		.refresh	= 59940,
+		.refresh	= 29970,
 		.oversample	= TV_OVERSAMPLE_8X,
 		.component_only = 0,
 
@@ -587,7 +587,7 @@ static const struct tv_mode tv_modes[] = {
 		/* 625 Lines, 50 Fields, 15.625KHz line, Sub-Carrier 4.434MHz */
 		.name	    = "PAL-N",
 		.clock		= 108000,
-		.refresh	= 50000,
+		.refresh	= 25000,
 		.oversample	= TV_OVERSAMPLE_8X,
 		.component_only = 0,
 
@@ -632,7 +632,7 @@ static const struct tv_mode tv_modes[] = {
 		/* 625 Lines, 50 Fields, 15.625KHz line, Sub-Carrier 4.434MHz */
 		.name	    = "PAL",
 		.clock		= 108000,
-		.refresh	= 50000,
+		.refresh	= 25000,
 		.oversample	= TV_OVERSAMPLE_8X,
 		.component_only = 0,
 
@@ -819,7 +819,7 @@ static const struct tv_mode tv_modes[] = {
 	{
 		.name       = "1080i@50Hz",
 		.clock		= 148800,
-		.refresh	= 50000,
+		.refresh	= 25000,
 		.oversample     = TV_OVERSAMPLE_2X,
 		.component_only = 1,
 
@@ -845,7 +845,7 @@ static const struct tv_mode tv_modes[] = {
 	{
 		.name       = "1080i@60Hz",
 		.clock		= 148800,
-		.refresh	= 60000,
+		.refresh	= 30000,
 		.oversample     = TV_OVERSAMPLE_2X,
 		.component_only = 1,
 
@@ -1082,8 +1082,7 @@ intel_tv_mode_valid(struct drm_connector *connector, struct drm_display_mode *mo
 	const struct tv_mode *tv_mode = intel_tv_mode_find(intel_output);
 
 	/* Ensure TV refresh is close to desired refresh */
-	if (tv_mode && abs(tv_mode->refresh - drm_mode_vrefresh(mode) * 1000)
-				< 1000)
+	if (tv_mode && abs(tv_mode->refresh - drm_mode_vrefresh(mode)) < 10)
 		return MODE_OK;
 	return MODE_CLOCK_RANGE;
 }
@@ -1435,35 +1434,6 @@ intel_tv_detect_type (struct drm_crtc *crtc, struct intel_output *intel_output)
 	return type;
 }
 
-/*
- * Here we set accurate tv format according to connector type
- * i.e Component TV should not be assigned by NTSC or PAL
- */
-static void intel_tv_find_better_format(struct drm_connector *connector)
-{
-	struct intel_output *intel_output = to_intel_output(connector);
-	struct intel_tv_priv *tv_priv = intel_output->dev_priv;
-	const struct tv_mode *tv_mode = intel_tv_mode_find(intel_output);
-	int i;
-
-	if ((tv_priv->type == DRM_MODE_CONNECTOR_Component) ==
-		tv_mode->component_only)
-		return;
-
-
-	for (i = 0; i < sizeof(tv_modes) / sizeof(*tv_modes); i++) {
-		tv_mode = tv_modes + i;
-
-		if ((tv_priv->type == DRM_MODE_CONNECTOR_Component) ==
-			tv_mode->component_only)
-			break;
-	}
-
-	tv_priv->tv_format = tv_mode->name;
-	drm_connector_property_set_value(connector,
-		connector->dev->mode_config.tv_mode_property, i);
-}
-
 /**
  * Detect the TV connection.
  *
@@ -1500,7 +1470,6 @@ intel_tv_detect(struct drm_connector *connector)
 	if (type < 0)
 		return connector_status_disconnected;
 
-	intel_tv_find_better_format(connector);
 	return connector_status_connected;
 }
 

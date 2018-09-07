@@ -57,7 +57,7 @@ static struct chan_waitqueues {
 } channel_wqs[RTLX_CHANNELS];
 
 static struct vpe_notifications notify;
-static int sp_stopping;
+static int sp_stopping = 0;
 
 extern void *vpe_get_shared(int index);
 
@@ -72,9 +72,8 @@ static void rtlx_dispatch(void)
 */
 static irqreturn_t rtlx_interrupt(int irq, void *dev_id)
 {
-	unsigned int vpeflags;
-	unsigned long flags;
 	int i;
+	unsigned int flags, vpeflags;
 
 	/* Ought not to be strictly necessary for SMTC builds */
 	local_irq_save(flags);
@@ -393,12 +392,20 @@ out:
 
 static int file_open(struct inode *inode, struct file *filp)
 {
-	return rtlx_open(iminor(inode), (filp->f_flags & O_NONBLOCK) ? 0 : 1);
+	int minor = iminor(inode);
+	int err;
+
+	lock_kernel();
+	err = rtlx_open(minor, (filp->f_flags & O_NONBLOCK) ? 0 : 1);
+	unlock_kernel();
+	return err;
 }
 
 static int file_release(struct inode *inode, struct file *filp)
 {
-	return rtlx_release(iminor(inode));
+	int minor = iminor(inode);
+
+	return rtlx_release(minor);
 }
 
 static unsigned int file_poll(struct file *file, poll_table * wait)

@@ -40,11 +40,10 @@ static void packet_came(struct ieee80211_hw *hw, char *pRxBufferAddress, int Pac
 	rx_status.phymode = MODE_IEEE80211B;
 */
 
-	memcpy(IEEE80211_SKB_RXCB(skb), &rx_status, sizeof(rx_status));
-	ieee80211_rx_irqsafe(hw, skb);
+	ieee80211_rx_irqsafe(hw, skb, &rx_status);
 }
 
-static void Wb35Rx_adjust(struct wb35_descriptor *pRxDes)
+static void Wb35Rx_adjust(PDESCRIPTOR pRxDes)
 {
 	u32 *	pRxBufferAddress;
 	u32	DecryptionMethod;
@@ -84,7 +83,7 @@ static u16 Wb35Rx_indicate(struct ieee80211_hw *hw)
 {
 	struct wbsoft_priv *priv = hw->priv;
 	struct hw_data * pHwData = &priv->sHwData;
-	struct wb35_descriptor	RxDes;
+	DESCRIPTOR	RxDes;
 	struct wb35_rx *pWb35Rx = &pHwData->Wb35Rx;
 	u8 *		pRxBufferAddress;
 	u16		PacketSize;

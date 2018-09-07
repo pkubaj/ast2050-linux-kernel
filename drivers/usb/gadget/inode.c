@@ -30,7 +30,6 @@
 #include <linux/wait.h>
 #include <linux/compiler.h>
 #include <asm/uaccess.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
 #include <linux/smp_lock.h>
@@ -2034,7 +2033,7 @@ gadgetfs_create_file (struct super_block *sb, char const *name,
 	return inode;
 }
 
-static const struct super_operations gadget_fs_operations = {
+static struct super_operations gadget_fs_operations = {
 	.statfs =	simple_statfs,
 	.drop_inode =	generic_delete_inode,
 };

@@ -697,7 +697,7 @@ not_empty:
 	return 0;
 }
 
-const struct file_operations nilfs_dir_operations = {
+struct file_operations nilfs_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
 	.readdir	= nilfs_readdir,

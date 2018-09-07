@@ -56,13 +56,10 @@ int raw_pci_read(unsigned int seg, unsigned int bus, unsigned int devfn,
 	if ((seg | reg) <= 255) {
 		addr = PCI_SAL_ADDRESS(seg, bus, devfn, reg);
 		mode = 0;
-	} else if (sal_revision >= SAL_VERSION_CODE(3,2)) {
+	} else {
 		addr = PCI_SAL_EXT_ADDRESS(seg, bus, devfn, reg);
 		mode = 1;
-	} else {
-		return -EINVAL;
 	}
-
 	result = ia64_sal_pci_config_read(addr, mode, len, &data);
 	if (result != 0)
 		return -EINVAL;
@@ -83,11 +80,9 @@ int raw_pci_write(unsigned int seg, unsigned int bus, unsigned int devfn,
 	if ((seg | reg) <= 255) {
 		addr = PCI_SAL_ADDRESS(seg, bus, devfn, reg);
 		mode = 0;
-	} else if (sal_revision >= SAL_VERSION_CODE(3,2)) {
+	} else {
 		addr = PCI_SAL_EXT_ADDRESS(seg, bus, devfn, reg);
 		mode = 1;
-	} else {
-		return -EINVAL;
 	}
 	result = ia64_sal_pci_config_write(addr, mode, len, value);
 	if (result != 0)

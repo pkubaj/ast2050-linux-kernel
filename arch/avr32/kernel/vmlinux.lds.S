@@ -124,11 +124,14 @@ SECTIONS
 		_end = .;
 	}
 
-	DWARF_DEBUG
-
 	/* When something in the kernel is NOT compiled as a module, the module
 	 * cleanup code and data are put into these segments. Both can then be
 	 * thrown away, as cleanup code is never called unless it's a module.
 	 */
-	DISCARDS
+	/DISCARD/       	: {
+		EXIT_DATA
+		*(.exitcall.exit)
+	}
+
+	DWARF_DEBUG
 }

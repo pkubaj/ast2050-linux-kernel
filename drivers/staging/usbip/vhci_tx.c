@@ -26,7 +26,7 @@ static void setup_cmd_submit_pdu(struct usbip_header *pdup,  struct urb *urb)
 	struct vhci_priv *priv = ((struct vhci_priv *)urb->hcpriv);
 	struct vhci_device *vdev = priv->vdev;
 
-	usbip_dbg_vhci_tx("URB, local devnum %u, remote devid %u\n",
+	dbg_vhci_tx("URB, local devnum %u, remote devid %u\n",
 				usb_pipedevice(urb->pipe), vdev->devid);
 
 	pdup->base.command = USBIP_CMD_SUBMIT;
@@ -85,7 +85,7 @@ static int vhci_send_cmd_submit(struct vhci_device *vdev)
 		memset(&msg, 0, sizeof(msg));
 		memset(&iov, 0, sizeof(iov));
 
-		usbip_dbg_vhci_tx("setup txdata urb %p\n", urb);
+		dbg_vhci_tx("setup txdata urb %p\n", urb);
 
 
 		/* 1. setup usbip_header */
@@ -121,15 +121,15 @@ static int vhci_send_cmd_submit(struct vhci_device *vdev)
 
 		ret = kernel_sendmsg(vdev->ud.tcp_socket, &msg, iov, 3, txsize);
 		if (ret != txsize) {
-			usbip_uerr("sendmsg failed!, retval %d for %zd\n", ret,
-									txsize);
+			uerr("sendmsg failed!, retval %d for %zd\n", ret,
+								txsize);
 			kfree(iso_buffer);
 			usbip_event_add(&vdev->ud, VDEV_EVENT_ERROR_TCP);
 			return -1;
 		}
 
 		kfree(iso_buffer);
-		usbip_dbg_vhci_tx("send txdata\n");
+		dbg_vhci_tx("send txdata\n");
 
 		total_size += txsize;
 	}
@@ -177,7 +177,7 @@ static int vhci_send_cmd_unlink(struct vhci_device *vdev)
 		memset(&msg, 0, sizeof(msg));
 		memset(&iov, 0, sizeof(iov));
 
-		usbip_dbg_vhci_tx("setup cmd unlink, %lu \n", unlink->seqnum);
+		dbg_vhci_tx("setup cmd unlink, %lu \n", unlink->seqnum);
 
 
 		/* 1. setup usbip_header */
@@ -195,14 +195,14 @@ static int vhci_send_cmd_unlink(struct vhci_device *vdev)
 
 		ret = kernel_sendmsg(vdev->ud.tcp_socket, &msg, iov, 1, txsize);
 		if (ret != txsize) {
-			usbip_uerr("sendmsg failed!, retval %d for %zd\n", ret,
-									txsize);
+			uerr("sendmsg failed!, retval %d for %zd\n", ret,
+								txsize);
 			usbip_event_add(&vdev->ud, VDEV_EVENT_ERROR_TCP);
 			return -1;
 		}
 
 
-		usbip_dbg_vhci_tx("send txdata\n");
+		dbg_vhci_tx("send txdata\n");
 
 		total_size += txsize;
 	}
@@ -220,7 +220,7 @@ void vhci_tx_loop(struct usbip_task *ut)
 
 	while (1) {
 		if (signal_pending(current)) {
-			usbip_uinfo("vhci_tx signal catched\n");
+			uinfo("vhci_tx signal catched\n");
 			break;
 		}
 
@@ -234,6 +234,6 @@ void vhci_tx_loop(struct usbip_task *ut)
 				(!list_empty(&vdev->priv_tx) ||
 				 !list_empty(&vdev->unlink_tx)));
 
-		usbip_dbg_vhci_tx("pending urbs ?, now wake up\n");
+		dbg_vhci_tx("pending urbs ?, now wake up\n");
 	}
 }

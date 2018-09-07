@@ -10,8 +10,6 @@
 #ifndef ASMARM_ARCH_KEYPAD_H
 #define ASMARM_ARCH_KEYPAD_H
 
-#warning: Please update the board to use matrix_keypad.h instead
-
 struct omap_kp_platform_data {
 	int rows;
 	int cols;

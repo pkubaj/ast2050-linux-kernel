@@ -48,34 +48,50 @@
 
 struct xqmstats xqmstats;
 
-static int xqm_proc_show(struct seq_file *m, void *v)
+STATIC int
+xfs_qm_read_xfsquota(
+	char		*buffer,
+	char		**start,
+	off_t		offset,
+	int		count,
+	int		*eof,
+	void		*data)
 {
+	int		len;
+
 	/* maximum; incore; ratio free to inuse; freelist */
-	seq_printf(m, "%d\t%d\t%d\t%u\n",
+	len = sprintf(buffer, "%d\t%d\t%d\t%u\n",
 			ndquot,
 			xfs_Gqm? atomic_read(&xfs_Gqm->qm_totaldquots) : 0,
 			xfs_Gqm? xfs_Gqm->qm_dqfree_ratio : 0,
 			xfs_Gqm? xfs_Gqm->qm_dqfreelist.qh_nelems : 0);
-	return 0;
+
+	if (offset >= len) {
+		*start = buffer;
+		*eof = 1;
+		return 0;
+	}
+	*start = buffer + offset;
+	if ((len -= offset) > count)
+		return count;
+	*eof = 1;
+
+	return len;
 }
 
-static int xqm_proc_open(struct inode *inode, struct file *file)
+STATIC int
+xfs_qm_read_stats(
+	char		*buffer,
+	char		**start,
+	off_t		offset,
+	int		count,
+	int		*eof,
+	void		*data)
 {
-	return single_open(file, xqm_proc_show, NULL);
-}
+	int		len;
 
-static const struct file_operations xqm_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= xqm_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int xqmstat_proc_show(struct seq_file *m, void *v)
-{
 	/* quota performance statistics */
-	seq_printf(m, "qm %u %u %u %u %u %u %u %u\n",
+	len = sprintf(buffer, "qm %u %u %u %u %u %u %u %u\n",
 			xqmstats.xs_qm_dqreclaims,
 			xqmstats.xs_qm_dqreclaim_misses,
 			xqmstats.xs_qm_dquot_dups,
@@ -84,27 +100,25 @@ static int xqmstat_proc_show(struct seq_file *m, void *v)
 			xqmstats.xs_qm_dqwants,
 			xqmstats.xs_qm_dqshake_reclaims,
 			xqmstats.xs_qm_dqinact_reclaims);
-	return 0;
-}
 
-static int xqmstat_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, xqmstat_proc_show, NULL);
-}
+	if (offset >= len) {
+		*start = buffer;
+		*eof = 1;
+		return 0;
+	}
+	*start = buffer + offset;
+	if ((len -= offset) > count)
+		return count;
+	*eof = 1;
 
-static const struct file_operations xqmstat_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= xqmstat_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+	return len;
+}
 
 void
 xfs_qm_init_procfs(void)
 {
-	proc_create("fs/xfs/xqmstat", 0, NULL, &xqmstat_proc_fops);
-	proc_create("fs/xfs/xqm", 0, NULL, &xqm_proc_fops);
+	create_proc_read_entry("fs/xfs/xqmstat", 0, NULL, xfs_qm_read_stats, NULL);
+	create_proc_read_entry("fs/xfs/xqm", 0, NULL, xfs_qm_read_xfsquota, NULL);
 }
 
 void

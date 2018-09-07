@@ -163,12 +163,12 @@ static struct hid_driver sjoy_driver = {
 	.probe = sjoy_probe,
 };
 
-static int __init sjoy_init(void)
+static int sjoy_init(void)
 {
 	return hid_register_driver(&sjoy_driver);
 }
 
-static void __exit sjoy_exit(void)
+static void sjoy_exit(void)
 {
 	hid_unregister_driver(&sjoy_driver);
 }

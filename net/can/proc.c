@@ -196,8 +196,8 @@ void can_stat_update(unsigned long data)
  *
  */
 
-static void can_print_rcvlist(struct seq_file *m, struct hlist_head *rx_list,
-			      struct net_device *dev)
+static int can_print_rcvlist(char *page, int len, struct hlist_head *rx_list,
+			     struct net_device *dev)
 {
 	struct receiver *r;
 	struct hlist_node *n;
@@ -208,188 +208,199 @@ static void can_print_rcvlist(struct seq_file *m, struct hlist_head *rx_list,
 			"   %-5s  %08X  %08x  %08x  %08x  %8ld  %s\n" :
 			"   %-5s     %03X    %08x  %08lx  %08lx  %8ld  %s\n";
 
-		seq_printf(m, fmt, DNAME(dev), r->can_id, r->mask,
+		len += snprintf(page + len, PAGE_SIZE - len, fmt,
+				DNAME(dev), r->can_id, r->mask,
 				(unsigned long)r->func, (unsigned long)r->data,
 				r->matches, r->ident);
+
+		/* does a typical line fit into the current buffer? */
+
+		/* 100 Bytes before end of buffer */
+		if (len > PAGE_SIZE - 100) {
+			/* mark output cut off */
+			len += snprintf(page + len, PAGE_SIZE - len,
+					"   (..)\n");
+			break;
+		}
 	}
 	rcu_read_unlock();
+
+	return len;
 }
 
-static void can_print_recv_banner(struct seq_file *m)
+static int can_print_recv_banner(char *page, int len)
 {
 	/*
 	 *                  can1.  00000000  00000000  00000000
 	 *                 .......          0  tp20
 	 */
-	seq_puts(m, "  device   can_id   can_mask  function"
+	len += snprintf(page + len, PAGE_SIZE - len,
+			"  device   can_id   can_mask  function"
 			"  userdata   matches  ident\n");
+
+	return len;
 }
 
-static int can_stats_proc_show(struct seq_file *m, void *v)
+static int can_proc_read_stats(char *page, char **start, off_t off,
+			       int count, int *eof, void *data)
 {
-	seq_putc(m, '\n');
-	seq_printf(m, " %8ld transmitted frames (TXF)\n", can_stats.tx_frames);
-	seq_printf(m, " %8ld received frames (RXF)\n", can_stats.rx_frames);
-	seq_printf(m, " %8ld matched frames (RXMF)\n", can_stats.matches);
+	int len = 0;
 
-	seq_putc(m, '\n');
+	len += snprintf(page + len, PAGE_SIZE - len, "\n");
+	len += snprintf(page + len, PAGE_SIZE - len,
+			" %8ld transmitted frames (TXF)\n",
+			can_stats.tx_frames);
+	len += snprintf(page + len, PAGE_SIZE - len,
+			" %8ld received frames (RXF)\n", can_stats.rx_frames);
+	len += snprintf(page + len, PAGE_SIZE - len,
+			" %8ld matched frames (RXMF)\n", can_stats.matches);
+
+	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
 	if (can_stattimer.function == can_stat_update) {
-		seq_printf(m, " %8ld %% total match ratio (RXMR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld %% total match ratio (RXMR)\n",
 				can_stats.total_rx_match_ratio);
 
-		seq_printf(m, " %8ld frames/s total tx rate (TXR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld frames/s total tx rate (TXR)\n",
 				can_stats.total_tx_rate);
-		seq_printf(m, " %8ld frames/s total rx rate (RXR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld frames/s total rx rate (RXR)\n",
 				can_stats.total_rx_rate);
 
-		seq_putc(m, '\n');
+		len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-		seq_printf(m, " %8ld %% current match ratio (CRXMR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld %% current match ratio (CRXMR)\n",
 				can_stats.current_rx_match_ratio);
 
-		seq_printf(m, " %8ld frames/s current tx rate (CTXR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld frames/s current tx rate (CTXR)\n",
 				can_stats.current_tx_rate);
-		seq_printf(m, " %8ld frames/s current rx rate (CRXR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld frames/s current rx rate (CRXR)\n",
 				can_stats.current_rx_rate);
 
-		seq_putc(m, '\n');
+		len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-		seq_printf(m, " %8ld %% max match ratio (MRXMR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld %% max match ratio (MRXMR)\n",
 				can_stats.max_rx_match_ratio);
 
-		seq_printf(m, " %8ld frames/s max tx rate (MTXR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld frames/s max tx rate (MTXR)\n",
 				can_stats.max_tx_rate);
-		seq_printf(m, " %8ld frames/s max rx rate (MRXR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld frames/s max rx rate (MRXR)\n",
 				can_stats.max_rx_rate);
 
-		seq_putc(m, '\n');
+		len += snprintf(page + len, PAGE_SIZE - len, "\n");
 	}
 
-	seq_printf(m, " %8ld current receive list entries (CRCV)\n",
+	len += snprintf(page + len, PAGE_SIZE - len,
+			" %8ld current receive list entries (CRCV)\n",
 			can_pstats.rcv_entries);
-	seq_printf(m, " %8ld maximum receive list entries (MRCV)\n",
+	len += snprintf(page + len, PAGE_SIZE - len,
+			" %8ld maximum receive list entries (MRCV)\n",
 			can_pstats.rcv_entries_max);
 
 	if (can_pstats.stats_reset)
-		seq_printf(m, "\n %8ld statistic resets (STR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				"\n %8ld statistic resets (STR)\n",
 				can_pstats.stats_reset);
 
 	if (can_pstats.user_reset)
-		seq_printf(m, " %8ld user statistic resets (USTR)\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				" %8ld user statistic resets (USTR)\n",
 				can_pstats.user_reset);
 
-	seq_putc(m, '\n');
-	return 0;
+	len += snprintf(page + len, PAGE_SIZE - len, "\n");
+
+	*eof = 1;
+	return len;
 }
 
-static int can_stats_proc_open(struct inode *inode, struct file *file)
+static int can_proc_read_reset_stats(char *page, char **start, off_t off,
+				     int count, int *eof, void *data)
 {
-	return single_open(file, can_stats_proc_show, NULL);
-}
+	int len = 0;
 
-static const struct file_operations can_stats_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= can_stats_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int can_reset_stats_proc_show(struct seq_file *m, void *v)
-{
 	user_reset = 1;
 
 	if (can_stattimer.function == can_stat_update) {
-		seq_printf(m, "Scheduled statistic reset #%ld.\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				"Scheduled statistic reset #%ld.\n",
 				can_pstats.stats_reset + 1);
 
 	} else {
 		if (can_stats.jiffies_init != jiffies)
 			can_init_stats();
 
-		seq_printf(m, "Performed statistic reset #%ld.\n",
+		len += snprintf(page + len, PAGE_SIZE - len,
+				"Performed statistic reset #%ld.\n",
 				can_pstats.stats_reset);
 	}
-	return 0;
+
+	*eof = 1;
+	return len;
 }
 
-static int can_reset_stats_proc_open(struct inode *inode, struct file *file)
+static int can_proc_read_version(char *page, char **start, off_t off,
+				 int count, int *eof, void *data)
 {
-	return single_open(file, can_reset_stats_proc_show, NULL);
+	int len = 0;
+
+	len += snprintf(page + len, PAGE_SIZE - len, "%s\n",
+			CAN_VERSION_STRING);
+	*eof = 1;
+	return len;
 }
 
-static const struct file_operations can_reset_stats_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= can_reset_stats_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int can_version_proc_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "%s\n", CAN_VERSION_STRING);
-	return 0;
-}
-
-static int can_version_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, can_version_proc_show, NULL);
-}
-
-static const struct file_operations can_version_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= can_version_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int can_rcvlist_proc_show(struct seq_file *m, void *v)
+static int can_proc_read_rcvlist(char *page, char **start, off_t off,
+				 int count, int *eof, void *data)
 {
 	/* double cast to prevent GCC warning */
-	int idx = (int)(long)m->private;
+	int idx = (int)(long)data;
+	int len = 0;
 	struct dev_rcv_lists *d;
 	struct hlist_node *n;
 
-	seq_printf(m, "\nreceive list '%s':\n", rx_list_name[idx]);
+	len += snprintf(page + len, PAGE_SIZE - len,
+			"\nreceive list '%s':\n", rx_list_name[idx]);
 
 	rcu_read_lock();
 	hlist_for_each_entry_rcu(d, n, &can_rx_dev_list, list) {
 
 		if (!hlist_empty(&d->rx[idx])) {
-			can_print_recv_banner(m);
-			can_print_rcvlist(m, &d->rx[idx], d->dev);
+			len = can_print_recv_banner(page, len);
+			len = can_print_rcvlist(page, len, &d->rx[idx], d->dev);
 		} else
-			seq_printf(m, "  (%s: no entry)\n", DNAME(d->dev));
+			len += snprintf(page + len, PAGE_SIZE - len,
+					"  (%s: no entry)\n", DNAME(d->dev));
+
+		/* exit on end of buffer? */
+		if (len > PAGE_SIZE - 100)
+			break;
 	}
 	rcu_read_unlock();
 
-	seq_putc(m, '\n');
-	return 0;
+	len += snprintf(page + len, PAGE_SIZE - len, "\n");
+
+	*eof = 1;
+	return len;
 }
 
-static int can_rcvlist_proc_open(struct inode *inode, struct file *file)
+static int can_proc_read_rcvlist_sff(char *page, char **start, off_t off,
+				     int count, int *eof, void *data)
 {
-	return single_open(file, can_rcvlist_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations can_rcvlist_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= can_rcvlist_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int can_rcvlist_sff_proc_show(struct seq_file *m, void *v)
-{
+	int len = 0;
 	struct dev_rcv_lists *d;
 	struct hlist_node *n;
 
 	/* RX_SFF */
-	seq_puts(m, "\nreceive list 'rx_sff':\n");
+	len += snprintf(page + len, PAGE_SIZE - len,
+			"\nreceive list 'rx_sff':\n");
 
 	rcu_read_lock();
 	hlist_for_each_entry_rcu(d, n, &can_rx_dev_list, list) {
@@ -402,37 +413,45 @@ static int can_rcvlist_sff_proc_show(struct seq_file *m, void *v)
 			}
 
 		if (!all_empty) {
-			can_print_recv_banner(m);
+			len = can_print_recv_banner(page, len);
 			for (i = 0; i < 0x800; i++) {
-				if (!hlist_empty(&d->rx_sff[i]))
-					can_print_rcvlist(m, &d->rx_sff[i],
-							  d->dev);
+				if (!hlist_empty(&d->rx_sff[i]) &&
+				    len < PAGE_SIZE - 100)
+					len = can_print_rcvlist(page, len,
+								&d->rx_sff[i],
+								d->dev);
 			}
 		} else
-			seq_printf(m, "  (%s: no entry)\n", DNAME(d->dev));
+			len += snprintf(page + len, PAGE_SIZE - len,
+					"  (%s: no entry)\n", DNAME(d->dev));
+
+		/* exit on end of buffer? */
+		if (len > PAGE_SIZE - 100)
+			break;
 	}
 	rcu_read_unlock();
 
-	seq_putc(m, '\n');
-	return 0;
-}
+	len += snprintf(page + len, PAGE_SIZE - len, "\n");
 
-static int can_rcvlist_sff_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, can_rcvlist_sff_proc_show, NULL);
+	*eof = 1;
+	return len;
 }
-
-static const struct file_operations can_rcvlist_sff_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= can_rcvlist_sff_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 /*
  * proc utility functions
  */
+
+static struct proc_dir_entry *can_create_proc_readentry(const char *name,
+							mode_t mode,
+							read_proc_t *read_proc,
+							void *data)
+{
+	if (can_dir)
+		return create_proc_read_entry(name, mode, can_dir, read_proc,
+					      data);
+	else
+		return NULL;
+}
 
 static void can_remove_proc_readentry(const char *name)
 {
@@ -455,24 +474,24 @@ void can_init_proc(void)
 	}
 
 	/* own procfs entries from the AF_CAN core */
-	pde_version     = proc_create(CAN_PROC_VERSION, 0644, can_dir,
-				      &can_version_proc_fops);
-	pde_stats       = proc_create(CAN_PROC_STATS, 0644, can_dir,
-				      &can_stats_proc_fops);
-	pde_reset_stats = proc_create(CAN_PROC_RESET_STATS, 0644, can_dir,
-				      &can_reset_stats_proc_fops);
-	pde_rcvlist_err = proc_create_data(CAN_PROC_RCVLIST_ERR, 0644, can_dir,
-					   &can_rcvlist_proc_fops, (void *)RX_ERR);
-	pde_rcvlist_all = proc_create_data(CAN_PROC_RCVLIST_ALL, 0644, can_dir,
-					   &can_rcvlist_proc_fops, (void *)RX_ALL);
-	pde_rcvlist_fil = proc_create_data(CAN_PROC_RCVLIST_FIL, 0644, can_dir,
-					   &can_rcvlist_proc_fops, (void *)RX_FIL);
-	pde_rcvlist_inv = proc_create_data(CAN_PROC_RCVLIST_INV, 0644, can_dir,
-					   &can_rcvlist_proc_fops, (void *)RX_INV);
-	pde_rcvlist_eff = proc_create_data(CAN_PROC_RCVLIST_EFF, 0644, can_dir,
-					   &can_rcvlist_proc_fops, (void *)RX_EFF);
-	pde_rcvlist_sff = proc_create(CAN_PROC_RCVLIST_SFF, 0644, can_dir,
-				      &can_rcvlist_sff_proc_fops);
+	pde_version     = can_create_proc_readentry(CAN_PROC_VERSION, 0644,
+					can_proc_read_version, NULL);
+	pde_stats       = can_create_proc_readentry(CAN_PROC_STATS, 0644,
+					can_proc_read_stats, NULL);
+	pde_reset_stats = can_create_proc_readentry(CAN_PROC_RESET_STATS, 0644,
+					can_proc_read_reset_stats, NULL);
+	pde_rcvlist_err = can_create_proc_readentry(CAN_PROC_RCVLIST_ERR, 0644,
+					can_proc_read_rcvlist, (void *)RX_ERR);
+	pde_rcvlist_all = can_create_proc_readentry(CAN_PROC_RCVLIST_ALL, 0644,
+					can_proc_read_rcvlist, (void *)RX_ALL);
+	pde_rcvlist_fil = can_create_proc_readentry(CAN_PROC_RCVLIST_FIL, 0644,
+					can_proc_read_rcvlist, (void *)RX_FIL);
+	pde_rcvlist_inv = can_create_proc_readentry(CAN_PROC_RCVLIST_INV, 0644,
+					can_proc_read_rcvlist, (void *)RX_INV);
+	pde_rcvlist_eff = can_create_proc_readentry(CAN_PROC_RCVLIST_EFF, 0644,
+					can_proc_read_rcvlist, (void *)RX_EFF);
+	pde_rcvlist_sff = can_create_proc_readentry(CAN_PROC_RCVLIST_SFF, 0644,
+					can_proc_read_rcvlist_sff, NULL);
 }
 
 /*

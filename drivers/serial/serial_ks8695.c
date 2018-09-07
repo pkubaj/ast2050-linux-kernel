@@ -110,11 +110,7 @@ static struct console ks8695_console;
 static void ks8695uart_stop_tx(struct uart_port *port)
 {
 	if (tx_enabled(port)) {
-		/* use disable_irq_nosync() and not disable_irq() to avoid self
-		 * imposed deadlock by not waiting for irq handler to end,
-		 * since this ks8695uart_stop_tx() is called from interrupt context.
-		 */
-		disable_irq_nosync(KS8695_IRQ_UART_TX);
+		disable_irq(KS8695_IRQ_UART_TX);
 		tx_enable(port, 0);
 	}
 }
@@ -154,7 +150,7 @@ static void ks8695uart_disable_ms(struct uart_port *port)
 static irqreturn_t ks8695uart_rx_chars(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
-	struct tty_struct *tty = port->state->port.tty;
+	struct tty_struct *tty = port->info->port.tty;
 	unsigned int status, ch, lsr, flg, max_count = 256;
 
 	status = UART_GET_LSR(port);		/* clears pending LSR interrupts */
@@ -210,7 +206,7 @@ ignore_char:
 static irqreturn_t ks8695uart_tx_chars(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
-	struct circ_buf *xmit = &port->state->xmit;
+	struct circ_buf *xmit = &port->info->xmit;
 	unsigned int count;
 
 	if (port->x_char) {
@@ -266,7 +262,7 @@ static irqreturn_t ks8695uart_modem_status(int irq, void *dev_id)
 	if (status & URMS_URTERI)
 		port->icount.rng++;
 
-	wake_up_interruptible(&port->state->port.delta_msr_wait);
+	wake_up_interruptible(&port->info->delta_msr_wait);
 
 	return IRQ_HANDLED;
 }

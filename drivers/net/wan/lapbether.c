@@ -147,8 +147,7 @@ static int lapbeth_data_indication(struct net_device *dev, struct sk_buff *skb)
 /*
  *	Send a LAPB frame via an ethernet interface
  */
-static netdev_tx_t lapbeth_xmit(struct sk_buff *skb,
-				      struct net_device *dev)
+static int lapbeth_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	int err;
 

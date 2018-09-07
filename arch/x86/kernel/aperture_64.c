@@ -20,7 +20,6 @@
 #include <linux/bitops.h>
 #include <linux/ioport.h>
 #include <linux/suspend.h>
-#include <linux/kmemleak.h>
 #include <asm/e820.h>
 #include <asm/io.h>
 #include <asm/iommu.h>
@@ -95,11 +94,6 @@ static u32 __init allocate_aperture(void)
 	 * code for safe
 	 */
 	p = __alloc_bootmem_nopanic(aper_size, aper_size, 512ULL<<20);
-	/*
-	 * Kmemleak should not scan this block as it may not be mapped via the
-	 * kernel direct mapping.
-	 */
-	kmemleak_ignore(p);
 	if (!p || __pa(p)+aper_size > 0xffffffff) {
 		printk(KERN_ERR
 			"Cannot allocate aperture memory hole (%p,%uK)\n",
@@ -389,7 +383,6 @@ void __init gart_iommu_hole_init(void)
 	for (i = 0; i < ARRAY_SIZE(bus_dev_ranges); i++) {
 		int bus;
 		int dev_base, dev_limit;
-		u32 ctl;
 
 		bus = bus_dev_ranges[i].bus;
 		dev_base = bus_dev_ranges[i].dev_base;
@@ -402,19 +395,7 @@ void __init gart_iommu_hole_init(void)
 			iommu_detected = 1;
 			gart_iommu_aperture = 1;
 
-			ctl = read_pci_config(bus, slot, 3,
-					      AMD64_GARTAPERTURECTL);
-
-			/*
-			 * Before we do anything else disable the GART. It may
-			 * still be enabled if we boot into a crash-kernel here.
-			 * Reconfiguring the GART while it is enabled could have
-			 * unknown side-effects.
-			 */
-			ctl &= ~GARTEN;
-			write_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL, ctl);
-
-			aper_order = (ctl >> 1) & 7;
+			aper_order = (read_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL) >> 1) & 7;
 			aper_size = (32 * 1024 * 1024) << aper_order;
 			aper_base = read_pci_config(bus, slot, 3, AMD64_GARTAPERTUREBASE) & 0x7fff;
 			aper_base <<= 25;

@@ -830,8 +830,7 @@ enum {
 int snd_hda_bus_new(struct snd_card *card, const struct hda_bus_template *temp,
 		    struct hda_bus **busp);
 int snd_hda_codec_new(struct hda_bus *bus, unsigned int codec_addr,
-		      struct hda_codec **codecp);
-int snd_hda_codec_configure(struct hda_codec *codec);
+		      int do_init, struct hda_codec **codecp);
 
 /*
  * low level functions
@@ -937,13 +936,6 @@ void snd_hda_power_down(struct hda_codec *codec);
 static inline void snd_hda_power_up(struct hda_codec *codec) {}
 static inline void snd_hda_power_down(struct hda_codec *codec) {}
 #define snd_hda_codec_needs_resume(codec) 1
-#endif
-
-#ifdef CONFIG_SND_HDA_PATCH_LOADER
-/*
- * patch firmware
- */
-int snd_hda_load_patch(struct hda_bus *bus, const char *patch);
 #endif
 
 /*

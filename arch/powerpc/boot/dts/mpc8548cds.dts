@@ -100,21 +100,6 @@
 			interrupts = <43 2>;
 			interrupt-parent = <&mpic>;
 			dfsrr;
-
-			eeprom@50 {
-				compatible = "atmel,24c64";
-				reg = <0x50>;
-			};
-
-			eeprom@56 {
-				compatible = "atmel,24c64";
-				reg = <0x56>;
-			};
-
-			eeprom@57 {
-				compatible = "atmel,24c64";
-				reg = <0x57>;
-			};
 		};
 
 		i2c@3100 {
@@ -126,11 +111,6 @@
 			interrupts = <43 2>;
 			interrupt-parent = <&mpic>;
 			dfsrr;
-
-			eeprom@50 {
-				compatible = "atmel,24c64";
-				reg = <0x50>;
-			};
 		};
 
 		dma@21300 {

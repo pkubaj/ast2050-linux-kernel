@@ -31,14 +31,6 @@
 #include <sound/control.h>
 #include <sound/info.h>
 
-/* monitor files for graceful shutdown (hotplug) */
-struct snd_monitor_file {
-	struct file *file;
-	const struct file_operations *disconnected_f_op;
-	struct list_head shutdown_list;	/* still need to shutdown */
-	struct list_head list;	/* link of monitor files */
-};
-
 static DEFINE_SPINLOCK(shutdown_lock);
 static LIST_HEAD(shutdown_files);
 
@@ -206,7 +198,6 @@ int snd_card_create(int idx, const char *xid,
 	INIT_LIST_HEAD(&card->devices);
 	init_rwsem(&card->controls_rwsem);
 	rwlock_init(&card->ctl_files_rwlock);
-	mutex_init(&card->user_ctl_lock);
 	INIT_LIST_HEAD(&card->controls);
 	INIT_LIST_HEAD(&card->ctl_files);
 	spin_lock_init(&card->files_lock);
@@ -849,7 +840,6 @@ int snd_card_file_add(struct snd_card *card, struct file *file)
 		return -ENOMEM;
 	mfile->file = file;
 	mfile->disconnected_f_op = NULL;
-	INIT_LIST_HEAD(&mfile->shutdown_list);
 	spin_lock(&card->files_lock);
 	if (card->shutdown) {
 		spin_unlock(&card->files_lock);
@@ -885,9 +875,6 @@ int snd_card_file_remove(struct snd_card *card, struct file *file)
 	list_for_each_entry(mfile, &card->files_list, list) {
 		if (mfile->file == file) {
 			list_del(&mfile->list);
-			spin_lock(&shutdown_lock);
-			list_del(&mfile->shutdown_list);
-			spin_unlock(&shutdown_lock);
 			if (mfile->disconnected_f_op)
 				fops_put(mfile->disconnected_f_op);
 			found = mfile;

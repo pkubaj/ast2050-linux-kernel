@@ -224,13 +224,12 @@ static void pipe_grant_credits(struct sock *sk)
 static int pipe_rcv_status(struct sock *sk, struct sk_buff *skb)
 {
 	struct pep_sock *pn = pep_sk(sk);
-	struct pnpipehdr *hdr;
+	struct pnpipehdr *hdr = pnp_hdr(skb);
 	int wake = 0;
 
 	if (!pskb_may_pull(skb, sizeof(*hdr) + 4))
 		return -EINVAL;
 
-	hdr = pnp_hdr(skb);
 	if (hdr->data[0] != PN_PEP_TYPE_COMMON) {
 		LIMIT_NETDEBUG(KERN_DEBUG"Phonet unknown PEP type: %u\n",
 				(unsigned)hdr->data[0]);
@@ -347,10 +346,8 @@ static int pipe_do_rcv(struct sock *sk, struct sk_buff *skb)
 		break;
 
 	case PNS_PEP_CTRL_REQ:
-		if (skb_queue_len(&pn->ctrlreq_queue) >= PNPIPE_CTRLREQ_MAX) {
-			atomic_inc(&sk->sk_drops);
+		if (skb_queue_len(&pn->ctrlreq_queue) >= PNPIPE_CTRLREQ_MAX)
 			break;
-		}
 		__skb_pull(skb, 4);
 		queue = &pn->ctrlreq_queue;
 		goto queue;
@@ -361,13 +358,10 @@ static int pipe_do_rcv(struct sock *sk, struct sk_buff *skb)
 			err = sock_queue_rcv_skb(sk, skb);
 			if (!err)
 				return 0;
-			if (err == -ENOMEM)
-				atomic_inc(&sk->sk_drops);
 			break;
 		}
 
 		if (pn->rx_credits == 0) {
-			atomic_inc(&sk->sk_drops);
 			err = -ENOBUFS;
 			break;
 		}
@@ -743,7 +737,7 @@ static int pep_init(struct sock *sk)
 }
 
 static int pep_setsockopt(struct sock *sk, int level, int optname,
-				char __user *optval, unsigned int optlen)
+				char __user *optval, int optlen)
 {
 	struct pep_sock *pn = pep_sk(sk);
 	int val = 0, err = 0;
@@ -850,9 +844,6 @@ static int pep_sendmsg(struct kiocb *iocb, struct sock *sk,
 	long timeo;
 	int flags = msg->msg_flags;
 	int err, done;
-
-	if (len > 65535)
-		return -EMSGSIZE;
 
 	if (msg->msg_flags & MSG_OOB || !(msg->msg_flags & MSG_EOR))
 		return -EOPNOTSUPP;

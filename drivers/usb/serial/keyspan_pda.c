@@ -290,7 +290,7 @@ static void keyspan_pda_rx_unthrottle(struct tty_struct *tty)
 	/* just restart the receive interrupt URB */
 	dbg("keyspan_pda_rx_unthrottle port %d", port->number);
 	port->interrupt_in_urb->dev = port->serial->dev;
-	if (usb_submit_urb(port->interrupt_in_urb, GFP_KERNEL))
+	if (usb_submit_urb(port->interrupt_in_urb, GFP_ATOMIC))
 		dbg(" usb_submit_urb(read urb) failed");
 	return;
 }
@@ -663,9 +663,25 @@ static void keyspan_pda_dtr_rts(struct usb_serial_port *port, int on)
 	}
 }
 
+static int keyspan_pda_carrier_raised(struct usb_serial_port *port)
+{
+	struct usb_serial *serial = port->serial;
+	unsigned char modembits;
+
+	/* If we can read the modem status and the DCD is low then
+	   carrier is not raised yet */
+	if (keyspan_pda_get_modem_info(serial, &modembits) >= 0) {
+		if (!(modembits & (1>>6)))
+			return 0;
+	}
+	/* Carrier raised, or we failed (eg disconnected) so
+	   progress accordingly */
+	return 1;
+}
+
 
 static int keyspan_pda_open(struct tty_struct *tty,
-					struct usb_serial_port *port)
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct usb_serial *serial = port->serial;
 	unsigned char room;
@@ -838,6 +854,7 @@ static struct usb_serial_driver keyspan_pda_device = {
 	.id_table =		id_table_std,
 	.num_ports =		1,
 	.dtr_rts =		keyspan_pda_dtr_rts,
+	.carrier_raised	=	keyspan_pda_carrier_raised,
 	.open =			keyspan_pda_open,
 	.close =		keyspan_pda_close,
 	.write =		keyspan_pda_write,

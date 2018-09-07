@@ -165,12 +165,6 @@ static __init int dccpprobe_init(void)
 		goto err0;
 
 	ret = register_jprobe(&dccp_send_probe);
-	if (ret) {
-		ret = request_module("dccp");
-		if (!ret)
-			ret = register_jprobe(&dccp_send_probe);
-	}
-
 	if (ret)
 		goto err1;
 

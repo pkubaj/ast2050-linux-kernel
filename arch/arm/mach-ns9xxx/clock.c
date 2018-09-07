@@ -195,7 +195,7 @@ static int clk_debugfs_open(struct inode *inode, struct file *file)
 	return single_open(file, clk_debugfs_show, NULL);
 }
 
-static const struct file_operations clk_debugfs_operations = {
+static struct file_operations clk_debugfs_operations = {
 	.open = clk_debugfs_open,
 	.read = seq_read,
 	.llseek = seq_lseek,

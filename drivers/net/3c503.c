@@ -380,16 +380,10 @@ out:
     return retval;
 }
 
-static irqreturn_t el2_probe_interrupt(int irq, void *seen)
-{
-	*(bool *)seen = true;
-	return IRQ_HANDLED;
-}
-
 static int
 el2_open(struct net_device *dev)
 {
-    int retval;
+    int retval = -EAGAIN;
 
     if (dev->irq < 2) {
 	int irqlist[] = {5, 9, 3, 4, 0};
@@ -397,37 +391,20 @@ el2_open(struct net_device *dev)
 
 	outb(EGACFR_NORM, E33G_GACFR);	/* Enable RAM and interrupts. */
 	do {
-		bool seen;
-
-		retval = request_irq(*irqp, el2_probe_interrupt, 0,
-				     dev->name, &seen);
-		if (retval == -EBUSY)
-			continue;
-		if (retval < 0)
-			goto err_disable;
-
+	    if (request_irq (*irqp, NULL, 0, "bogus", dev) != -EBUSY) {
 		/* Twinkle the interrupt, and check if it's seen. */
-		seen = false;
-		smp_wmb();
+		unsigned long cookie = probe_irq_on();
 		outb_p(0x04 << ((*irqp == 9) ? 2 : *irqp), E33G_IDCFR);
 		outb_p(0x00, E33G_IDCFR);
-		msleep(1);
-		free_irq(*irqp, el2_probe_interrupt);
-		if (!seen)
-			continue;
-
-		retval = request_irq(dev->irq = *irqp, eip_interrupt, 0,
-				     dev->name, dev);
-		if (retval == -EBUSY)
-			continue;
-		if (retval < 0)
-			goto err_disable;
+		if (*irqp == probe_irq_off(cookie)	/* It's a good IRQ line! */
+		    && ((retval = request_irq(dev->irq = *irqp,
+		    eip_interrupt, 0, dev->name, dev)) == 0))
+		    break;
+	    }
 	} while (*++irqp);
-
 	if (*irqp == 0) {
-	err_disable:
 	    outb(EGACFR_IRQOFF, E33G_GACFR);	/* disable interrupts. */
-	    return -EAGAIN;
+	    return retval;
 	}
     } else {
 	if ((retval = request_irq(dev->irq, eip_interrupt, 0, dev->name, dev))) {

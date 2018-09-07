@@ -9,6 +9,7 @@ endif
 # Chip mappings
 obj-$(CONFIG_MTD_CDB89712)	+= cdb89712.o
 obj-$(CONFIG_MTD_ARM_INTEGRATOR)+= integrator-flash.o
+obj-$(CONFIG_MTD_AST)		+= ast-nor.o
 obj-$(CONFIG_MTD_CFI_FLAGADM)	+= cfi_flagadm.o
 obj-$(CONFIG_MTD_DC21285)	+= dc21285.o
 obj-$(CONFIG_MTD_DILNETPC)	+= dilnetpc.o
@@ -60,4 +61,3 @@ obj-$(CONFIG_MTD_INTEL_VR_NOR)	+= intel_vr_nor.o
 obj-$(CONFIG_MTD_BFIN_ASYNC)	+= bfin-async-flash.o
 obj-$(CONFIG_MTD_RBTX4939)	+= rbtx4939-flash.o
 obj-$(CONFIG_MTD_VMU)		+= vmu-flash.o
-obj-$(CONFIG_MTD_GPIO_ADDR)	+= gpio-addr-flash.o

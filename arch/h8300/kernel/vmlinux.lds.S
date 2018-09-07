@@ -1,6 +1,5 @@
 #define VMLINUX_SYMBOL(_sym_) _##_sym_
 #include <asm-generic/vmlinux.lds.h>
-#include <asm/page.h>
 
 /* target memory map */
 #ifdef CONFIG_H8300H_GENERIC
@@ -80,8 +79,11 @@ SECTIONS
 	SCHED_TEXT
 	LOCK_TEXT
 	__etext = . ;
+	. = ALIGN(16);          /* Exception table              */
+	___start___ex_table = .;
+		*(__ex_table)
+	___stop___ex_table = .;
 	}
-	EXCEPTION_TABLE(16)
 
 	RODATA
 #if defined(CONFIG_ROMKERNEL)
@@ -98,7 +100,8 @@ SECTIONS
 	__sdata = . ;
 	___data_start = . ;
 
-	INIT_TASK_DATA(0x2000)
+	. = ALIGN(0x2000) ;
+		*(.data.init_task)
 	. = ALIGN(0x4) ;
 		DATA_DATA
 	. = ALIGN(0x4) ;
@@ -111,16 +114,24 @@ SECTIONS
 	__einittext = .; 
 		INIT_DATA
 	. = ALIGN(0x4) ;
-	INIT_SETUP(0x4)
 	___setup_start = .;
 		*(.init.setup)
 	. = ALIGN(0x4) ;
 	___setup_end = .;
-	INIT_CALLS
-	CON_INITCALL
+	___initcall_start = .;
+		INITCALLS
+	___initcall_end = .;
+	___con_initcall_start = .;
+		*(.con_initcall.init)
+	___con_initcall_end = .;
 		EXIT_TEXT
 		EXIT_DATA
-	INIT_RAM_FS
+#if defined(CONFIG_BLK_DEV_INITRD)
+		. = ALIGN(4);
+	___initramfs_start = .;
+  		*(.init.ramfs)
+  	___initramfs_end = .;
+#endif
 	. = ALIGN(0x4) ;
 	___init_end = .;
 	__edata = . ;
@@ -141,6 +152,9 @@ SECTIONS
 	__end = . ;
 	__ramstart = .;
 	}
+	/DISCARD/ : {
+		*(.exitcall.exit)
+	}
         .romfs :	
 	{
 		*(.romfs*)
@@ -151,6 +165,4 @@ SECTIONS
 	COMMAND_START = . - 0x200 ;
 	__ramend = . ;
 	}
-
-	DISCARDS
 }

@@ -133,7 +133,8 @@ consider_steal_time(unsigned long new_itm)
 		account_idle_ticks(blocked);
 		run_local_timers();
 
-		rcu_check_callbacks(cpu, user_mode(get_irq_regs()));
+		if (rcu_pending(cpu))
+			rcu_check_callbacks(cpu, user_mode(get_irq_regs()));
 
 		scheduler_tick();
 		run_posix_cpu_timers(p);

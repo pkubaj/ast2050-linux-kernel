@@ -40,7 +40,7 @@ static int debugmode = 0;
 MODULE_DESCRIPTION("CAPI4Linux: Interface to ISDN4Linux");
 MODULE_AUTHOR("Carsten Paeth");
 MODULE_LICENSE("GPL");
-module_param(debugmode, uint, S_IRUGO|S_IWUSR);
+module_param(debugmode, uint, 0);
 
 /* -------- type definitions ----------------------------------------- */
 
@@ -671,8 +671,8 @@ static void n0(capidrv_contr * card, capidrv_ncci * ncci)
 				 NULL,	/* Useruserdata */   /* $$$$ */
 				 NULL	/* Facilitydataarray */
 	);
-	plci_change_state(card, ncci->plcip, EV_PLCI_DISCONNECT_REQ);
 	send_message(card, &cmsg);
+	plci_change_state(card, ncci->plcip, EV_PLCI_DISCONNECT_REQ);
 
 	cmd.command = ISDN_STAT_BHUP;
 	cmd.driver = card->myid;
@@ -924,8 +924,8 @@ static void handle_incoming_call(capidrv_contr * card, _cmsg * cmsg)
 		 */
 		capi_cmsg_answer(cmsg);
 		cmsg->Reject = 1;	/* ignore */
-		plci_change_state(card, plcip, EV_PLCI_CONNECT_REJECT);
 		send_message(card, cmsg);
+		plci_change_state(card, plcip, EV_PLCI_CONNECT_REJECT);
 		printk(KERN_INFO "capidrv-%d: incoming call %s,%d,%d,%s ignored\n",
 			card->contrnr,
 			cmd.parm.setup.phone,
@@ -974,8 +974,8 @@ static void handle_incoming_call(capidrv_contr * card, _cmsg * cmsg)
 	case 2:		/* Call will be rejected. */
 		capi_cmsg_answer(cmsg);
 		cmsg->Reject = 2;	/* reject call, normal call clearing */
-		plci_change_state(card, plcip, EV_PLCI_CONNECT_REJECT);
 		send_message(card, cmsg);
+		plci_change_state(card, plcip, EV_PLCI_CONNECT_REJECT);
 		break;
 
 	default:
@@ -983,8 +983,8 @@ static void handle_incoming_call(capidrv_contr * card, _cmsg * cmsg)
 		capi_cmsg_answer(cmsg);
 		cmsg->Reject = 8;	/* reject call,
 					   destination out of order */
-		plci_change_state(card, plcip, EV_PLCI_CONNECT_REJECT);
 		send_message(card, cmsg);
+		plci_change_state(card, plcip, EV_PLCI_CONNECT_REJECT);
 		break;
 	}
 	return;
@@ -1020,8 +1020,8 @@ static void handle_plci(_cmsg * cmsg)
 		card->bchans[plcip->chan].disconnecting = 1;
 		plci_change_state(card, plcip, EV_PLCI_DISCONNECT_IND);
 		capi_cmsg_answer(cmsg);
-		plci_change_state(card, plcip, EV_PLCI_DISCONNECT_RESP);
 		send_message(card, cmsg);
+		plci_change_state(card, plcip, EV_PLCI_DISCONNECT_RESP);
 		break;
 
 	case CAPI_DISCONNECT_CONF:	/* plci */
@@ -1078,8 +1078,8 @@ static void handle_plci(_cmsg * cmsg)
 
 		if (card->bchans[plcip->chan].incoming) {
 			capi_cmsg_answer(cmsg);
-			plci_change_state(card, plcip, EV_PLCI_CONNECT_ACTIVE_IND);
 			send_message(card, cmsg);
+			plci_change_state(card, plcip, EV_PLCI_CONNECT_ACTIVE_IND);
 		} else {
 			capidrv_ncci *nccip;
 			capi_cmsg_answer(cmsg);
@@ -1098,14 +1098,13 @@ static void handle_plci(_cmsg * cmsg)
 						 NULL	/* NCPI */
 			);
 			nccip->msgid = cmsg->Messagenumber;
-			plci_change_state(card, plcip,
-					  EV_PLCI_CONNECT_ACTIVE_IND);
-			ncci_change_state(card, nccip, EV_NCCI_CONNECT_B3_REQ);
 			send_message(card, cmsg);
 			cmd.command = ISDN_STAT_DCONN;
 			cmd.driver = card->myid;
 			cmd.arg = plcip->chan;
 			card->interface.statcallb(&cmd);
+			plci_change_state(card, plcip, EV_PLCI_CONNECT_ACTIVE_IND);
+			ncci_change_state(card, nccip, EV_NCCI_CONNECT_B3_REQ);
 		}
 		break;
 
@@ -1194,8 +1193,8 @@ static void handle_ncci(_cmsg * cmsg)
 			goto notfound;
 
 		capi_cmsg_answer(cmsg);
-		ncci_change_state(card, nccip, EV_NCCI_CONNECT_B3_ACTIVE_IND);
 		send_message(card, cmsg);
+		ncci_change_state(card, nccip, EV_NCCI_CONNECT_B3_ACTIVE_IND);
 
 		cmd.command = ISDN_STAT_BCONN;
 		cmd.driver = card->myid;
@@ -1223,8 +1222,8 @@ static void handle_ncci(_cmsg * cmsg)
 							  0,	/* Reject */
 							  NULL	/* NCPI */
 				);
-				ncci_change_state(card, nccip, EV_NCCI_CONNECT_B3_RESP);
 				send_message(card, cmsg);
+				ncci_change_state(card, nccip, EV_NCCI_CONNECT_B3_RESP);
 				break;
 			}
 			printk(KERN_ERR "capidrv-%d: no mem for ncci, sorry\n",							card->contrnr);
@@ -1300,8 +1299,8 @@ static void handle_ncci(_cmsg * cmsg)
 		card->bchans[nccip->chan].disconnecting = 1;
 		ncci_change_state(card, nccip, EV_NCCI_DISCONNECT_B3_IND);
 		capi_cmsg_answer(cmsg);
-		ncci_change_state(card, nccip, EV_NCCI_DISCONNECT_B3_RESP);
 		send_message(card, cmsg);
+		ncci_change_state(card, nccip, EV_NCCI_DISCONNECT_B3_RESP);
 		break;
 
 	case CAPI_DISCONNECT_B3_CONF:	/* ncci */
@@ -2015,8 +2014,8 @@ static void send_listen(capidrv_contr *card)
 			     card->cipmask,
 			     card->cipmask2,
 			     NULL, NULL);
-	listen_change_state(card, EV_LISTEN_REQ);
 	send_message(card, &cmdcmsg);
+	listen_change_state(card, EV_LISTEN_REQ);
 }
 
 static void listentimerfunc(unsigned long x)

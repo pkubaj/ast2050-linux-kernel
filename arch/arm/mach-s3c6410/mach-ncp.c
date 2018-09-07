@@ -79,7 +79,7 @@ static struct platform_device *ncp_devices[] __initdata = {
 	&s3c_device_i2c0,
 };
 
-static struct map_desc ncp_iodesc[] __initdata = {};
+struct map_desc ncp_iodesc[] = {};
 
 static void __init ncp_map_io(void)
 {

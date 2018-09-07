@@ -44,13 +44,12 @@ static enum hrtimer_restart snd_hrtimer_callback(struct hrtimer *hrt)
 {
 	struct snd_hrtimer *stime = container_of(hrt, struct snd_hrtimer, hrt);
 	struct snd_timer *t = stime->timer;
-	unsigned long oruns;
 
 	if (!atomic_read(&stime->running))
 		return HRTIMER_NORESTART;
 
-	oruns = hrtimer_forward_now(hrt, ns_to_ktime(t->sticks * resolution));
-	snd_timer_interrupt(stime->timer, t->sticks * oruns);
+	hrtimer_forward_now(hrt, ns_to_ktime(t->sticks * resolution));
+	snd_timer_interrupt(stime->timer, t->sticks);
 
 	if (!atomic_read(&stime->running))
 		return HRTIMER_NORESTART;
@@ -89,7 +88,7 @@ static int snd_hrtimer_start(struct snd_timer *t)
 	struct snd_hrtimer *stime = t->private_data;
 
 	atomic_set(&stime->running, 0);
-	hrtimer_try_to_cancel(&stime->hrt);
+	hrtimer_cancel(&stime->hrt);
 	hrtimer_start(&stime->hrt, ns_to_ktime(t->sticks * resolution),
 		      HRTIMER_MODE_REL);
 	atomic_set(&stime->running, 1);
@@ -100,7 +99,6 @@ static int snd_hrtimer_stop(struct snd_timer *t)
 {
 	struct snd_hrtimer *stime = t->private_data;
 	atomic_set(&stime->running, 0);
-	hrtimer_try_to_cancel(&stime->hrt);
 	return 0;
 }
 

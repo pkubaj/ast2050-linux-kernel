@@ -2,12 +2,9 @@
 #define __ASM_ARCH_PXA27x_KEYPAD_H
 
 #include <linux/input.h>
-#include <linux/input/matrix_keypad.h>
 
 #define MAX_MATRIX_KEY_ROWS	(8)
 #define MAX_MATRIX_KEY_COLS	(8)
-#define MATRIX_ROW_SHIFT	(3)
-#define MAX_DIRECT_KEY_NUM	(8)
 
 /* pxa3xx keypad platform specific parameters
  *
@@ -36,7 +33,7 @@ struct pxa27x_keypad_platform_data {
 
 	/* direct keys */
 	int		direct_key_num;
-	unsigned int	direct_key_map[MAX_DIRECT_KEY_NUM];
+	unsigned int	direct_key_map[8];
 
 	/* rotary encoders 0 */
 	int		enable_rotary0;
@@ -53,6 +50,8 @@ struct pxa27x_keypad_platform_data {
 	/* key debounce interval */
 	unsigned int	debounce_interval;
 };
+
+#define KEY(row, col, val)	(((row) << 28) | ((col) << 24) | (val))
 
 extern void pxa_set_keypad_info(struct pxa27x_keypad_platform_data *info);
 

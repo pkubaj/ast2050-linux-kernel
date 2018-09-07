@@ -1553,24 +1553,24 @@ __lcs_start_xmit(struct lcs_card *card, struct sk_buff *skb,
 		 struct net_device *dev)
 {
 	struct lcs_header *header;
-	int rc = NETDEV_TX_OK;
+	int rc = 0;
 
 	LCS_DBF_TEXT(5, trace, "hardxmit");
 	if (skb == NULL) {
 		card->stats.tx_dropped++;
 		card->stats.tx_errors++;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	if (card->state != DEV_STATE_UP) {
 		dev_kfree_skb(skb);
 		card->stats.tx_dropped++;
 		card->stats.tx_errors++;
 		card->stats.tx_carrier_errors++;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	if (skb->protocol == htons(ETH_P_IPV6)) {
 		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	netif_stop_queue(card->dev);
 	spin_lock(&card->lock);

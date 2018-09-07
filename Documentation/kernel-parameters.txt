@@ -57,7 +57,6 @@ parameter is applicable:
 	ISAPNP	ISA PnP code is enabled.
 	ISDN	Appropriate ISDN support is enabled.
 	JOY	Appropriate joystick support is enabled.
-	KVM	Kernel Virtual Machine support is enabled.
 	LIBATA  Libata driver is enabled
 	LP	Printer support is enabled.
 	LOOP	Loopback device support is enabled.
@@ -241,7 +240,7 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	acpi_sleep=	[HW,ACPI] Sleep options
 			Format: { s3_bios, s3_mode, s3_beep, s4_nohwsig,
-				  old_ordering, s4_nonvs, sci_force_enable }
+				  old_ordering, s4_nonvs }
 			See Documentation/power/video.txt for information on
 			s3_bios and s3_mode.
 			s3_beep is for debugging; it makes the PC's speaker beep
@@ -254,9 +253,6 @@ and is between 256 and 4096 characters. It is defined in the file
 			of _PTS is used by default).
 			s4_nonvs prevents the kernel from saving/restoring the
 			ACPI NVS memory during hibernation.
-			sci_force_enable causes the kernel to set SCI_EN directly
-			on resume from S1/S3 (which is against the ACPI spec,
-			but some broken systems don't work without it).
 
 	acpi_use_timer_override [HW,ACPI]
 			Use timer override. For some broken Nvidia NF5 boards
@@ -674,8 +670,7 @@ and is between 256 and 4096 characters. It is defined in the file
 	earlyprintk=	[X86,SH,BLACKFIN]
 			earlyprintk=vga
 			earlyprintk=serial[,ttySn[,baudrate]]
-			earlyprintk=ttySn[,baudrate]
-			earlyprintk=dbgp[debugController#]
+			earlyprintk=dbgp
 
 			Append ",keep" to not disable it when the real console
 			takes over.
@@ -878,7 +873,6 @@ and is between 256 and 4096 characters. It is defined in the file
 	i8042.panicblink=
 			[HW] Frequency with which keyboard LEDs should blink
 			     when kernel panics (default is 0.5 sec)
-	i8042.notimeout	[HW] Ignore timeout condition signalled by conroller
 	i8042.reset	[HW] Reset the controller during init and cleanup
 	i8042.unlock	[HW] Unlock (ignore) the keylock
 
@@ -938,7 +932,7 @@ and is between 256 and 4096 characters. It is defined in the file
 			1 -- enable informational integrity auditing messages.
 
 	ima_hash=	[IMA]
-			Format: { "sha1" | "md5" }
+			Formt: { "sha1" | "md5" }
 			default: "sha1"
 
 	ima_tcb		[IMA]
@@ -1104,44 +1098,6 @@ and is between 256 and 4096 characters. It is defined in the file
 	kstack=N	[X86] Print N words from the kernel stack
 			in oops dumps.
 
-	kvm.ignore_msrs=[KVM] Ignore guest accesses to unhandled MSRs.
-			Default is 0 (don't ignore, but inject #GP)
-
-	kvm.oos_shadow=	[KVM] Disable out-of-sync shadow paging.
-			Default is 1 (enabled)
-
-	kvm-amd.nested=	[KVM,AMD] Allow nested virtualization in KVM/SVM.
-			Default is 0 (off)
-
-	kvm-amd.npt=	[KVM,AMD] Disable nested paging (virtualized MMU)
-			for all guests.
-			Default is 1 (enabled) if in 64bit or 32bit-PAE mode
-
-	kvm-intel.bypass_guest_pf=
-			[KVM,Intel] Disables bypassing of guest page faults
-			on Intel chips. Default is 1 (enabled)
-
-	kvm-intel.ept=	[KVM,Intel] Disable extended page tables
-			(virtualized MMU) support on capable Intel chips.
-			Default is 1 (enabled)
-
-	kvm-intel.emulate_invalid_guest_state=
-			[KVM,Intel] Enable emulation of invalid guest states
-			Default is 0 (disabled)
-
-	kvm-intel.flexpriority=
-			[KVM,Intel] Disable FlexPriority feature (TPR shadow).
-			Default is 1 (enabled)
-
-	kvm-intel.unrestricted_guest=
-			[KVM,Intel] Disable unrestricted guest feature
-			(virtualized real and unpaged mode) on capable
-			Intel chips. Default is 1 (enabled)
-
-	kvm-intel.vpid=	[KVM,Intel] Disable Virtual Processor Identification
-			feature (tagged TLBs) on capable Intel chips.
-			Default is 1 (enabled)
-
 	l2cr=		[PPC]
 
 	l3cr=		[PPC]
@@ -1290,10 +1246,6 @@ and is between 256 and 4096 characters. It is defined in the file
 	machvec=	[IA64] Force the use of a particular machine-vector
 			(machvec) in a generic kernel.
 			Example: machvec=hpzx1_swiotlb
-
-	machtype=	[Loongson] Share the same kernel image file between different
-			 yeeloong laptop.
-			Example: machtype=lemote-yeeloong-2f-7inch
 
 	max_addr=nn[KMG]	[KNL,BOOT,ia64] All physical memory greater
 			than or equal to this physical address is ignored.
@@ -1551,14 +1503,6 @@ and is between 256 and 4096 characters. It is defined in the file
 			[NFS] set the TCP port on which the NFSv4 callback
 			channel should listen.
 
-	nfs.cache_getent=
-			[NFS] sets the pathname to the program which is used
-			to update the NFS client cache entries.
-
-	nfs.cache_getent_timeout=
-			[NFS] sets the timeout after which an attempt to
-			update a cache entry is deemed to have failed.
-
 	nfs.idmap_cache_timeout=
 			[NFS] set the maximum lifetime for idmapper cache
 			entries.
@@ -1570,7 +1514,7 @@ and is between 256 and 4096 characters. It is defined in the file
 			of returning the full 64-bit number.
 			The default is to return 64-bit inode numbers.
 
-	nmi_debug=	[KNL,AVR32,SH] Specify one or more actions to take
+	nmi_debug=	[KNL,AVR32] Specify one or more actions to take
 			when a NMI is triggered.
 			Format: [state][,regs][,debounce][,die]
 
@@ -1590,11 +1534,6 @@ and is between 256 and 4096 characters. It is defined in the file
 			Instead of 1 and 2 it is possible to use the following
 			symbolic names: lapic and ioapic
 			Example: nmi_watchdog=2 or nmi_watchdog=panic,lapic
-
-	netpoll.carrier_timeout=
-			[NET] Specifies amount of time (in seconds) that
-			netpoll should wait for a carrier. By default netpoll
-			waits 4 seconds.
 
 	no387		[BUGS=X86-32] Tells the kernel to use the 387 maths
 			emulation library even if a 387 maths coprocessor
@@ -1724,11 +1663,6 @@ and is between 256 and 4096 characters. It is defined in the file
 			with UP alternatives
 
 	noresidual	[PPC] Don't use residual data on PReP machines.
-
-	nordrand	[X86] Disable the direct use of the RDRAND
-			instruction even if it is supported by the
-			processor.  RDRAND is still available to user
-			space applications.
 
 	noresume	[SWSUSP] Disables resume and restores original swap
 			space.
@@ -1985,12 +1919,11 @@ and is between 256 and 4096 characters. It is defined in the file
 			Format: { 0 | 1 }
 			See arch/parisc/kernel/pdc_chassis.c
 
-	percpu_alloc=	Select which percpu first chunk allocator to use.
-			Currently supported values are "embed" and "page".
-			Archs may support subset or none of the	selections.
-			See comments in mm/percpu.c for details on each
-			allocator.  This parameter is primarily	for debugging
-			and performance comparison.
+	percpu_alloc=	[X86] Select which percpu first chunk allocator to use.
+			Allowed values are one of "lpage", "embed" and "4k".
+			See comments in arch/x86/kernel/setup_percpu.c for
+			details on each allocator.  This parameter is primarily
+			for debugging and performance comparison.
 
 	pf.		[PARIDE]
 			See Documentation/blockdev/paride.txt.
@@ -2462,18 +2395,6 @@ and is between 256 and 4096 characters. It is defined in the file
 	stifb=		[HW]
 			Format: bpp:<bpp1>[:<bpp2>[:<bpp3>...]]
 
-	sunrpc.min_resvport=
-	sunrpc.max_resvport=
-			[NFS,SUNRPC]
-			SunRPC servers often require that client requests
-			originate from a privileged port (i.e. a port in the
-			range 0 < portnr < 1024).
-			An administrator who wishes to reserve some of these
-			ports for other uses may adjust the range that the
-			kernel's sunrpc client considers to be privileged
-			using these two parameters to set the minimum and
-			maximum port values.
-
 	sunrpc.pool_mode=
 			[NFS]
 			Control how the NFS server code allocates CPUs to
@@ -2489,15 +2410,6 @@ and is between 256 and 4096 characters. It is defined in the file
 			percpu	    one pool for each CPU
 			pernode	    one pool for each NUMA node (equivalent
 				    to global on non-NUMA machines)
-
-	sunrpc.tcp_slot_table_entries=
-	sunrpc.udp_slot_table_entries=
-			[NFS,SUNRPC]
-			Sets the upper limit on the number of simultaneous
-			RPC calls that can be sent from the client to a
-			server. Increasing these values may allow you to
-			improve throughput, but will also increase the
-			amount of memory reserved for use by the client.
 
 	swiotlb=	[IA-64] Number of I/O TLB slabs
 
@@ -2568,11 +2480,6 @@ and is between 256 and 4096 characters. It is defined in the file
 	trace_buf_size=nn[KMG]
 			[FTRACE] will set tracing buffer size.
 
-	trace_event=[event-list]
-			[FTRACE] Set and start specified trace events in order
-			to facilitate early boot debugging.
-			See also Documentation/trace/events.txt
-
 	trix=		[HW,OSS] MediaTrix AudioTrix Pro
 			Format:
 			<io>,<irq>,<dma>,<dma2>,<sb_io>,<sb_irq>,<sb_dma>,<mpu_io>,<mpu_irq>
@@ -2583,10 +2490,6 @@ and is between 256 and 4096 characters. It is defined in the file
 			disables clocksource verification at runtime.
 			Used to enable high-resolution timer mode on older
 			hardware, and in virtualized environment.
-			[x86] noirqtime: Do not use TSC to do irq accounting.
-			Used to run time disable IRQ_TIME_ACCOUNTING on any
-			platforms where RDTSC is slow and this accounting
-			can add overhead.
 
 	turbografx.map[2|3]=	[HW,JOY]
 			TurboGraFX parallel port interface
@@ -2680,13 +2583,6 @@ and is between 256 and 4096 characters. It is defined in the file
 				w = NO_WP_DETECT (don't test whether the
 					medium is write-protected).
 			Example: quirks=0419:aaf5:rl,0421:0433:rc
-
-	userpte=
-			[X86] Flags controlling user PTE allocations.
-
-				nohigh = do not allocate PTE pages in
-					HIGHMEM regardless of setting
-					of CONFIG_HIGHPTE.
 
 	vdso=		[X86,SH]
 			vdso=2: enable compat VDSO (default with COMPAT_VDSO)

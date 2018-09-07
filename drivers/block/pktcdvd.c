@@ -92,7 +92,7 @@ static struct mutex ctl_mutex;	/* Serialize open/close/setup/teardown */
 static mempool_t *psd_pool;
 
 static struct class	*class_pktcdvd = NULL;    /* /sys/class/pktcdvd */
-static struct dentry	*pkt_debugfs_root = NULL; /* /sys/kernel/debug/pktcdvd */
+static struct dentry	*pkt_debugfs_root = NULL; /* /debug/pktcdvd */
 
 /* forward declaration */
 static int pkt_setup_dev(dev_t dev, dev_t* pkt_dev);
@@ -322,7 +322,7 @@ static void pkt_sysfs_dev_remove(struct pktcdvd_device *pd)
 	pkt_kobj_remove(pd->kobj_stat);
 	pkt_kobj_remove(pd->kobj_wqueue);
 	if (class_pktcdvd)
-		device_unregister(pd->dev);
+		device_destroy(class_pktcdvd, pd->pkt_dev);
 }
 
 
@@ -2408,7 +2408,7 @@ static void pkt_release_dev(struct pktcdvd_device *pd, int flush)
 	pkt_shrink_pktlist(pd);
 }
 
-static struct pktcdvd_device *pkt_find_dev_from_minor(unsigned int dev_minor)
+static struct pktcdvd_device *pkt_find_dev_from_minor(int dev_minor)
 {
 	if (dev_minor >= MAX_WRITERS)
 		return NULL;
@@ -2849,7 +2849,7 @@ static int pkt_media_changed(struct gendisk *disk)
 	return attached_disk->fops->media_changed(attached_disk);
 }
 
-static const struct block_device_operations pktcdvd_ops = {
+static struct block_device_operations pktcdvd_ops = {
 	.owner =		THIS_MODULE,
 	.open =			pkt_open,
 	.release =		pkt_close,
@@ -2857,7 +2857,7 @@ static const struct block_device_operations pktcdvd_ops = {
 	.media_changed =	pkt_media_changed,
 };
 
-static char *pktcdvd_devnode(struct gendisk *gd, mode_t *mode)
+static char *pktcdvd_nodename(struct gendisk *gd)
 {
 	return kasprintf(GFP_KERNEL, "pktcdvd/%s", gd->disk_name);
 }
@@ -2914,7 +2914,7 @@ static int pkt_setup_dev(dev_t dev, dev_t* pkt_dev)
 	disk->fops = &pktcdvd_ops;
 	disk->flags = GENHD_FL_REMOVABLE;
 	strcpy(disk->disk_name, pd->name);
-	disk->devnode = pktcdvd_devnode;
+	disk->nodename = pktcdvd_nodename;
 	disk->private_data = pd;
 	disk->queue = blk_alloc_queue(GFP_KERNEL);
 	if (!disk->queue)
@@ -3070,7 +3070,7 @@ static const struct file_operations pkt_ctl_fops = {
 static struct miscdevice pkt_misc = {
 	.minor 		= MISC_DYNAMIC_MINOR,
 	.name  		= DRIVER_NAME,
-	.nodename	= "pktcdvd/control",
+	.name  		= "pktcdvd/control",
 	.fops  		= &pkt_ctl_fops
 };
 

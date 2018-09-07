@@ -2,7 +2,6 @@
 #include <linux/compiler.h>
 #include <linux/fs.h>
 #include <linux/init.h>
-#include <linux/ksm.h>
 #include <linux/mm.h>
 #include <linux/mmzone.h>
 #include <linux/proc_fs.h>
@@ -94,10 +93,7 @@ static const struct file_operations proc_kpagecount_operations = {
 #define KPF_COMPOUND_TAIL	16
 #define KPF_HUGE		17
 #define KPF_UNEVICTABLE		18
-#define KPF_HWPOISON		19
 #define KPF_NOPAGE		20
-
-#define KPF_KSM			21
 
 /* kernel hacking assistances
  * WARNING: subject to change, never rely on them!
@@ -141,8 +137,6 @@ static u64 get_uflags(struct page *page)
 		u |= 1 << KPF_MMAP;
 	if (PageAnon(page))
 		u |= 1 << KPF_ANON;
-	if (PageKsm(page))
-		u |= 1 << KPF_KSM;
 
 	/*
 	 * compound pages: export both head/tail info
@@ -180,10 +174,6 @@ static u64 get_uflags(struct page *page)
 
 	u |= kpf_copy_bit(k, KPF_UNEVICTABLE,	PG_unevictable);
 	u |= kpf_copy_bit(k, KPF_MLOCKED,	PG_mlocked);
-
-#ifdef CONFIG_MEMORY_FAILURE
-	u |= kpf_copy_bit(k, KPF_HWPOISON,	PG_hwpoison);
-#endif
 
 #ifdef CONFIG_IA64_UNCACHED_ALLOCATOR
 	u |= kpf_copy_bit(k, KPF_UNCACHED,	PG_uncached);

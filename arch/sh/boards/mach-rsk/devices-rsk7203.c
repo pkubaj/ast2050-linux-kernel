@@ -11,6 +11,10 @@
 #include <linux/types.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/partitions.h>
+#include <linux/mtd/physmap.h>
+#include <linux/mtd/map.h>
 #include <linux/smsc911x.h>
 #include <linux/gpio.h>
 #include <linux/leds.h>

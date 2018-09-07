@@ -1458,7 +1458,6 @@ static __inline__ int cbq_dump_wrr(struct sk_buff *skb, struct cbq_class *cl)
 	unsigned char *b = skb_tail_pointer(skb);
 	struct tc_cbq_wrropt opt;
 
-	memset(&opt, 0, sizeof(opt));
 	opt.flags = 0;
 	opt.allot = cl->allot;
 	opt.priority = cl->priority+1;
@@ -1622,25 +1621,29 @@ static int cbq_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
 {
 	struct cbq_class *cl = (struct cbq_class*)arg;
 
-	if (new == NULL) {
-		new = qdisc_create_dflt(qdisc_dev(sch), sch->dev_queue,
-					&pfifo_qdisc_ops, cl->common.classid);
-		if (new == NULL)
-			return -ENOBUFS;
-	} else {
+	if (cl) {
+		if (new == NULL) {
+			new = qdisc_create_dflt(qdisc_dev(sch), sch->dev_queue,
+						&pfifo_qdisc_ops,
+						cl->common.classid);
+			if (new == NULL)
+				return -ENOBUFS;
+		} else {
 #ifdef CONFIG_NET_CLS_ACT
-		if (cl->police == TC_POLICE_RECLASSIFY)
-			new->reshape_fail = cbq_reshape_fail;
+			if (cl->police == TC_POLICE_RECLASSIFY)
+				new->reshape_fail = cbq_reshape_fail;
 #endif
-	}
-	sch_tree_lock(sch);
-	*old = cl->q;
-	cl->q = new;
-	qdisc_tree_decrease_qlen(*old, (*old)->q.qlen);
-	qdisc_reset(*old);
-	sch_tree_unlock(sch);
+		}
+		sch_tree_lock(sch);
+		*old = cl->q;
+		cl->q = new;
+		qdisc_tree_decrease_qlen(*old, (*old)->q.qlen);
+		qdisc_reset(*old);
+		sch_tree_unlock(sch);
 
-	return 0;
+		return 0;
+	}
+	return -ENOENT;
 }
 
 static struct Qdisc *
@@ -1648,7 +1651,7 @@ cbq_leaf(struct Qdisc *sch, unsigned long arg)
 {
 	struct cbq_class *cl = (struct cbq_class*)arg;
 
-	return cl->q;
+	return cl ? cl->q : NULL;
 }
 
 static void cbq_qlen_notify(struct Qdisc *sch, unsigned long arg)

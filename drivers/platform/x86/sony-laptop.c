@@ -976,12 +976,15 @@ static acpi_status sony_walk_callback(acpi_handle handle, u32 level,
 				      void *context, void **return_value)
 {
 	struct acpi_device_info *info;
+	struct acpi_buffer buffer = {ACPI_ALLOCATE_BUFFER, NULL};
 
-	if (ACPI_SUCCESS(acpi_get_object_info(handle, &info))) {
+	if (ACPI_SUCCESS(acpi_get_object_info(handle, &buffer))) {
+		info = buffer.pointer;
+
 		printk(KERN_WARNING DRV_PFX "method: name: %4.4s, args %X\n",
 			(char *)&info->name, info->param_count);
 
-		kfree(info);
+		kfree(buffer.pointer);
 	}
 
 	return AE_OK;
@@ -1040,9 +1043,6 @@ static int sony_nc_resume(struct acpi_device *device)
 	if (sony_backlight_device &&
 			sony_backlight_update_status(sony_backlight_device) < 0)
 		printk(KERN_WARNING DRV_PFX "unable to restore brightness level\n");
-
-	/* re-read rfkill state */
-	sony_nc_rfkill_update();
 
 	return 0;
 }
@@ -1209,6 +1209,15 @@ static int sony_nc_add(struct acpi_device *device)
 			result = -ENODEV;
 			goto outwalk;
 		}
+	}
+
+	/* try to _INI the device if such method exists (ACPI spec 3.0-6.5.1
+	 * should be respected as we already checked for the device presence above */
+	if (ACPI_SUCCESS(acpi_get_handle(sony_nc_acpi_handle, METHOD_NAME__INI, &handle))) {
+		dprintk("Invoking _INI\n");
+		if (ACPI_FAILURE(acpi_evaluate_object(sony_nc_acpi_handle, METHOD_NAME__INI,
+						NULL, NULL)))
+			dprintk("_INI Method failed\n");
 	}
 
 	if (ACPI_SUCCESS(acpi_get_handle(sony_nc_acpi_handle, "ECON",
@@ -1390,28 +1399,33 @@ struct sonypi_eventtypes {
 	struct sonypi_event	*events;
 };
 
-struct sony_pic_dev {
-	struct acpi_device		*acpi_dev;
-	struct sony_pic_irq		*cur_irq;
-	struct sony_pic_ioport		*cur_ioport;
-	struct list_head		interrupts;
-	struct list_head		ioports;
-	struct mutex			lock;
-	struct sonypi_eventtypes	*event_types;
-	int                             (*handle_irq)(const u8, const u8);
+struct device_ctrl {
 	int				model;
+	int				(*handle_irq)(const u8, const u8);
 	u16				evport_offset;
-	u8				camera_power;
-	u8				bluetooth_power;
-	u8				wwan_power;
+	u8				has_camera;
+	u8				has_bluetooth;
+	u8				has_wwan;
+	struct sonypi_eventtypes	*event_types;
+};
+
+struct sony_pic_dev {
+	struct device_ctrl	*control;
+	struct acpi_device	*acpi_dev;
+	struct sony_pic_irq	*cur_irq;
+	struct sony_pic_ioport	*cur_ioport;
+	struct list_head	interrupts;
+	struct list_head	ioports;
+	struct mutex		lock;
+	u8			camera_power;
+	u8			bluetooth_power;
+	u8			wwan_power;
 };
 
 static struct sony_pic_dev spic_dev = {
 	.interrupts	= LIST_HEAD_INIT(spic_dev.interrupts),
 	.ioports	= LIST_HEAD_INIT(spic_dev.ioports),
 };
-
-static int spic_drv_registered;
 
 /* Event masks */
 #define SONYPI_JOGGER_MASK			0x00000001
@@ -1710,6 +1724,27 @@ static int type3_handle_irq(const u8 data_mask, const u8 ev)
 	return 1;
 }
 
+static struct device_ctrl spic_types[] = {
+	{
+		.model = SONYPI_DEVICE_TYPE1,
+		.handle_irq = NULL,
+		.evport_offset = SONYPI_TYPE1_OFFSET,
+		.event_types = type1_events,
+	},
+	{
+		.model = SONYPI_DEVICE_TYPE2,
+		.handle_irq = NULL,
+		.evport_offset = SONYPI_TYPE2_OFFSET,
+		.event_types = type2_events,
+	},
+	{
+		.model = SONYPI_DEVICE_TYPE3,
+		.handle_irq = type3_handle_irq,
+		.evport_offset = SONYPI_TYPE3_OFFSET,
+		.event_types = type3_events,
+	},
+};
+
 static void sony_pic_detect_device_type(struct sony_pic_dev *dev)
 {
 	struct pci_dev *pcidev;
@@ -1717,63 +1752,48 @@ static void sony_pic_detect_device_type(struct sony_pic_dev *dev)
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_82371AB_3, NULL);
 	if (pcidev) {
-		dev->model = SONYPI_DEVICE_TYPE1;
-		dev->evport_offset = SONYPI_TYPE1_OFFSET;
-		dev->event_types = type1_events;
+		dev->control = &spic_types[0];
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH6_1, NULL);
 	if (pcidev) {
-		dev->model = SONYPI_DEVICE_TYPE2;
-		dev->evport_offset = SONYPI_TYPE2_OFFSET;
-		dev->event_types = type2_events;
+		dev->control = &spic_types[2];
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH7_1, NULL);
 	if (pcidev) {
-		dev->model = SONYPI_DEVICE_TYPE3;
-		dev->handle_irq = type3_handle_irq;
-		dev->evport_offset = SONYPI_TYPE3_OFFSET;
-		dev->event_types = type3_events;
+		dev->control = &spic_types[2];
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH8_4, NULL);
 	if (pcidev) {
-		dev->model = SONYPI_DEVICE_TYPE3;
-		dev->handle_irq = type3_handle_irq;
-		dev->evport_offset = SONYPI_TYPE3_OFFSET;
-		dev->event_types = type3_events;
+		dev->control = &spic_types[2];
 		goto out;
 	}
 
 	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL,
 			PCI_DEVICE_ID_INTEL_ICH9_1, NULL);
 	if (pcidev) {
-		dev->model = SONYPI_DEVICE_TYPE3;
-		dev->handle_irq = type3_handle_irq;
-		dev->evport_offset = SONYPI_TYPE3_OFFSET;
-		dev->event_types = type3_events;
+		dev->control = &spic_types[2];
 		goto out;
 	}
 
 	/* default */
-	dev->model = SONYPI_DEVICE_TYPE2;
-	dev->evport_offset = SONYPI_TYPE2_OFFSET;
-	dev->event_types = type2_events;
+	dev->control = &spic_types[1];
 
 out:
 	if (pcidev)
 		pci_dev_put(pcidev);
 
 	printk(KERN_INFO DRV_PFX "detected Type%d model\n",
-			dev->model == SONYPI_DEVICE_TYPE1 ? 1 :
-			dev->model == SONYPI_DEVICE_TYPE2 ? 2 : 3);
+			dev->control->model == SONYPI_DEVICE_TYPE1 ? 1 :
+			dev->control->model == SONYPI_DEVICE_TYPE2 ? 2 : 3);
 }
 
 /* camera tests and poweron/poweroff */
@@ -2546,7 +2566,7 @@ static int sony_pic_enable(struct acpi_device *device,
 	buffer.pointer = resource;
 
 	/* setup Type 1 resources */
-	if (spic_dev.model == SONYPI_DEVICE_TYPE1) {
+	if (spic_dev.control->model == SONYPI_DEVICE_TYPE1) {
 
 		/* setup io resources */
 		resource->res1.type = ACPI_RESOURCE_TYPE_IO;
@@ -2629,28 +2649,29 @@ static irqreturn_t sony_pic_irq(int irq, void *dev_id)
 		data_mask = inb_p(dev->cur_ioport->io2.minimum);
 	else
 		data_mask = inb_p(dev->cur_ioport->io1.minimum +
-				dev->evport_offset);
+				dev->control->evport_offset);
 
 	dprintk("event ([%.2x] [%.2x]) at port 0x%.4x(+0x%.2x)\n",
 			ev, data_mask, dev->cur_ioport->io1.minimum,
-			dev->evport_offset);
+			dev->control->evport_offset);
 
 	if (ev == 0x00 || ev == 0xff)
 		return IRQ_HANDLED;
 
-	for (i = 0; dev->event_types[i].mask; i++) {
+	for (i = 0; dev->control->event_types[i].mask; i++) {
 
-		if ((data_mask & dev->event_types[i].data) !=
-		    dev->event_types[i].data)
+		if ((data_mask & dev->control->event_types[i].data) !=
+		    dev->control->event_types[i].data)
 			continue;
 
-		if (!(mask & dev->event_types[i].mask))
+		if (!(mask & dev->control->event_types[i].mask))
 			continue;
 
-		for (j = 0; dev->event_types[i].events[j].event; j++) {
-			if (ev == dev->event_types[i].events[j].data) {
+		for (j = 0; dev->control->event_types[i].events[j].event; j++) {
+			if (ev == dev->control->event_types[i].events[j].data) {
 				device_event =
-					dev->event_types[i].events[j].event;
+					dev->control->
+						event_types[i].events[j].event;
 				goto found;
 			}
 		}
@@ -2658,12 +2679,13 @@ static irqreturn_t sony_pic_irq(int irq, void *dev_id)
 	/* Still not able to decode the event try to pass
 	 * it over to the minidriver
 	 */
-	if (dev->handle_irq && dev->handle_irq(data_mask, ev) == 0)
+	if (dev->control->handle_irq &&
+			dev->control->handle_irq(data_mask, ev) == 0)
 		return IRQ_HANDLED;
 
 	dprintk("unknown event ([%.2x] [%.2x]) at port 0x%.4x(+0x%.2x)\n",
 			ev, data_mask, dev->cur_ioport->io1.minimum,
-			dev->evport_offset);
+			dev->control->evport_offset);
 	return IRQ_HANDLED;
 
 found:
@@ -2794,7 +2816,7 @@ static int sony_pic_add(struct acpi_device *device)
 	/* request IRQ */
 	list_for_each_entry_reverse(irq, &spic_dev.interrupts, list) {
 		if (!request_irq(irq->irq.interrupts[0], sony_pic_irq,
-					IRQF_DISABLED, "sony-laptop", &spic_dev)) {
+					IRQF_SHARED, "sony-laptop", &spic_dev)) {
 			dprintk("IRQ: %d - triggering: %d - "
 					"polarity: %d - shr: %d\n",
 					irq->irq.interrupts[0],
@@ -2927,7 +2949,6 @@ static int __init sony_laptop_init(void)
 					"Unable to register SPIC driver.");
 			goto out;
 		}
-		spic_drv_registered = 1;
 	}
 
 	result = acpi_bus_register_driver(&sony_nc_driver);
@@ -2939,7 +2960,7 @@ static int __init sony_laptop_init(void)
 	return 0;
 
 out_unregister_pic:
-	if (spic_drv_registered)
+	if (!no_spic)
 		acpi_bus_unregister_driver(&sony_pic_driver);
 out:
 	return result;
@@ -2948,7 +2969,7 @@ out:
 static void __exit sony_laptop_exit(void)
 {
 	acpi_bus_unregister_driver(&sony_nc_driver);
-	if (spic_drv_registered)
+	if (!no_spic)
 		acpi_bus_unregister_driver(&sony_pic_driver);
 }
 

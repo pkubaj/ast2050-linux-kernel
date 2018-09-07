@@ -1,8 +1,12 @@
 #
 # KVM configuration
 #
+config HAVE_KVM
+	bool
 
-source "virt/kvm/Kconfig"
+config HAVE_KVM_IRQCHIP
+       bool
+       default y
 
 menuconfig VIRTUALIZATION
 	bool "Virtualization"
@@ -24,8 +28,6 @@ config KVM
 	depends on PCI
 	select PREEMPT_NOTIFIERS
 	select ANON_INODES
-	select HAVE_KVM_IRQCHIP
-	select KVM_APIC_ARCHITECTURE
 	---help---
 	  Support hosting fully virtualized guest machines using hardware
 	  virtualization extensions.  You will need a fairly recent
@@ -46,6 +48,9 @@ config KVM_INTEL
 	---help---
 	  Provides support for KVM on Itanium 2 processors equipped with the VT
 	  extensions.
+
+config KVM_TRACE
+       bool
 
 source drivers/virtio/Kconfig
 

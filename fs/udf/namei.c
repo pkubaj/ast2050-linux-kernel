@@ -237,8 +237,7 @@ static struct fileIdentDesc *udf_find_entry(struct inode *dir,
 		if (!lfi)
 			continue;
 
-		flen = udf_get_filename(dir->i_sb, nameptr, lfi, fname,
-					UDF_NAME_LEN);
+		flen = udf_get_filename(dir->i_sb, nameptr, fname, lfi);
 		if (flen && udf_match(flen, fname, child->len, child->name))
 			goto out_ok;
 	}
@@ -944,6 +943,7 @@ static int udf_symlink(struct inode *dir, struct dentry *dentry,
 		pc->componentType = 1;
 		pc->lengthComponentIdent = 0;
 		pc->componentFileVersionNum = 0;
+		pc += sizeof(struct pathComponent);
 		elen += sizeof(struct pathComponent);
 	}
 
@@ -1332,7 +1332,6 @@ static int udf_encode_fh(struct dentry *de, __u32 *fh, int *lenp,
 	*lenp = 3;
 	fid->udf.block = location.logicalBlockNum;
 	fid->udf.partref = location.partitionReferenceNum;
-	fid->udf.parent_partref = 0;
 	fid->udf.generation = inode->i_generation;
 
 	if (connectable && !S_ISDIR(inode->i_mode)) {

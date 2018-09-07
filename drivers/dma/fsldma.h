@@ -90,7 +90,6 @@ struct fsl_dma_ld_hw {
 struct fsl_desc_sw {
 	struct fsl_dma_ld_hw hw;
 	struct list_head node;
-	struct list_head tx_list;
 	struct dma_async_tx_descriptor async_tx;
 	struct list_head *ld;
 	void *priv;
@@ -144,11 +143,10 @@ struct fsl_dma_chan {
 	struct tasklet_struct tasklet;
 	u32 feature;
 
-	void (*toggle_ext_pause)(struct fsl_dma_chan *fsl_chan, int enable);
+	void (*toggle_ext_pause)(struct fsl_dma_chan *fsl_chan, int size);
 	void (*toggle_ext_start)(struct fsl_dma_chan *fsl_chan, int enable);
 	void (*set_src_loop_size)(struct fsl_dma_chan *fsl_chan, int size);
 	void (*set_dest_loop_size)(struct fsl_dma_chan *fsl_chan, int size);
-	void (*set_request_count)(struct fsl_dma_chan *fsl_chan, int size);
 };
 
 #define to_fsl_chan(chan) container_of(chan, struct fsl_dma_chan, common)

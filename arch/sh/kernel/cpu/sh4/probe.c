@@ -57,12 +57,8 @@ int __init detect_cpu_and_cache_system(void)
 	 * Setup some generic flags we can probe on SH-4A parts
 	 */
 	if (((pvr >> 16) & 0xff) == 0x10) {
-		boot_cpu_data.family = CPU_FAMILY_SH4A;
-
-		if ((cvr & 0x10000000) == 0) {
+		if ((cvr & 0x10000000) == 0)
 			boot_cpu_data.flags |= CPU_HAS_DSP;
-			boot_cpu_data.family = CPU_FAMILY_SH4AL_DSP;
-		}
 
 		boot_cpu_data.flags |= CPU_HAS_LLSC | CPU_HAS_PERF_COUNTER;
 		boot_cpu_data.cut_major = pvr & 0x7f;
@@ -72,7 +68,6 @@ int __init detect_cpu_and_cache_system(void)
 	} else {
 		/* And some SH-4 defaults.. */
 		boot_cpu_data.flags |= CPU_HAS_PTEA;
-		boot_cpu_data.family = CPU_FAMILY_SH4;
 	}
 
 	/* FPU detection works for everyone */
@@ -144,15 +139,8 @@ int __init detect_cpu_and_cache_system(void)
 		}
 		break;
 	case 0x300b:
-		switch (prr) {
-		case 0x20:
-			boot_cpu_data.type = CPU_SH7724;
-			boot_cpu_data.flags |= CPU_HAS_L2_CACHE;
-			break;
-		case 0x50:
-			boot_cpu_data.type = CPU_SH7757;
-			break;
-		}
+		boot_cpu_data.type = CPU_SH7724;
+		boot_cpu_data.flags |= CPU_HAS_L2_CACHE;
 		break;
 	case 0x4000:	/* 1st cut */
 	case 0x4001:	/* 2nd cut */
@@ -184,6 +172,9 @@ int __init detect_cpu_and_cache_system(void)
 		boot_cpu_data.icache.ways = 2;
 		boot_cpu_data.dcache.ways = 2;
 
+		break;
+	default:
+		boot_cpu_data.type = CPU_SH_NONE;
 		break;
 	}
 

@@ -44,7 +44,6 @@
 #include <linux/mutex.h>
 #include <linux/kref.h>
 #include <linux/compat.h>
-#include <linux/sched.h>
 #include <linux/semaphore.h>
 
 #include <asm/uaccess.h>

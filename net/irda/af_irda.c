@@ -810,8 +810,8 @@ static int irda_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
 	err = irda_open_tsap(self, addr->sir_lsap_sel, addr->sir_name);
 	if (err < 0) {
-		irias_delete_object(self->ias_obj);
-		self->ias_obj = NULL;
+		kfree(self->ias_obj->name);
+		kfree(self->ias_obj);
 		return err;
 	}
 
@@ -1068,9 +1068,6 @@ static int irda_create(struct net *net, struct socket *sock, int protocol)
 	struct irda_sock *self;
 
 	IRDA_DEBUG(2, "%s()\n", __func__);
-
-	if (protocol < 0 || protocol > SK_PROTOCOL_MAX)
-		return -EINVAL;
 
 	if (net != &init_net)
 		return -EAFNOSUPPORT;
@@ -1402,6 +1399,8 @@ static int irda_recvmsg_stream(struct kiocb *iocb, struct socket *sock,
 
 	target = sock_rcvlowat(sk, flags & MSG_WAITALL, size);
 	timeo = sock_rcvtimeo(sk, noblock);
+
+	msg->msg_namelen = 0;
 
 	do {
 		int chunk;
@@ -1827,7 +1826,7 @@ static int irda_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned lon
  *
  */
 static int irda_setsockopt(struct socket *sock, int level, int optname,
-			   char __user *optval, unsigned int optlen)
+			   char __user *optval, int optlen)
 {
 	struct sock *sk = sock->sk;
 	struct irda_sock *self = irda_sk(sk);
@@ -2165,14 +2164,6 @@ static int irda_getsockopt(struct socket *sock, int level, int optname,
 
 	switch (optname) {
 	case IRLMP_ENUMDEVICES:
-
-		/* Offset to first device entry */
-		offset = sizeof(struct irda_device_list) -
-			sizeof(struct irda_device_info);
-
-		if (len < offset)
-			return -EINVAL;
-
 		/* Ask lmp for the current discovery log */
 		discoveries = irlmp_get_discoveries(&list.len, self->mask.word,
 						    self->nslots);
@@ -2182,8 +2173,14 @@ static int irda_getsockopt(struct socket *sock, int level, int optname,
 		err = 0;
 
 		/* Write total list length back to client */
-		if (copy_to_user(optval, &list, offset))
+		if (copy_to_user(optval, &list,
+				 sizeof(struct irda_device_list) -
+				 sizeof(struct irda_device_info)))
 			err = -EFAULT;
+
+		/* Offset to first device entry */
+		offset = sizeof(struct irda_device_list) -
+			sizeof(struct irda_device_info);
 
 		/* Copy the list itself - watch for overflow */
 		if(list.len > 2048)

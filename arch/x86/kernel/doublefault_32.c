@@ -27,7 +27,9 @@ static void doublefault_fn(void)
 
 	if (ptr_ok(gdt)) {
 		gdt += GDT_ENTRY_TSS << 3;
-		tss = get_desc_base((struct desc_struct *)gdt);
+		tss = *(u16 *)(gdt+2);
+		tss += *(u8 *)(gdt+4) << 16;
+		tss += *(u8 *)(gdt+7) << 24;
 		printk(KERN_EMERG "double fault, tss at %08lx\n", tss);
 
 		if (ptr_ok(tss)) {

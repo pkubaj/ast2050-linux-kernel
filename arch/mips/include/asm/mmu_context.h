@@ -16,7 +16,6 @@
 #include <linux/smp.h>
 #include <linux/slab.h>
 #include <asm/cacheflush.h>
-#include <asm/hazards.h>
 #include <asm/tlbflush.h>
 #ifdef CONFIG_MIPS_MT_SMTC
 #include <asm/mipsmtregs.h>
@@ -37,13 +36,11 @@ extern unsigned long pgd_current[];
 #ifdef CONFIG_32BIT
 #define TLBMISS_HANDLER_SETUP()						\
 	write_c0_context((unsigned long) smp_processor_id() << 25);	\
-	back_to_back_c0_hazard();					\
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir)
 #endif
 #ifdef CONFIG_64BIT
 #define TLBMISS_HANDLER_SETUP()						\
 	write_c0_context((unsigned long) smp_processor_id() << 26);	\
-	back_to_back_c0_hazard();					\
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir)
 #endif
 
@@ -168,12 +165,12 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	 * having ASID_MASK smaller than the hardware maximum,
 	 * make sure no "soft" bits become "hard"...
 	 */
-	write_c0_entryhi((read_c0_entryhi() & ~HW_ASID_MASK) |
-			 cpu_asid(cpu, next));
+	write_c0_entryhi((read_c0_entryhi() & ~HW_ASID_MASK)
+			| (cpu_context(cpu, next) & ASID_MASK));
 	ehb(); /* Make sure it propagates to TCStatus */
 	evpe(mtflags);
 #else
-	write_c0_entryhi(cpu_asid(cpu, next));
+	write_c0_entryhi(cpu_context(cpu, next));
 #endif /* CONFIG_MIPS_MT_SMTC */
 	TLBMISS_HANDLER_SETUP_PGD(next->pgd);
 
@@ -181,8 +178,8 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	 * Mark current->active_mm as not "active" anymore.
 	 * We don't want to mislead possible IPI tlb flush routines.
 	 */
-	cpumask_clear_cpu(cpu, mm_cpumask(prev));
-	cpumask_set_cpu(cpu, mm_cpumask(next));
+	cpu_clear(cpu, prev->cpu_vm_mask);
+	cpu_set(cpu, next->cpu_vm_mask);
 
 	local_irq_restore(flags);
 }
@@ -229,17 +226,17 @@ activate_mm(struct mm_struct *prev, struct mm_struct *next)
 	}
 	/* See comments for similar code above */
 	write_c0_entryhi((read_c0_entryhi() & ~HW_ASID_MASK) |
-	                 cpu_asid(cpu, next));
+	                 (cpu_context(cpu, next) & ASID_MASK));
 	ehb(); /* Make sure it propagates to TCStatus */
 	evpe(mtflags);
 #else
-	write_c0_entryhi(cpu_asid(cpu, next));
+	write_c0_entryhi(cpu_context(cpu, next));
 #endif /* CONFIG_MIPS_MT_SMTC */
 	TLBMISS_HANDLER_SETUP_PGD(next->pgd);
 
 	/* mark mmu ownership change */
-	cpumask_clear_cpu(cpu, mm_cpumask(prev));
-	cpumask_set_cpu(cpu, mm_cpumask(next));
+	cpu_clear(cpu, prev->cpu_vm_mask);
+	cpu_set(cpu, next->cpu_vm_mask);
 
 	local_irq_restore(flags);
 }
@@ -261,7 +258,7 @@ drop_mmu_context(struct mm_struct *mm, unsigned cpu)
 
 	local_irq_save(flags);
 
-	if (cpumask_test_cpu(cpu, mm_cpumask(mm)))  {
+	if (cpu_isset(cpu, mm->cpu_vm_mask))  {
 		get_new_mmu_context(mm, cpu);
 #ifdef CONFIG_MIPS_MT_SMTC
 		/* See comments for similar code above */

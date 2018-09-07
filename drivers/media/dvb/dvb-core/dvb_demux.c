@@ -21,7 +21,6 @@
  *
  */
 
-#include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
@@ -426,9 +425,13 @@ no_dvb_demux_tscheck:
 		if ((DVR_FEED(feed)) && (dvr_done++))
 			continue;
 
-		if (feed->pid == pid)
+		if (feed->pid == pid) {
 			dvb_dmx_swfilter_packet_type(feed, buf);
-		else if (feed->pid == 0x2000)
+			if (DVR_FEED(feed))
+				continue;
+		}
+
+		if (feed->pid == 0x2000)
 			feed->cb.ts(buf, 188, NULL, 0, &feed->feed.ts, DMX_OK);
 	}
 }

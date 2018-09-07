@@ -26,7 +26,6 @@
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/nf_nat_helper.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
-#include <net/netfilter/nf_log.h>
 
 int (*nf_nat_seq_adjust_hook)(struct sk_buff *skb,
 			      struct nf_conn *ct,
@@ -83,14 +82,6 @@ static int ipv4_get_l4proto(const struct sk_buff *skb, unsigned int nhoff,
 	*dataoff = nhoff + (iph->ihl << 2);
 	*protonum = iph->protocol;
 
-	/* Check bogus IP headers */
-	if (*dataoff > skb->len) {
-		pr_debug("nf_conntrack_ipv4: bogus IPv4 packet: "
-			 "nhoff %u, ihl %u, skblen %u\n",
-			 nhoff, iph->ihl << 2, skb->len);
-		return -NF_ACCEPT;
-	}
-
 	return NF_ACCEPT;
 }
 
@@ -122,11 +113,8 @@ static unsigned int ipv4_confirm(unsigned int hooknum,
 
 	ret = helper->help(skb, skb_network_offset(skb) + ip_hdrlen(skb),
 			   ct, ctinfo);
-	if (ret != NF_ACCEPT) {
-		nf_log_packet(NFPROTO_IPV4, hooknum, skb, in, out, NULL,
-			      "nf_ct_%s: dropping packet", helper->name);
+	if (ret != NF_ACCEPT)
 		return ret;
-	}
 
 	if (test_bit(IPS_SEQ_ADJUST_BIT, &ct->status)) {
 		typeof(nf_nat_seq_adjust_hook) seq_adjust;
@@ -170,28 +158,28 @@ static struct nf_hook_ops ipv4_conntrack_ops[] __read_mostly = {
 	{
 		.hook		= ipv4_conntrack_in,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_PRE_ROUTING,
 		.priority	= NF_IP_PRI_CONNTRACK,
 	},
 	{
 		.hook		= ipv4_conntrack_local,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_LOCAL_OUT,
 		.priority	= NF_IP_PRI_CONNTRACK,
 	},
 	{
 		.hook		= ipv4_confirm,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_POST_ROUTING,
 		.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
 	},
 	{
 		.hook		= ipv4_confirm,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_LOCAL_IN,
 		.priority	= NF_IP_PRI_CONNTRACK_CONFIRM,
 	},
@@ -221,7 +209,7 @@ static ctl_table ip_ct_sysctl_table[] = {
 	{
 		.ctl_name	= NET_IPV4_NF_CONNTRACK_BUCKETS,
 		.procname	= "ip_conntrack_buckets",
-		.data		= &init_net.ct.htable_size,
+		.data		= &nf_conntrack_htable_size,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
@@ -268,11 +256,11 @@ getorigdst(struct sock *sk, int optval, void __user *user, int *len)
 	tuple.dst.u3.ip = inet->daddr;
 	tuple.dst.u.tcp.port = inet->dport;
 	tuple.src.l3num = PF_INET;
-	tuple.dst.protonum = sk->sk_protocol;
+	tuple.dst.protonum = IPPROTO_TCP;
 
-	/* We only do TCP and SCTP at the moment: is there a better way? */
-	if (sk->sk_protocol != IPPROTO_TCP && sk->sk_protocol != IPPROTO_SCTP) {
-		pr_debug("SO_ORIGINAL_DST: Not a TCP/SCTP socket\n");
+	/* We only do TCP at the moment: is there a better way? */
+	if (strcmp(sk->sk_prot->name, "TCP")) {
+		pr_debug("SO_ORIGINAL_DST: Not a TCP socket\n");
 		return -ENOPROTOOPT;
 	}
 

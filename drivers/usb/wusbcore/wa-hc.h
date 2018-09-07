@@ -47,7 +47,7 @@
  *             to an endpoint on a WUSB device that is connected to a
  *             HWA RC.
  *
- *  xfer       Transfer management -- this is all the code that gets a
+ *  xfer       Transfer managment -- this is all the code that gets a
  *             buffer and pushes it to a device (or viceversa). *
  *
  * Some day a lot of this code will be shared between this driver and

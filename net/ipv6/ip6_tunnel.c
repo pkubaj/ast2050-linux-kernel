@@ -56,7 +56,6 @@
 MODULE_AUTHOR("Ville Nuorvala");
 MODULE_DESCRIPTION("IPv6 tunneling device");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_NETDEV("ip6tnl0");
 
 #define IPV6_TLV_TEL_DST_SIZE 8
 
@@ -1037,12 +1036,17 @@ ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t
+static int
 ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ip6_tnl *t = netdev_priv(dev);
 	struct net_device_stats *stats = &t->dev->stats;
 	int ret;
+
+	if (t->recursion++) {
+		stats->collisions++;
+		goto tx_err;
+	}
 
 	switch (skb->protocol) {
 	case htons(ETH_P_IP):
@@ -1058,13 +1062,15 @@ ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (ret < 0)
 		goto tx_err;
 
-	return NETDEV_TX_OK;
+	t->recursion--;
+	return 0;
 
 tx_err:
 	stats->tx_errors++;
 	stats->tx_dropped++;
 	kfree_skb(skb);
-	return NETDEV_TX_OK;
+	t->recursion--;
+	return 0;
 }
 
 static void ip6_tnl_set_cap(struct ip6_tnl *t)
@@ -1466,29 +1472,27 @@ static int __init ip6_tunnel_init(void)
 {
 	int  err;
 
+	if (xfrm6_tunnel_register(&ip4ip6_handler, AF_INET)) {
+		printk(KERN_ERR "ip6_tunnel init: can't register ip4ip6\n");
+		err = -EAGAIN;
+		goto out;
+	}
+
+	if (xfrm6_tunnel_register(&ip6ip6_handler, AF_INET6)) {
+		printk(KERN_ERR "ip6_tunnel init: can't register ip6ip6\n");
+		err = -EAGAIN;
+		goto unreg_ip4ip6;
+	}
+
 	err = register_pernet_gen_device(&ip6_tnl_net_id, &ip6_tnl_net_ops);
 	if (err < 0)
-		goto out_pernet;
-
-	err = xfrm6_tunnel_register(&ip4ip6_handler, AF_INET);
-	if (err < 0) {
-		printk(KERN_ERR "ip6_tunnel init: can't register ip4ip6\n");
-		goto out_ip4ip6;
-	}
-
-	err = xfrm6_tunnel_register(&ip6ip6_handler, AF_INET6);
-	if (err < 0) {
-		printk(KERN_ERR "ip6_tunnel init: can't register ip6ip6\n");
-		goto out_ip6ip6;
-	}
-
+		goto err_pernet;
 	return 0;
-
-out_ip6ip6:
+err_pernet:
+	xfrm6_tunnel_deregister(&ip6ip6_handler, AF_INET6);
+unreg_ip4ip6:
 	xfrm6_tunnel_deregister(&ip4ip6_handler, AF_INET);
-out_ip4ip6:
-	unregister_pernet_gen_device(ip6_tnl_net_id, &ip6_tnl_net_ops);
-out_pernet:
+out:
 	return err;
 }
 

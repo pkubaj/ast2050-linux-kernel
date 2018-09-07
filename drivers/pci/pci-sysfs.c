@@ -662,21 +662,17 @@ void pci_remove_legacy_files(struct pci_bus *b)
 
 #ifdef HAVE_PCI_MMAP
 
-int pci_mmap_fits(struct pci_dev *pdev, int resno, struct vm_area_struct *vma,
-		  enum pci_mmap_api mmap_api)
+int pci_mmap_fits(struct pci_dev *pdev, int resno, struct vm_area_struct *vma)
 {
-	unsigned long nr, start, size, pci_start;
+	unsigned long nr, start, size;
 
-	if (pci_resource_len(pdev, resno) == 0)
-		return 0;
 	nr = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 	start = vma->vm_pgoff;
 	size = ((pci_resource_len(pdev, resno) - 1) >> PAGE_SHIFT) + 1;
-	pci_start = (mmap_api == PCI_MMAP_PROCFS) ?
-			pci_resource_start(pdev, resno) >> PAGE_SHIFT : 0;
-	if (start >= pci_start && start < pci_start + size &&
-			start + nr <= pci_start + size)
+	if (start < size && size - start >= nr)
 		return 1;
+	WARN(1, "process \"%s\" tried to map 0x%08lx-0x%08lx on %s BAR %d (size 0x%08lx)\n",
+		current->comm, start, start+nr, pci_name(pdev), resno, size);
 	return 0;
 }
 
@@ -706,14 +702,8 @@ pci_mmap_resource(struct kobject *kobj, struct bin_attribute *attr,
 	if (i >= PCI_ROM_RESOURCE)
 		return -ENODEV;
 
-	if (!pci_mmap_fits(pdev, i, vma, PCI_MMAP_SYSFS)) {
-		WARN(1, "process \"%s\" tried to map 0x%08lx bytes "
-			"at page 0x%08lx on %s BAR %d (start 0x%16Lx, size 0x%16Lx)\n",
-			current->comm, vma->vm_end-vma->vm_start, vma->vm_pgoff,
-			pci_name(pdev), i,
-			pci_resource_start(pdev, i), pci_resource_len(pdev, i));
+	if (!pci_mmap_fits(pdev, i, vma))
 		return -EINVAL;
-	}
 
 	/* pci_mmap_page_range() expects the same kind of entry as coming
 	 * from /proc/bus/pci/ which is a "user visible" value. If this is
@@ -926,29 +916,6 @@ int __attribute__ ((weak)) pcibios_add_platform_entries(struct pci_dev *dev)
 	return 0;
 }
 
-static ssize_t reset_store(struct device *dev,
-			   struct device_attribute *attr, const char *buf,
-			   size_t count)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	unsigned long val;
-	ssize_t result = strict_strtoul(buf, 0, &val);
-
-	if (result < 0)
-		return result;
-
-	if (val != 1)
-		return -EINVAL;
-
-	result = pci_reset_function(pdev);
-	if (result < 0)
-		return result;
-
-	return count;
-}
-
-static struct device_attribute reset_attr = __ATTR(reset, 0200, NULL, reset_store);
-
 static int pci_create_capabilities_sysfs(struct pci_dev *dev)
 {
 	int retval;
@@ -967,7 +934,7 @@ static int pci_create_capabilities_sysfs(struct pci_dev *dev)
 		attr->write = write_vpd_attr;
 		retval = sysfs_create_bin_file(&dev->dev.kobj, attr);
 		if (retval) {
-			kfree(attr);
+			kfree(dev->vpd->attr);
 			return retval;
 		}
 		dev->vpd->attr = attr;
@@ -976,22 +943,7 @@ static int pci_create_capabilities_sysfs(struct pci_dev *dev)
 	/* Active State Power Management */
 	pcie_aspm_create_sysfs_dev_files(dev);
 
-	if (!pci_probe_reset_function(dev)) {
-		retval = device_create_file(&dev->dev, &reset_attr);
-		if (retval)
-			goto error;
-		dev->reset_fn = 1;
-	}
 	return 0;
-
-error:
-	pcie_aspm_remove_sysfs_dev_files(dev);
-	if (dev->vpd && dev->vpd->attr) {
-		sysfs_remove_bin_file(&dev->dev.kobj, dev->vpd->attr);
-		kfree(dev->vpd->attr);
-	}
-
-	return retval;
 }
 
 int __must_check pci_create_sysfs_dev_files (struct pci_dev *pdev)
@@ -1085,10 +1037,6 @@ static void pci_remove_capabilities_sysfs(struct pci_dev *dev)
 	}
 
 	pcie_aspm_remove_sysfs_dev_files(dev);
-	if (dev->reset_fn) {
-		device_remove_file(&dev->dev, &reset_attr);
-		dev->reset_fn = 0;
-	}
 }
 
 /**

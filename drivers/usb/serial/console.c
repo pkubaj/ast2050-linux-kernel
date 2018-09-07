@@ -155,9 +155,9 @@ static int usb_console_setup(struct console *co, char *options)
 		/* only call the device specific open if this
 		 * is the first time the port is opened */
 		if (serial->type->open)
-			retval = serial->type->open(NULL, port);
+			retval = serial->type->open(NULL, port, NULL);
 		else
-			retval = usb_serial_generic_open(NULL, port);
+			retval = usb_serial_generic_open(NULL, port, NULL);
 
 		if (retval) {
 			err("could not open USB console port");

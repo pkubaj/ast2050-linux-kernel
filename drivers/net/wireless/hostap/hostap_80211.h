@@ -3,7 +3,6 @@
 
 #include <linux/types.h>
 #include <linux/skbuff.h>
-#include <linux/netdevice.h>
 
 struct hostap_ieee80211_mgmt {
 	__le16 frame_control;
@@ -86,11 +85,8 @@ void hostap_dump_rx_80211(const char *name, struct sk_buff *skb,
 			  struct hostap_80211_rx_status *rx_stats);
 
 void hostap_dump_tx_80211(const char *name, struct sk_buff *skb);
-netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
-				   struct net_device *dev);
-netdev_tx_t hostap_mgmt_start_xmit(struct sk_buff *skb,
-				   struct net_device *dev);
-netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
-				     struct net_device *dev);
+int hostap_data_start_xmit(struct sk_buff *skb, struct net_device *dev);
+int hostap_mgmt_start_xmit(struct sk_buff *skb, struct net_device *dev);
+int hostap_master_start_xmit(struct sk_buff *skb, struct net_device *dev);
 
 #endif /* HOSTAP_80211_H */

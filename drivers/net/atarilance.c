@@ -796,7 +796,7 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 
 	if (len > skb->len) {
 		if (skb_padto(skb, len))
-			return NETDEV_TX_OK;
+			return 0;
 	}
 
 	netif_stop_queue (dev);
@@ -846,7 +846,7 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 		lp->tx_full = 1;
 	spin_unlock_irqrestore (&lp->devlock, flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* The LANCE interrupt handler. */

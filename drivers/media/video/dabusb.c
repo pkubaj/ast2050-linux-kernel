@@ -748,14 +748,14 @@ static const struct file_operations dabusb_fops =
 	.release =	dabusb_release,
 };
 
-static char *dabusb_devnode(struct device *dev, mode_t *mode)
+static char *dabusb_nodename(struct device *dev)
 {
 	return kasprintf(GFP_KERNEL, "usb/%s", dev_name(dev));
 }
 
 static struct usb_class_driver dabusb_class = {
 	.name =		"dabusb%d",
-	.devnode =	dabusb_devnode,
+	.nodename =	dabusb_nodename,
 	.fops =		&dabusb_fops,
 	.minor_base =	DABUSB_MINOR,
 };

@@ -66,48 +66,6 @@ xattr_permission(struct inode *inode, const char *name, int mask)
 	return inode_permission(inode, mask);
 }
 
-/**
- *  __vfs_setxattr_noperm - perform setxattr operation without performing
- *  permission checks.
- *
- *  @dentry - object to perform setxattr on
- *  @name - xattr name to set
- *  @value - value to set @name to
- *  @size - size of @value
- *  @flags - flags to pass into filesystem operations
- *
- *  returns the result of the internal setxattr or setsecurity operations.
- *
- *  This function requires the caller to lock the inode's i_mutex before it
- *  is executed. It also assumes that the caller will make the appropriate
- *  permission checks.
- */
-int __vfs_setxattr_noperm(struct dentry *dentry, const char *name,
-		const void *value, size_t size, int flags)
-{
-	struct inode *inode = dentry->d_inode;
-	int error = -EOPNOTSUPP;
-
-	if (inode->i_op->setxattr) {
-		error = inode->i_op->setxattr(dentry, name, value, size, flags);
-		if (!error) {
-			fsnotify_xattr(dentry);
-			security_inode_post_setxattr(dentry, name, value,
-						     size, flags);
-		}
-	} else if (!strncmp(name, XATTR_SECURITY_PREFIX,
-				XATTR_SECURITY_PREFIX_LEN)) {
-		const char *suffix = name + XATTR_SECURITY_PREFIX_LEN;
-		error = security_inode_setsecurity(inode, suffix, value,
-						   size, flags);
-		if (!error)
-			fsnotify_xattr(dentry);
-	}
-
-	return error;
-}
-
-
 int
 vfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 		size_t size, int flags)
@@ -123,9 +81,22 @@ vfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 	error = security_inode_setxattr(dentry, name, value, size, flags);
 	if (error)
 		goto out;
-
-	error = __vfs_setxattr_noperm(dentry, name, value, size, flags);
-
+	error = -EOPNOTSUPP;
+	if (inode->i_op->setxattr) {
+		error = inode->i_op->setxattr(dentry, name, value, size, flags);
+		if (!error) {
+			fsnotify_xattr(dentry);
+			security_inode_post_setxattr(dentry, name, value,
+						     size, flags);
+		}
+	} else if (!strncmp(name, XATTR_SECURITY_PREFIX,
+				XATTR_SECURITY_PREFIX_LEN)) {
+		const char *suffix = name + XATTR_SECURITY_PREFIX_LEN;
+		error = security_inode_setsecurity(inode, suffix, value,
+						   size, flags);
+		if (!error)
+			fsnotify_xattr(dentry);
+	}
 out:
 	mutex_unlock(&inode->i_mutex);
 	return error;

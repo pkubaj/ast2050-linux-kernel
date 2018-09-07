@@ -10,7 +10,7 @@
  * Author.........: Nigel Hislop <hislop_nigel@emc.com>
  */
 
-#define KMSG_COMPONENT "dasd-eckd"
+#define KMSG_COMPONENT "dasd"
 
 #include <linux/stddef.h>
 #include <linux/kernel.h>
@@ -19,7 +19,6 @@
 #include <linux/bio.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/compat.h>
 
 #include <asm/debug.h>
 #include <asm/idals.h>
@@ -64,7 +63,7 @@ static struct dasd_discipline dasd_eckd_discipline;
 static struct ccw_device_id dasd_eckd_ids[] = {
 	{ CCW_DEVICE_DEVTYPE (0x3990, 0, 0x3390, 0), .driver_info = 0x1},
 	{ CCW_DEVICE_DEVTYPE (0x2105, 0, 0x3390, 0), .driver_info = 0x2},
-	{ CCW_DEVICE_DEVTYPE (0x3880, 0, 0x3380, 0), .driver_info = 0x3},
+	{ CCW_DEVICE_DEVTYPE (0x3880, 0, 0x3390, 0), .driver_info = 0x3},
 	{ CCW_DEVICE_DEVTYPE (0x3990, 0, 0x3380, 0), .driver_info = 0x4},
 	{ CCW_DEVICE_DEVTYPE (0x2105, 0, 0x3380, 0), .driver_info = 0x5},
 	{ CCW_DEVICE_DEVTYPE (0x9343, 0, 0x9345, 0), .driver_info = 0x6},
@@ -89,9 +88,9 @@ dasd_eckd_probe (struct ccw_device *cdev)
 	/* set ECKD specific ccw-device options */
 	ret = ccw_device_set_options(cdev, CCWDEV_ALLOW_FORCE);
 	if (ret) {
-		DBF_EVENT_DEVID(DBF_WARNING, cdev, "%s",
-				"dasd_eckd_probe: could not set "
-				"ccw-device options");
+		DBF_EVENT(DBF_WARNING,
+		       "dasd_eckd_probe: could not set ccw-device options "
+		       "for %s\n", dev_name(&cdev->dev));
 		return ret;
 	}
 	ret = dasd_generic_probe(cdev, &dasd_eckd_discipline);
@@ -707,7 +706,7 @@ static int dasd_eckd_generate_uid(struct dasd_device *device,
 	       sizeof(uid->serial) - 1);
 	EBCASC(uid->serial, sizeof(uid->serial) - 1);
 	uid->ssid = private->gneq->subsystemID;
-	uid->real_unit_addr = private->ned->unit_addr;
+	uid->real_unit_addr = private->ned->unit_addr;;
 	if (private->sneq) {
 		uid->type = private->sneq->sua_flags;
 		if (uid->type == UA_BASE_PAV_ALIAS)
@@ -731,8 +730,7 @@ static struct dasd_ccw_req *dasd_eckd_build_rcd_lpm(struct dasd_device *device,
 	struct dasd_ccw_req *cqr;
 	struct ccw1 *ccw;
 
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1 /* RCD */, ciw->count,
-				   device);
+	cqr = dasd_smalloc_request("ECKD", 1 /* RCD */, ciw->count, device);
 
 	if (IS_ERR(cqr)) {
 		DBF_DEV_EVENT(DBF_WARNING, device, "%s",
@@ -886,15 +884,16 @@ static int dasd_eckd_read_conf(struct dasd_device *device)
 			rc = dasd_eckd_read_conf_lpm(device, &conf_data,
 						     &conf_len, lpm);
 			if (rc && rc != -EOPNOTSUPP) {	/* -EOPNOTSUPP is ok */
-				DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
+				DBF_EVENT(DBF_WARNING,
 					  "Read configuration data returned "
-					  "error %d", rc);
+					  "error %d for device: %s", rc,
+					  dev_name(&device->cdev->dev));
 				return rc;
 			}
 			if (conf_data == NULL) {
-				DBF_EVENT_DEVID(DBF_WARNING, device->cdev, "%s",
-						"No configuration data "
-						"retrieved");
+				DBF_EVENT(DBF_WARNING, "No configuration "
+					  "data retrieved for device: %s",
+					  dev_name(&device->cdev->dev));
 				continue;	/* no error */
 			}
 			/* save first valid configuration data */
@@ -935,14 +934,15 @@ static int dasd_eckd_read_features(struct dasd_device *device)
 	struct dasd_eckd_private *private;
 
 	private = (struct dasd_eckd_private *) device->private;
-	memset(&private->features, 0, sizeof(struct dasd_rssd_features));
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1 /* PSF */	+ 1 /* RSSD */,
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   1 /* PSF */	+ 1 /* RSSD */ ,
 				   (sizeof(struct dasd_psf_prssd_data) +
 				    sizeof(struct dasd_rssd_features)),
 				   device);
 	if (IS_ERR(cqr)) {
-		DBF_EVENT_DEVID(DBF_WARNING, device->cdev, "%s", "Could not "
-				"allocate initialization request");
+		DBF_EVENT(DBF_WARNING, "Could not allocate initialization "
+			  "request for device: %s",
+			  dev_name(&device->cdev->dev));
 		return PTR_ERR(cqr);
 	}
 	cqr->startdev = device;
@@ -982,9 +982,7 @@ static int dasd_eckd_read_features(struct dasd_device *device)
 		features = (struct dasd_rssd_features *) (prssdp + 1);
 		memcpy(&private->features, features,
 		       sizeof(struct dasd_rssd_features));
-	} else
-		dev_warn(&device->cdev->dev, "Reading device feature codes"
-			 " failed with rc=%d\n", rc);
+	}
 	dasd_sfree_request(cqr, cqr->memdev);
 	return rc;
 }
@@ -1000,7 +998,7 @@ static struct dasd_ccw_req *dasd_eckd_build_psf_ssc(struct dasd_device *device,
 	struct dasd_psf_ssc_data *psf_ssc_data;
 	struct ccw1 *ccw;
 
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1 /* PSF */ ,
+	cqr = dasd_smalloc_request("ECKD", 1 /* PSF */ ,
 				  sizeof(struct dasd_psf_ssc_data),
 				  device);
 
@@ -1070,8 +1068,10 @@ static int dasd_eckd_validate_server(struct dasd_device *device)
 	/* may be requested feature is not available on server,
 	 * therefore just report error and go ahead */
 	private = (struct dasd_eckd_private *) device->private;
-	DBF_EVENT_DEVID(DBF_WARNING, device->cdev, "PSF-SSC for SSID %04x "
-			"returned rc=%d", private->uid.ssid, rc);
+	DBF_EVENT(DBF_WARNING, "PSF-SSC on storage subsystem %s.%s.%04x "
+		  "returned rc=%d for device: %s",
+		  private->uid.vendor, private->uid.serial,
+		  private->uid.ssid, rc, dev_name(&device->cdev->dev));
 	/* RE-Read Configuration Data */
 	return dasd_eckd_read_conf(device);
 }
@@ -1120,9 +1120,9 @@ dasd_eckd_check_characteristics(struct dasd_device *device)
 	if (private->uid.type == UA_BASE_DEVICE) {
 		block = dasd_alloc_block();
 		if (IS_ERR(block)) {
-			DBF_EVENT_DEVID(DBF_WARNING, device->cdev, "%s",
-					"could not allocate dasd "
-					"block structure");
+			DBF_EVENT(DBF_WARNING, "could not allocate dasd "
+				  "block structure for device: %s",
+				  dev_name(&device->cdev->dev));
 			rc = PTR_ERR(block);
 			goto out_err1;
 		}
@@ -1144,14 +1144,17 @@ dasd_eckd_check_characteristics(struct dasd_device *device)
 	}
 
 	/* Read Feature Codes */
-	dasd_eckd_read_features(device);
+	rc = dasd_eckd_read_features(device);
+	if (rc)
+		goto out_err3;
 
 	/* Read Device Characteristics */
-	rc = dasd_generic_read_dev_chars(device, DASD_ECKD_MAGIC,
-					 &private->rdc_data, 64);
+	rc = dasd_generic_read_dev_chars(device, "ECKD", &private->rdc_data,
+					 64);
 	if (rc) {
-		DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
-				"Read device characteristic failed, rc=%d", rc);
+		DBF_EVENT(DBF_WARNING,
+			  "Read device characteristics failed, rc=%d for "
+			  "device: %s", rc, dev_name(&device->cdev->dev));
 		goto out_err3;
 	}
 	/* find the vaild cylinder size */
@@ -1214,7 +1217,8 @@ dasd_eckd_analysis_ccw(struct dasd_device *device)
 
 	cplength = 8;
 	datasize = sizeof(struct DE_eckd_data) + 2*sizeof(struct LO_eckd_data);
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, cplength, datasize, device);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   cplength, datasize, device);
 	if (IS_ERR(cqr))
 		return cqr;
 	ccw = cqr->cpaddr;
@@ -1495,7 +1499,8 @@ dasd_eckd_format_device(struct dasd_device * device,
 		return ERR_PTR(-EINVAL);
 	}
 	/* Allocate the format ccw request. */
-	fcp = dasd_smalloc_request(DASD_ECKD_MAGIC, cplength, datasize, device);
+	fcp = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   cplength, datasize, device);
 	if (IS_ERR(fcp))
 		return fcp;
 
@@ -1778,8 +1783,8 @@ static struct dasd_ccw_req *dasd_eckd_build_cp_cmd_single(
 		datasize += count*sizeof(struct LO_eckd_data);
 	}
 	/* Allocate the ccw request. */
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, cplength, datasize,
-				   startdev);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   cplength, datasize, startdev);
 	if (IS_ERR(cqr))
 		return cqr;
 	ccw = cqr->cpaddr;
@@ -1943,8 +1948,8 @@ static struct dasd_ccw_req *dasd_eckd_build_cp_cmd_track(
 		cidaw * sizeof(unsigned long long);
 
 	/* Allocate the ccw request. */
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, cplength, datasize,
-				   startdev);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   cplength, datasize, startdev);
 	if (IS_ERR(cqr))
 		return cqr;
 	ccw = cqr->cpaddr;
@@ -2244,7 +2249,8 @@ static struct dasd_ccw_req *dasd_eckd_build_cp_tpm_track(
 
 	/* Allocate the ccw request. */
 	itcw_size = itcw_calc_size(0, ctidaw, 0);
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 0, itcw_size, startdev);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   0, itcw_size, startdev);
 	if (IS_ERR(cqr))
 		return cqr;
 
@@ -2334,8 +2340,6 @@ static struct dasd_ccw_req *dasd_eckd_build_cp(struct dasd_device *startdev,
 	/* Calculate number of blocks/records per track. */
 	blksize = block->bp_block;
 	blk_per_trk = recs_per_track(&private->rdc_data, 0, blksize);
-	if (blk_per_trk == 0)
-		return ERR_PTR(-EINVAL);
 	/* Calculate record id of first and last block. */
 	first_rec = first_trk = blk_rq_pos(req) >> block->s2b_shift;
 	first_offs = sector_div(first_trk, blk_per_trk);
@@ -2553,7 +2557,8 @@ dasd_eckd_release(struct dasd_device *device)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1, 32, device);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   1, 32, device);
 	if (IS_ERR(cqr)) {
 		DBF_DEV_EVENT(DBF_WARNING, device, "%s",
 			    "Could not allocate initialization request");
@@ -2595,7 +2600,8 @@ dasd_eckd_reserve(struct dasd_device *device)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1, 32, device);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   1, 32, device);
 	if (IS_ERR(cqr)) {
 		DBF_DEV_EVENT(DBF_WARNING, device, "%s",
 			    "Could not allocate initialization request");
@@ -2636,7 +2642,8 @@ dasd_eckd_steal_lock(struct dasd_device *device)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1, 32, device);
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   1, 32, device);
 	if (IS_ERR(cqr)) {
 		DBF_DEV_EVENT(DBF_WARNING, device, "%s",
 			    "Could not allocate initialization request");
@@ -2674,7 +2681,8 @@ dasd_eckd_performance(struct dasd_device *device, void __user *argp)
 	struct ccw1 *ccw;
 	int rc;
 
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 1 /* PSF */  + 1 /* RSSD */,
+	cqr = dasd_smalloc_request(dasd_eckd_discipline.name,
+				   1 /* PSF */  + 1 /* RSSD */ ,
 				   (sizeof(struct dasd_psf_prssd_data) +
 				    sizeof(struct dasd_rssd_perf_stats_t)),
 				   device);
@@ -2820,7 +2828,7 @@ static int dasd_symm_io(struct dasd_device *device, void __user *argp)
 	}
 
 	/* setup CCWs for PSF + RSSD */
-	cqr = dasd_smalloc_request(DASD_ECKD_MAGIC, 2 , 0, device);
+	cqr = dasd_smalloc_request("ECKD", 2 , 0, device);
 	if (IS_ERR(cqr)) {
 		DBF_DEV_EVENT(DBF_WARNING, device, "%s",
 			"Could not allocate initialization request");
@@ -2976,7 +2984,7 @@ static void dasd_eckd_dump_sense_ccw(struct dasd_device *device,
 	len += sprintf(page + len, KERN_ERR PRINTK_HEADER
 		       " in req: %p CS: 0x%02X DS: 0x%02X CC: 0x%02X RC: %d\n",
 		       req, scsw_cstat(&irb->scsw), scsw_dstat(&irb->scsw),
-		       scsw_cc(&irb->scsw), req ? req->intrc : 0);
+		       scsw_cc(&irb->scsw), req->intrc);
 	len += sprintf(page + len, KERN_ERR PRINTK_HEADER
 		       " device %s: Failing CCW: %p\n",
 		       dev_name(&device->cdev->dev),
@@ -3209,10 +3217,8 @@ int dasd_eckd_pm_freeze(struct dasd_device *device)
 int dasd_eckd_restore_device(struct dasd_device *device)
 {
 	struct dasd_eckd_private *private;
-	struct dasd_eckd_characteristics temp_rdc_data;
 	int is_known, rc;
 	struct dasd_uid temp_uid;
-	unsigned long flags;
 
 	private = (struct dasd_eckd_private *) device->private;
 
@@ -3225,8 +3231,7 @@ int dasd_eckd_restore_device(struct dasd_device *device)
 	rc = dasd_eckd_generate_uid(device, &private->uid);
 	dasd_get_uid(device->cdev, &temp_uid);
 	if (memcmp(&private->uid, &temp_uid, sizeof(struct dasd_uid)) != 0)
-		dev_err(&device->cdev->dev, "The UID of the DASD has "
-			"changed\n");
+		dev_err(&device->cdev->dev, "The UID of the DASD has changed\n");
 	if (rc)
 		goto out_err;
 	dasd_set_uid(device->cdev, &private->uid);
@@ -3243,19 +3248,20 @@ int dasd_eckd_restore_device(struct dasd_device *device)
 	}
 
 	/* Read Feature Codes */
-	dasd_eckd_read_features(device);
+	rc = dasd_eckd_read_features(device);
+	if (rc)
+		goto out_err;
 
 	/* Read Device Characteristics */
-	rc = dasd_generic_read_dev_chars(device, DASD_ECKD_MAGIC,
-					 &temp_rdc_data, 64);
+	memset(&private->rdc_data, 0, sizeof(private->rdc_data));
+	rc = dasd_generic_read_dev_chars(device, "ECKD",
+					 &private->rdc_data, 64);
 	if (rc) {
-		DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
-				"Read device characteristic failed, rc=%d", rc);
+		DBF_EVENT(DBF_WARNING,
+			  "Read device characteristics failed, rc=%d for "
+			  "device: %s", rc, dev_name(&device->cdev->dev));
 		goto out_err;
 	}
-	spin_lock_irqsave(get_ccwdev_lock(device->cdev), flags);
-	memcpy(&private->rdc_data, &temp_rdc_data, sizeof(temp_rdc_data));
-	spin_unlock_irqrestore(get_ccwdev_lock(device->cdev), flags);
 
 	/* add device to alias management */
 	dasd_alias_add_device(device);

@@ -438,37 +438,34 @@ static int __exit pxa_rtc_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-static int pxa_rtc_suspend(struct device *dev)
+static int pxa_rtc_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	struct pxa_rtc *pxa_rtc = dev_get_drvdata(dev);
+	struct pxa_rtc *pxa_rtc = platform_get_drvdata(pdev);
 
-	if (device_may_wakeup(dev))
+	if (device_may_wakeup(&pdev->dev))
 		enable_irq_wake(pxa_rtc->irq_Alrm);
 	return 0;
 }
 
-static int pxa_rtc_resume(struct device *dev)
+static int pxa_rtc_resume(struct platform_device *pdev)
 {
-	struct pxa_rtc *pxa_rtc = dev_get_drvdata(dev);
+	struct pxa_rtc *pxa_rtc = platform_get_drvdata(pdev);
 
-	if (device_may_wakeup(dev))
+	if (device_may_wakeup(&pdev->dev))
 		disable_irq_wake(pxa_rtc->irq_Alrm);
 	return 0;
 }
-
-static struct dev_pm_ops pxa_rtc_pm_ops = {
-	.suspend	= pxa_rtc_suspend,
-	.resume		= pxa_rtc_resume,
-};
+#else
+#define pxa_rtc_suspend	NULL
+#define pxa_rtc_resume	NULL
 #endif
 
 static struct platform_driver pxa_rtc_driver = {
 	.remove		= __exit_p(pxa_rtc_remove),
+	.suspend	= pxa_rtc_suspend,
+	.resume		= pxa_rtc_resume,
 	.driver		= {
-		.name	= "pxa-rtc",
-#ifdef CONFIG_PM
-		.pm	= &pxa_rtc_pm_ops,
-#endif
+		.name		= "pxa-rtc",
 	},
 };
 

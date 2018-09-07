@@ -28,7 +28,7 @@
 			 (1 << NF_INET_POST_ROUTING) | \
 			 (1 << NF_INET_LOCAL_OUT))
 
-static const struct
+static struct
 {
 	struct ipt_replace repl;
 	struct ipt_standard entries[3];
@@ -58,11 +58,11 @@ static const struct
 	.term = IPT_ERROR_INIT,			/* ERROR */
 };
 
-static const struct xt_table nat_table = {
+static struct xt_table nat_table = {
 	.name		= "nat",
 	.valid_hooks	= NAT_VALID_HOOKS,
 	.me		= THIS_MODULE,
-	.af		= NFPROTO_IPV4,
+	.af		= AF_INET,
 };
 
 /* Source NAT */

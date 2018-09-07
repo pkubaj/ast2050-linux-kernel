@@ -1,11 +1,11 @@
 #
-# linux/arch/m32r/boot/compressed/Makefile
+# linux/arch/sh/boot/compressed/Makefile
 #
 # create a compressed vmlinux image from the original vmlinux
 #
 
-targets		:= vmlinux vmlinux.bin vmlinux.bin.gz vmlinux.bin.bz2 \
-		   vmlinux.bin.lzma head.o misc.o piggy.o vmlinux.lds
+targets		:= vmlinux vmlinux.bin vmlinux.bin.gz head.o misc.o \
+		   piggy.o vmlinux.lds
 
 OBJECTS = $(obj)/head.o $(obj)/misc.o
 
@@ -27,12 +27,6 @@ $(obj)/vmlinux.bin: vmlinux FORCE
 $(obj)/vmlinux.bin.gz: $(obj)/vmlinux.bin FORCE
 	$(call if_changed,gzip)
 
-$(obj)/vmlinux.bin.bz2: $(obj)/vmlinux.bin FORCE
-	$(call if_changed,bzip2)
-
-$(obj)/vmlinux.bin.lzma: $(obj)/vmlinux.bin FORCE
-	$(call if_changed,lzma)
-
 CFLAGS_misc.o += -fpic
 
 ifdef CONFIG_MMU
@@ -43,9 +37,5 @@ endif
 
 OBJCOPYFLAGS += -R .empty_zero_page
 
-suffix_$(CONFIG_KERNEL_GZIP)	= gz
-suffix_$(CONFIG_KERNEL_BZIP2)	= bz2
-suffix_$(CONFIG_KERNEL_LZMA)	= lzma
-
-$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.$(suffix-y) FORCE
+$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.gz FORCE
 	$(call if_changed,ld)

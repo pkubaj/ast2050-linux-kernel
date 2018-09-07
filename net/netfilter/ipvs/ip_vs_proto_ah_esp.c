@@ -10,9 +10,6 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/in.h>
 #include <linux/ip.h>
 #include <linux/module.h>
@@ -141,7 +138,7 @@ ah_esp_debug_packet_v4(struct ip_vs_protocol *pp, const struct sk_buff *skb,
 		sprintf(buf, "%s %pI4->%pI4",
 			pp->name, &ih->saddr, &ih->daddr);
 
-	pr_debug("%s: %s\n", msg, buf);
+	printk(KERN_DEBUG "IPVS: %s: %s\n", msg, buf);
 }
 
 #ifdef CONFIG_IP_VS_IPV6
@@ -159,7 +156,7 @@ ah_esp_debug_packet_v6(struct ip_vs_protocol *pp, const struct sk_buff *skb,
 		sprintf(buf, "%s %pI6->%pI6",
 			pp->name, &ih->saddr, &ih->daddr);
 
-	pr_debug("%s: %s\n", msg, buf);
+	printk(KERN_DEBUG "IPVS: %s: %s\n", msg, buf);
 }
 #endif
 

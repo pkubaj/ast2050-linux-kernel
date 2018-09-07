@@ -512,8 +512,10 @@ int __init sctp_remaddr_proc_init(void)
 {
 	struct proc_dir_entry *p;
 
-	p = proc_create("remaddr", S_IRUGO, proc_net_sctp, &sctp_remaddr_seq_fops);
+	p = create_proc_entry("remaddr", S_IRUGO, proc_net_sctp);
 	if (!p)
 		return -ENOMEM;
+	p->proc_fops = &sctp_remaddr_seq_fops;
+
 	return 0;
 }

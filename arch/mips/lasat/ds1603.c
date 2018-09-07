@@ -135,7 +135,7 @@ static void rtc_end_op(void)
 	lasat_ndelay(1000);
 }
 
-void read_persistent_clock(struct timespec *ts)
+unsigned long read_persistent_clock(void)
 {
 	unsigned long word;
 	unsigned long flags;
@@ -147,8 +147,7 @@ void read_persistent_clock(struct timespec *ts)
 	rtc_end_op();
 	spin_unlock_irqrestore(&rtc_lock, flags);
 
-	ts->tv_sec = word;
-	ts->tv_nsec = 0;
+	return word;
 }
 
 int rtc_mips_set_mmss(unsigned long time)

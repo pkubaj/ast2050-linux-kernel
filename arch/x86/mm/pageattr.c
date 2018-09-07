@@ -12,7 +12,6 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/pfn.h>
-#include <linux/percpu.h>
 
 #include <asm/e820.h>
 #include <asm/processor.h>
@@ -31,7 +30,7 @@ struct cpa_data {
 	unsigned long	*vaddr;
 	pgprot_t	mask_set;
 	pgprot_t	mask_clr;
-	unsigned long	numpages;
+	int		numpages;
 	int		flags;
 	unsigned long	pfn;
 	unsigned	force_split : 1;
@@ -56,10 +55,12 @@ static unsigned long direct_pages_count[PG_LEVEL_NUM];
 
 void update_page_count(int level, unsigned long pages)
 {
+	unsigned long flags;
+
 	/* Protect against CPA */
-	spin_lock(&pgd_lock);
+	spin_lock_irqsave(&pgd_lock, flags);
 	direct_pages_count[level] += pages;
-	spin_unlock(&pgd_lock);
+	spin_unlock_irqrestore(&pgd_lock, flags);
 }
 
 static void split_page_count(int level)
@@ -352,7 +353,7 @@ static int
 try_preserve_large_page(pte_t *kpte, unsigned long address,
 			struct cpa_data *cpa)
 {
-	unsigned long nextpage_addr, numpages, pmask, psize, addr, pfn;
+	unsigned long nextpage_addr, numpages, pmask, psize, flags, addr, pfn;
 	pte_t new_pte, old_pte, *tmp;
 	pgprot_t old_prot, new_prot;
 	int i, do_split = 1;
@@ -361,7 +362,7 @@ try_preserve_large_page(pte_t *kpte, unsigned long address,
 	if (cpa->force_split)
 		return 1;
 
-	spin_lock(&pgd_lock);
+	spin_lock_irqsave(&pgd_lock, flags);
 	/*
 	 * Check for races, another CPU might have split this page
 	 * up already:
@@ -456,14 +457,14 @@ try_preserve_large_page(pte_t *kpte, unsigned long address,
 	}
 
 out_unlock:
-	spin_unlock(&pgd_lock);
+	spin_unlock_irqrestore(&pgd_lock, flags);
 
 	return do_split;
 }
 
 static int split_large_page(pte_t *kpte, unsigned long address)
 {
-	unsigned long pfn, pfninc = 1;
+	unsigned long flags, pfn, pfninc = 1;
 	unsigned int i, level;
 	pte_t *pbase, *tmp;
 	pgprot_t ref_prot;
@@ -477,7 +478,7 @@ static int split_large_page(pte_t *kpte, unsigned long address)
 	if (!base)
 		return -ENOMEM;
 
-	spin_lock(&pgd_lock);
+	spin_lock_irqsave(&pgd_lock, flags);
 	/*
 	 * Check for races, another CPU might have split this page
 	 * up for us already:
@@ -549,7 +550,7 @@ out_unlock:
 	 */
 	if (base)
 		__free_page(base);
-	spin_unlock(&pgd_lock);
+	spin_unlock_irqrestore(&pgd_lock, flags);
 
 	return 0;
 }
@@ -686,7 +687,7 @@ static int cpa_process_alias(struct cpa_data *cpa)
 {
 	struct cpa_data alias_cpa;
 	unsigned long laddr = (unsigned long)__va(cpa->pfn << PAGE_SHIFT);
-	unsigned long vaddr;
+	unsigned long vaddr, remapped;
 	int ret;
 
 	if (cpa->pfn >= max_pfn_mapped)
@@ -744,6 +745,24 @@ static int cpa_process_alias(struct cpa_data *cpa)
 	}
 #endif
 
+	/*
+	 * If the PMD page was partially used for per-cpu remapping,
+	 * the recycled area needs to be split and modified.  Because
+	 * the area is always proper subset of a PMD page
+	 * cpa->numpages is guaranteed to be 1 for these areas, so
+	 * there's no need to loop over and check for further remaps.
+	 */
+	remapped = (unsigned long)pcpu_lpage_remapped((void *)laddr);
+	if (remapped) {
+		WARN_ON(cpa->numpages > 1);
+		alias_cpa = *cpa;
+		alias_cpa.vaddr = &remapped;
+		alias_cpa.flags &= ~(CPA_PAGES_ARRAY | CPA_ARRAY);
+		ret = __change_page_attr_set_clr(&alias_cpa, 0);
+		if (ret)
+			return ret;
+	}
+
 	return 0;
 }
 
@@ -780,7 +799,7 @@ static int __change_page_attr_set_clr(struct cpa_data *cpa, int checkalias)
 		 * CPA operation. Either a large page has been
 		 * preserved or a single page update happened.
 		 */
-		BUG_ON(cpa->numpages > numpages || !cpa->numpages);
+		BUG_ON(cpa->numpages > numpages);
 		numpages -= cpa->numpages;
 		if (cpa->flags & (CPA_PAGES_ARRAY | CPA_ARRAY))
 			cpa->curpage++;

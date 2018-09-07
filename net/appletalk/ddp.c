@@ -1370,9 +1370,11 @@ static int atalk_route_packet(struct sk_buff *skb, struct net_device *dev,
 	if (skb == NULL)
 		goto drop;
 
-	if (aarp_send_ddp(rt->dev, skb, &ta, NULL) == NET_XMIT_DROP)
-		return NET_RX_DROP;
-	return NET_RX_SUCCESS;
+	/*
+	 * It is OK, NET_XMIT_SUCCESS == NET_RX_SUCCESS and
+	 * NET_XMIT_DROP == NET_RX_DROP
+	 */
+	return aarp_send_ddp(rt->dev, skb, &ta, NULL);
 free_it:
 	kfree_skb(skb);
 drop:
@@ -1402,15 +1404,15 @@ static int atalk_rcv(struct sk_buff *skb, struct net_device *dev,
 	__u16 len_hops;
 
 	if (!net_eq(dev_net(dev), &init_net))
-		goto drop;
+		goto freeit;
 
 	/* Don't mangle buffer if shared */
 	if (!(skb = skb_share_check(skb, GFP_ATOMIC)))
-		goto out;
+		goto drop;
 
 	/* Size check and make sure header is contiguous */
 	if (!pskb_may_pull(skb, sizeof(*ddp)))
-		goto drop;
+		goto freeit;
 
 	ddp = ddp_hdr(skb);
 
@@ -1428,7 +1430,7 @@ static int atalk_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (skb->len < sizeof(*ddp) || skb->len < (len_hops & 1023)) {
 		pr_debug("AppleTalk: dropping corrupted frame (deh_len=%u, "
 			 "skb->len=%u)\n", len_hops & 1023, skb->len);
-		goto drop;
+		goto freeit;
 	}
 
 	/*
@@ -1438,7 +1440,7 @@ static int atalk_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (ddp->deh_sum &&
 	    atalk_checksum(skb, len_hops & 1023) != ddp->deh_sum)
 		/* Not a valid AppleTalk frame - dustbin time */
-		goto drop;
+		goto freeit;
 
 	/* Check the packet is aimed at us */
 	if (!ddp->deh_dnet)	/* Net 0 is 'this network' */
@@ -1466,19 +1468,19 @@ static int atalk_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	sock = atalk_search_socket(&tosat, atif);
 	if (!sock) /* But not one of our sockets */
-		goto drop;
+		goto freeit;
 
 	/* Queue packet (standard) */
+	skb->sk = sock;
+
 	if (sock_queue_rcv_skb(sock, skb) < 0)
-		goto drop;
+		goto freeit;
 
 	return NET_RX_SUCCESS;
-
-drop:
+freeit:
 	kfree_skb(skb);
-out:
+drop:
 	return NET_RX_DROP;
-
 }
 
 /*
@@ -1614,6 +1616,7 @@ static int atalk_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr 
 	if (!skb)
 		return err;
 
+	skb->sk = sk;
 	skb_reserve(skb, ddp_dl->header_length);
 	skb_reserve(skb, dev->hard_header_len);
 	skb->dev = dev;
@@ -1700,6 +1703,7 @@ static int atalk_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr 
 			 size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
+	struct sockaddr_at *sat = (struct sockaddr_at *)msg->msg_name;
 	struct ddpehdr *ddp;
 	int copied = 0;
 	int offset = 0;
@@ -1724,13 +1728,14 @@ static int atalk_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr 
 	}
 	err = skb_copy_datagram_iovec(skb, offset, msg->msg_iov, copied);
 
-	if (!err && msg->msg_name) {
-		struct sockaddr_at *sat = msg->msg_name;
-		sat->sat_family      = AF_APPLETALK;
-		sat->sat_port        = ddp->deh_sport;
-		sat->sat_addr.s_node = ddp->deh_snode;
-		sat->sat_addr.s_net  = ddp->deh_snet;
-		msg->msg_namelen     = sizeof(*sat);
+	if (!err) {
+		if (sat) {
+			sat->sat_family      = AF_APPLETALK;
+			sat->sat_port        = ddp->deh_sport;
+			sat->sat_addr.s_node = ddp->deh_snode;
+			sat->sat_addr.s_net  = ddp->deh_snet;
+		}
+		msg->msg_namelen = sizeof(*sat);
 	}
 
 	skb_free_datagram(sk, skb);	/* Free the datagram. */

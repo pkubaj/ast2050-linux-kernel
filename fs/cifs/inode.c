@@ -610,16 +610,6 @@ cifs_find_inode(struct inode *inode, void *opaque)
 	if (CIFS_I(inode)->uniqueid != fattr->cf_uniqueid)
 		return 0;
 
-	/*
-	 * uh oh -- it's a directory. We can't use it since hardlinked dirs are
-	 * verboten. Disable serverino and return it as if it were found, the
-	 * caller can discard it, generate a uniqueid and retry the find
-	 */
-	if (S_ISDIR(inode->i_mode) && !list_empty(&inode->i_dentry)) {
-		fattr->cf_flags |= CIFS_FATTR_INO_COLLISION;
-		cifs_autodisable_serverino(CIFS_SB(inode->i_sb));
-	}
-
 	return 1;
 }
 
@@ -639,22 +629,15 @@ cifs_iget(struct super_block *sb, struct cifs_fattr *fattr)
 	unsigned long hash;
 	struct inode *inode;
 
-retry_iget5_locked:
 	cFYI(1, ("looking for uniqueid=%llu", fattr->cf_uniqueid));
 
 	/* hash down to 32-bits on 32-bit arch */
 	hash = cifs_uniqueid_to_ino_t(fattr->cf_uniqueid);
 
 	inode = iget5_locked(sb, hash, cifs_find_inode, cifs_init_inode, fattr);
-	if (inode) {
-		/* was there a problematic inode number collision? */
-		if (fattr->cf_flags & CIFS_FATTR_INO_COLLISION) {
-			iput(inode);
-			fattr->cf_uniqueid = iunique(sb, ROOT_I);
-			fattr->cf_flags &= ~CIFS_FATTR_INO_COLLISION;
-			goto retry_iget5_locked;
-		}
 
+	/* we have fattrs in hand, update the inode */
+	if (inode) {
 		cifs_fattr_to_inode(inode, fattr);
 		if (sb->s_flags & MS_NOATIME)
 			inode->i_flags |= S_NOATIME | S_NOCMTIME;
@@ -688,10 +671,8 @@ struct inode *cifs_root_iget(struct super_block *sb, unsigned long ino)
 		rc = cifs_get_inode_info(&inode, full_path, NULL, sb,
 						xid, NULL);
 
-	if (!inode) {
-		inode = ERR_PTR(rc);
-		goto out;
-	}
+	if (!inode)
+		return ERR_PTR(-ENOMEM);
 
 	if (rc && cifs_sb->tcon->ipc) {
 		cFYI(1, ("ipc connection - fake read inode"));
@@ -702,11 +683,13 @@ struct inode *cifs_root_iget(struct super_block *sb, unsigned long ino)
 		inode->i_uid = cifs_sb->mnt_uid;
 		inode->i_gid = cifs_sb->mnt_gid;
 	} else if (rc) {
+		kfree(full_path);
+		_FreeXid(xid);
 		iget_failed(inode);
-		inode = ERR_PTR(rc);
+		return ERR_PTR(rc);
 	}
 
-out:
+
 	kfree(full_path);
 	/* can not call macro FreeXid here since in a void func
 	 * TODO: This is no longer true
@@ -814,7 +797,7 @@ set_via_filehandle:
 	if (open_file == NULL)
 		CIFSSMBClose(xid, pTcon, netfid);
 	else
-		cifsFileInfo_put(open_file);
+		atomic_dec(&open_file->wrtPending);
 out:
 	return rc;
 }
@@ -1284,10 +1267,6 @@ cifs_do_rename(int xid, struct dentry *from_dentry, const char *fromPath,
 	if (rc == 0 || rc != -ETXTBSY)
 		return rc;
 
-	/* open-file renames don't work across directories */
-	if (to_dentry->d_parent != from_dentry->d_parent)
-		return rc;
-
 	/* open the file to be renamed -- we need DELETE perms */
 	rc = CIFSSMBOpen(xid, pTcon, fromPath, FILE_OPEN, DELETE,
 			 CREATE_NOT_DIR, &srcfid, &oplock, NULL,
@@ -1575,24 +1554,57 @@ static int cifs_truncate_page(struct address_space *mapping, loff_t from)
 
 static int cifs_vmtruncate(struct inode *inode, loff_t offset)
 {
-	loff_t oldsize;
-	int err;
+	struct address_space *mapping = inode->i_mapping;
+	unsigned long limit;
 
 	spin_lock(&inode->i_lock);
-	err = inode_newsize_ok(inode, offset);
-	if (err) {
+	if (inode->i_size < offset)
+		goto do_expand;
+	/*
+	 * truncation of in-use swapfiles is disallowed - it would cause
+	 * subsequent swapout to scribble on the now-freed blocks.
+	 */
+	if (IS_SWAPFILE(inode)) {
 		spin_unlock(&inode->i_lock);
-		goto out;
+		goto out_busy;
 	}
-
-	oldsize = inode->i_size;
 	i_size_write(inode, offset);
 	spin_unlock(&inode->i_lock);
-	truncate_pagecache(inode, oldsize, offset);
+	/*
+	 * unmap_mapping_range is called twice, first simply for efficiency
+	 * so that truncate_inode_pages does fewer single-page unmaps. However
+	 * after this first call, and before truncate_inode_pages finishes,
+	 * it is possible for private pages to be COWed, which remain after
+	 * truncate_inode_pages finishes, hence the second unmap_mapping_range
+	 * call must be made for correctness.
+	 */
+	unmap_mapping_range(mapping, offset + PAGE_SIZE - 1, 0, 1);
+	truncate_inode_pages(mapping, offset);
+	unmap_mapping_range(mapping, offset + PAGE_SIZE - 1, 0, 1);
+	goto out_truncate;
+
+do_expand:
+	limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
+	if (limit != RLIM_INFINITY && offset > limit) {
+		spin_unlock(&inode->i_lock);
+		goto out_sig;
+	}
+	if (offset > inode->i_sb->s_maxbytes) {
+		spin_unlock(&inode->i_lock);
+		goto out_big;
+	}
+	i_size_write(inode, offset);
+	spin_unlock(&inode->i_lock);
+out_truncate:
 	if (inode->i_op->truncate)
 		inode->i_op->truncate(inode);
-out:
-	return err;
+	return 0;
+out_sig:
+	send_sig(SIGXFSZ, current, 0);
+out_big:
+	return -EFBIG;
+out_busy:
+	return -ETXTBSY;
 }
 
 static int
@@ -1620,7 +1632,7 @@ cifs_set_file_size(struct inode *inode, struct iattr *attrs,
 		__u32 npid = open_file->pid;
 		rc = CIFSSMBSetFileSize(xid, pTcon, attrs->ia_size, nfid,
 					npid, false);
-		cifsFileInfo_put(open_file);
+		atomic_dec(&open_file->wrtPending);
 		cFYI(1, ("SetFSize for attrs rc = %d", rc));
 		if ((rc == -EINVAL) || (rc == -EOPNOTSUPP)) {
 			unsigned int bytes_written;
@@ -1775,7 +1787,7 @@ cifs_setattr_unix(struct dentry *direntry, struct iattr *attrs)
 		u16 nfid = open_file->netfid;
 		u32 npid = open_file->pid;
 		rc = CIFSSMBUnixSetFileInfo(xid, pTcon, args, nfid, npid);
-		cifsFileInfo_put(open_file);
+		atomic_dec(&open_file->wrtPending);
 	} else {
 		rc = CIFSSMBUnixSetPathInfo(xid, pTcon, full_path, args,
 				    cifs_sb->local_nls,

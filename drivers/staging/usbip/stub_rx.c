@@ -65,8 +65,8 @@ static int is_reset_device_cmd(struct urb *urb)
 
 	if ((req->bRequest == USB_REQ_SET_FEATURE) &&
 			(req->bRequestType == USB_RT_PORT) &&
-			(value == USB_PORT_FEAT_RESET)) {
-		usbip_dbg_stub_rx("reset_device_cmd, port %u\n", index);
+			(value = USB_PORT_FEAT_RESET)) {
+		dbg_stub_rx("reset_device_cmd, port %u\n", index);
 		return 1;
 	} else
 		return 0;
@@ -99,11 +99,11 @@ static int tweak_clear_halt_cmd(struct urb *urb)
 
 	ret = usb_clear_halt(urb->dev, target_pipe);
 	if (ret < 0)
-		usbip_uinfo("clear_halt error: devnum %d endp %d, %d\n",
-					urb->dev->devnum, target_endp, ret);
+		uinfo("clear_halt error: devnum %d endp %d, %d\n",
+				urb->dev->devnum, target_endp, ret);
 	else
-		usbip_uinfo("clear_halt done: devnum %d endp %d\n",
-					urb->dev->devnum, target_endp);
+		uinfo("clear_halt done: devnum %d endp %d\n",
+				urb->dev->devnum, target_endp);
 
 	return ret;
 }
@@ -119,15 +119,14 @@ static int tweak_set_interface_cmd(struct urb *urb)
 	alternate = le16_to_cpu(req->wValue);
 	interface = le16_to_cpu(req->wIndex);
 
-	usbip_dbg_stub_rx("set_interface: inf %u alt %u\n", interface,
-								alternate);
+	dbg_stub_rx("set_interface: inf %u alt %u\n", interface, alternate);
 
 	ret = usb_set_interface(urb->dev, interface, alternate);
 	if (ret < 0)
-		usbip_uinfo("set_interface error: inf %u alt %u, %d\n",
-					interface, alternate, ret);
+		uinfo("set_interface error: inf %u alt %u, %d\n",
+				interface, alternate, ret);
 	else
-		usbip_uinfo("set_interface done: inf %u alt %u\n",
+		uinfo("set_interface done: inf %u alt %u\n",
 							interface,
 							alternate);
 
@@ -158,9 +157,8 @@ static int tweak_set_configuration_cmd(struct urb *urb)
 	 * A user may need to set a special configuration value before
 	 * exporting the device.
 	 */
-	usbip_uinfo("set_configuration (%d) to %s\n", config,
-						dev_name(&urb->dev->dev));
-	usbip_uinfo("but, skip!\n");
+	uinfo("set_configuration (%d) to %s\n", config, dev_name(&urb->dev->dev));
+	uinfo("but, skip!\n");
 
 	return 0;
 	/* return usb_driver_set_configuration(urb->dev, config); */
@@ -168,23 +166,32 @@ static int tweak_set_configuration_cmd(struct urb *urb)
 
 static int tweak_reset_device_cmd(struct urb *urb)
 {
-	struct stub_priv *priv = (struct stub_priv *) urb->context;
-	struct stub_device *sdev = priv->sdev;
+	struct usb_ctrlrequest *req;
+	__u16 value;
+	__u16 index;
+	int ret;
 
-	usbip_uinfo("reset_device %s\n", dev_name(&urb->dev->dev));
+	req = (struct usb_ctrlrequest *) urb->setup_packet;
+	value = le16_to_cpu(req->wValue);
+	index = le16_to_cpu(req->wIndex);
 
-	/*
-	 * usb_lock_device_for_reset caused a deadlock: it causes the driver
-	 * to unbind. In the shutdown the rx thread is signalled to shut down
-	 * but this thread is pending in the usb_lock_device_for_reset.
-	 *
-	 * Instead queue the reset.
-	 *
-	 * Unfortunatly an existing usbip connection will be dropped due to
-	 * driver unbinding.
-	 */
-	usb_queue_reset_device(sdev->interface);
-	return 0;
+	uinfo("reset_device (port %d) to %s\n", index, dev_name(&urb->dev->dev));
+
+	/* all interfaces should be owned by usbip driver, so just reset it.  */
+	ret = usb_lock_device_for_reset(urb->dev, NULL);
+	if (ret < 0) {
+		dev_err(&urb->dev->dev, "lock for reset\n");
+		return ret;
+	}
+
+	/* try to reset the device */
+	ret = usb_reset_device(urb->dev);
+	if (ret < 0)
+		dev_err(&urb->dev->dev, "device reset\n");
+
+	usb_unlock_device(urb->dev);
+
+	return ret;
 }
 
 /*
@@ -213,7 +220,7 @@ static void tweak_special_requests(struct urb *urb)
 	else if (is_reset_device_cmd(urb))
 		tweak_reset_device_cmd(urb);
 	else
-		usbip_dbg_stub_rx("no need to tweak\n");
+		dbg_stub_rx("no need to tweak\n");
 }
 
 /*
@@ -285,8 +292,7 @@ static int stub_recv_cmd_unlink(struct stub_device *sdev,
 		}
 	}
 
-	usbip_dbg_stub_rx("seqnum %d is not pending\n",
-						pdu->u.cmd_unlink.seqnum);
+	dbg_stub_rx("seqnum %d is not pending\n", pdu->u.cmd_unlink.seqnum);
 
 	/*
 	 * The urb of the unlink target is not found in priv_init queue. It was
@@ -377,7 +383,7 @@ static struct usb_host_endpoint *get_ep_from_epnum(struct usb_device *udev,
 			epnum = (ep->desc.bEndpointAddress & 0x7f);
 
 			if (epnum == epnum0) {
-				/* usbip_uinfo("found epnum %d\n", epnum0);*/
+				/* uinfo("found epnum %d\n", epnum0); */
 				found = 1;
 				break;
 			}
@@ -520,8 +526,7 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 	ret = usb_submit_urb(priv->urb, GFP_KERNEL);
 
 	if (ret == 0)
-		usbip_dbg_stub_rx("submit urb ok, seqnum %u\n",
-							pdu->base.seqnum);
+		dbg_stub_rx("submit urb ok, seqnum %u\n", pdu->base.seqnum);
 	else {
 		dev_err(&sdev->interface->dev, "submit_urb error, %d\n", ret);
 		usbip_dump_header(pdu);
@@ -534,7 +539,7 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 		usbip_event_add(ud, SDEV_EVENT_ERROR_SUBMIT);
 	}
 
-	usbip_dbg_stub_rx("Leave\n");
+	dbg_stub_rx("Leave\n");
 	return;
 }
 
@@ -546,7 +551,7 @@ static void stub_rx_pdu(struct usbip_device *ud)
 	struct stub_device *sdev = container_of(ud, struct stub_device, ud);
 	struct device *dev = &sdev->interface->dev;
 
-	usbip_dbg_stub_rx("Enter\n");
+	dbg_stub_rx("Enter\n");
 
 	memset(&pdu, 0, sizeof(pdu));
 
@@ -560,7 +565,7 @@ static void stub_rx_pdu(struct usbip_device *ud)
 
 	usbip_header_correct_endian(&pdu, 0);
 
-	if (usbip_dbg_flag_stub_rx)
+	if (dbg_flag_stub_rx)
 		usbip_dump_header(&pdu);
 
 	if (!valid_request(sdev, &pdu)) {
@@ -593,11 +598,11 @@ void stub_rx_loop(struct usbip_task *ut)
 
 	while (1) {
 		if (signal_pending(current)) {
-			usbip_dbg_stub_rx("signal caught!\n");
+			dbg_stub_rx("signal caught!\n");
 			break;
 		}
 
-		if (usbip_event_happened(ud))
+		if (usbip_event_happend(ud))
 			break;
 
 		stub_rx_pdu(ud);

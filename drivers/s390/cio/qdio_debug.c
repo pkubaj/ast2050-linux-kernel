@@ -1,12 +1,14 @@
 /*
  *  drivers/s390/cio/qdio_debug.c
  *
- *  Copyright IBM Corp. 2008,2009
+ *  Copyright IBM Corp. 2008
  *
  *  Author: Jan Glauber (jang@linux.vnet.ibm.com)
  */
+#include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
+#include <asm/qdio.h>
 #include <asm/debug.h>
 #include "qdio_debug.h"
 #include "qdio.h"
@@ -15,7 +17,10 @@ debug_info_t *qdio_dbf_setup;
 debug_info_t *qdio_dbf_error;
 
 static struct dentry *debugfs_root;
-#define QDIO_DEBUGFS_NAME_LEN	10
+#define MAX_DEBUGFS_QUEUES	32
+static struct dentry *debugfs_queues[MAX_DEBUGFS_QUEUES] = { NULL };
+static DEFINE_MUTEX(debugfs_mutex);
+#define QDIO_DEBUGFS_NAME_LEN	40
 
 void qdio_allocate_dbf(struct qdio_initialize *init_data,
 		       struct qdio_irq *irq_ptr)
@@ -125,7 +130,21 @@ static int qstat_seq_open(struct inode *inode, struct file *filp)
 			   filp->f_path.dentry->d_inode->i_private);
 }
 
-static const struct file_operations debugfs_fops = {
+static void remove_debugfs_entry(struct qdio_q *q)
+{
+	int i;
+
+	for (i = 0; i < MAX_DEBUGFS_QUEUES; i++) {
+		if (!debugfs_queues[i])
+			continue;
+		if (debugfs_queues[i]->d_inode->i_private == q) {
+			debugfs_remove(debugfs_queues[i]);
+			debugfs_queues[i] = NULL;
+		}
+	}
+}
+
+static struct file_operations debugfs_fops = {
 	.owner	 = THIS_MODULE,
 	.open	 = qstat_seq_open,
 	.read	 = seq_read,
@@ -136,15 +155,22 @@ static const struct file_operations debugfs_fops = {
 
 static void setup_debugfs_entry(struct qdio_q *q, struct ccw_device *cdev)
 {
+	int i = 0;
 	char name[QDIO_DEBUGFS_NAME_LEN];
 
-	snprintf(name, QDIO_DEBUGFS_NAME_LEN, "%s_%d",
+	while (debugfs_queues[i] != NULL) {
+		i++;
+		if (i >= MAX_DEBUGFS_QUEUES)
+			return;
+	}
+	snprintf(name, QDIO_DEBUGFS_NAME_LEN, "%s_%s_%d",
+		 dev_name(&cdev->dev),
 		 q->is_input_q ? "input" : "output",
 		 q->nr);
-	q->debugfs_q = debugfs_create_file(name, S_IFREG | S_IRUGO | S_IWUSR,
-				q->irq_ptr->debugfs_dev, q, &debugfs_fops);
-	if (IS_ERR(q->debugfs_q))
-		q->debugfs_q = NULL;
+	debugfs_queues[i] = debugfs_create_file(name, S_IFREG | S_IRUGO | S_IWUSR,
+						debugfs_root, q, &debugfs_fops);
+	if (IS_ERR(debugfs_queues[i]))
+		debugfs_queues[i] = NULL;
 }
 
 void qdio_setup_debug_entries(struct qdio_irq *irq_ptr, struct ccw_device *cdev)
@@ -152,14 +178,12 @@ void qdio_setup_debug_entries(struct qdio_irq *irq_ptr, struct ccw_device *cdev)
 	struct qdio_q *q;
 	int i;
 
-	irq_ptr->debugfs_dev = debugfs_create_dir(dev_name(&cdev->dev),
-						  debugfs_root);
-	if (IS_ERR(irq_ptr->debugfs_dev))
-		irq_ptr->debugfs_dev = NULL;
+	mutex_lock(&debugfs_mutex);
 	for_each_input_queue(irq_ptr, q, i)
 		setup_debugfs_entry(q, cdev);
 	for_each_output_queue(irq_ptr, q, i)
 		setup_debugfs_entry(q, cdev);
+	mutex_unlock(&debugfs_mutex);
 }
 
 void qdio_shutdown_debug_entries(struct qdio_irq *irq_ptr, struct ccw_device *cdev)
@@ -167,16 +191,17 @@ void qdio_shutdown_debug_entries(struct qdio_irq *irq_ptr, struct ccw_device *cd
 	struct qdio_q *q;
 	int i;
 
+	mutex_lock(&debugfs_mutex);
 	for_each_input_queue(irq_ptr, q, i)
-		debugfs_remove(q->debugfs_q);
+		remove_debugfs_entry(q);
 	for_each_output_queue(irq_ptr, q, i)
-		debugfs_remove(q->debugfs_q);
-	debugfs_remove(irq_ptr->debugfs_dev);
+		remove_debugfs_entry(q);
+	mutex_unlock(&debugfs_mutex);
 }
 
 int __init qdio_debug_init(void)
 {
-	debugfs_root = debugfs_create_dir("qdio", NULL);
+	debugfs_root = debugfs_create_dir("qdio_queues", NULL);
 
 	qdio_dbf_setup = debug_register("qdio_setup", 16, 1, 16);
 	debug_register_view(qdio_dbf_setup, &debug_hex_ascii_view);

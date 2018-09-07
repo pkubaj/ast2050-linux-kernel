@@ -103,7 +103,7 @@ static const char *part_probes[] = { "cmdlinepart", "RedBoot", NULL };
 static int cafe_device_ready(struct mtd_info *mtd)
 {
 	struct cafe_priv *cafe = mtd->priv;
-	int result = !!(cafe_readl(cafe, NAND_STATUS) & 0x40000000);
+	int result = !!(cafe_readl(cafe, NAND_STATUS) | 0x40000000);
 	uint32_t irqs = cafe_readl(cafe, NAND_IRQ);
 
 	cafe_writel(cafe, irqs, NAND_IRQ);
@@ -381,7 +381,7 @@ static int cafe_nand_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
  * we need a special oob layout and handling.
  */
 static int cafe_nand_read_page(struct mtd_info *mtd, struct nand_chip *chip,
-			       uint8_t *buf, int page)
+			       uint8_t *buf)
 {
 	struct cafe_priv *cafe = mtd->priv;
 
@@ -903,12 +903,12 @@ static struct pci_driver cafe_nand_pci_driver = {
 	.resume = cafe_nand_resume,
 };
 
-static int __init cafe_nand_init(void)
+static int cafe_nand_init(void)
 {
 	return pci_register_driver(&cafe_nand_pci_driver);
 }
 
-static void __exit cafe_nand_exit(void)
+static void cafe_nand_exit(void)
 {
 	pci_unregister_driver(&cafe_nand_pci_driver);
 }

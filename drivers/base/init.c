@@ -20,7 +20,6 @@
 void __init driver_init(void)
 {
 	/* These are the core pieces */
-	devtmpfs_init();
 	devices_init();
 	buses_init();
 	classes_init();

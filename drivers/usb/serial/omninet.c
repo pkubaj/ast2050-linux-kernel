@@ -64,7 +64,8 @@ static int debug;
 #define BT_IGNITIONPRO_ID	0x2000
 
 /* function prototypes */
-static int  omninet_open(struct tty_struct *tty, struct usb_serial_port *port);
+static int  omninet_open(struct tty_struct *tty, struct usb_serial_port *port,
+							struct file *filp);
 static void omninet_close(struct usb_serial_port *port);
 static void omninet_read_bulk_callback(struct urb *urb);
 static void omninet_write_bulk_callback(struct urb *urb);
@@ -162,7 +163,8 @@ static int omninet_attach(struct usb_serial *serial)
 	return 0;
 }
 
-static int omninet_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int omninet_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct usb_serial	*serial = port->serial;
 	struct usb_serial_port	*wport;
@@ -317,7 +319,7 @@ static int omninet_write_room(struct tty_struct *tty)
 	int room = 0; /* Default: no room */
 
 	/* FIXME: no consistent locking for write_urb_busy */
-	if (!wport->write_urb_busy)
+	if (wport->write_urb_busy)
 		room = wport->bulk_out_size - OMNINET_HEADERLEN;
 
 	dbg("%s - returns %d", __func__, room);

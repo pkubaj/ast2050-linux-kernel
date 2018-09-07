@@ -27,81 +27,71 @@ struct virtual_consumer_data {
 	unsigned int mode;
 };
 
-static void update_voltage_constraints(struct device *dev,
-				       struct virtual_consumer_data *data)
+static void update_voltage_constraints(struct virtual_consumer_data *data)
 {
 	int ret;
 
 	if (data->min_uV && data->max_uV
 	    && data->min_uV <= data->max_uV) {
-		dev_dbg(dev, "Requesting %d-%duV\n",
-			data->min_uV, data->max_uV);
 		ret = regulator_set_voltage(data->regulator,
-					data->min_uV, data->max_uV);
+					    data->min_uV, data->max_uV);
 		if (ret != 0) {
-			dev_err(dev,
-				"regulator_set_voltage() failed: %d\n", ret);
+			printk(KERN_ERR "regulator_set_voltage() failed: %d\n",
+			       ret);
 			return;
 		}
 	}
 
 	if (data->min_uV && data->max_uV && !data->enabled) {
-		dev_dbg(dev, "Enabling regulator\n");
 		ret = regulator_enable(data->regulator);
 		if (ret == 0)
 			data->enabled = 1;
 		else
-			dev_err(dev, "regulator_enable() failed: %d\n",
+			printk(KERN_ERR "regulator_enable() failed: %d\n",
 				ret);
 	}
 
 	if (!(data->min_uV && data->max_uV) && data->enabled) {
-		dev_dbg(dev, "Disabling regulator\n");
 		ret = regulator_disable(data->regulator);
 		if (ret == 0)
 			data->enabled = 0;
 		else
-			dev_err(dev, "regulator_disable() failed: %d\n",
+			printk(KERN_ERR "regulator_disable() failed: %d\n",
 				ret);
 	}
 }
 
-static void update_current_limit_constraints(struct device *dev,
-					  struct virtual_consumer_data *data)
+static void update_current_limit_constraints(struct virtual_consumer_data
+						*data)
 {
 	int ret;
 
 	if (data->max_uA
 	    && data->min_uA <= data->max_uA) {
-		dev_dbg(dev, "Requesting %d-%duA\n",
-			data->min_uA, data->max_uA);
 		ret = regulator_set_current_limit(data->regulator,
 					data->min_uA, data->max_uA);
 		if (ret != 0) {
-			dev_err(dev,
-				"regulator_set_current_limit() failed: %d\n",
-				ret);
+			pr_err("regulator_set_current_limit() failed: %d\n",
+			       ret);
 			return;
 		}
 	}
 
 	if (data->max_uA && !data->enabled) {
-		dev_dbg(dev, "Enabling regulator\n");
 		ret = regulator_enable(data->regulator);
 		if (ret == 0)
 			data->enabled = 1;
 		else
-			dev_err(dev, "regulator_enable() failed: %d\n",
+			printk(KERN_ERR "regulator_enable() failed: %d\n",
 				ret);
 	}
 
 	if (!(data->min_uA && data->max_uA) && data->enabled) {
-		dev_dbg(dev, "Disabling regulator\n");
 		ret = regulator_disable(data->regulator);
 		if (ret == 0)
 			data->enabled = 0;
 		else
-			dev_err(dev, "regulator_disable() failed: %d\n",
+			printk(KERN_ERR "regulator_disable() failed: %d\n",
 				ret);
 	}
 }
@@ -125,7 +115,7 @@ static ssize_t set_min_uV(struct device *dev, struct device_attribute *attr,
 	mutex_lock(&data->lock);
 
 	data->min_uV = val;
-	update_voltage_constraints(dev, data);
+	update_voltage_constraints(data);
 
 	mutex_unlock(&data->lock);
 
@@ -151,7 +141,7 @@ static ssize_t set_max_uV(struct device *dev, struct device_attribute *attr,
 	mutex_lock(&data->lock);
 
 	data->max_uV = val;
-	update_voltage_constraints(dev, data);
+	update_voltage_constraints(data);
 
 	mutex_unlock(&data->lock);
 
@@ -177,7 +167,7 @@ static ssize_t set_min_uA(struct device *dev, struct device_attribute *attr,
 	mutex_lock(&data->lock);
 
 	data->min_uA = val;
-	update_current_limit_constraints(dev, data);
+	update_current_limit_constraints(data);
 
 	mutex_unlock(&data->lock);
 
@@ -203,7 +193,7 @@ static ssize_t set_max_uA(struct device *dev, struct device_attribute *attr,
 	mutex_lock(&data->lock);
 
 	data->max_uA = val;
-	update_current_limit_constraints(dev, data);
+	update_current_limit_constraints(data);
 
 	mutex_unlock(&data->lock);
 
@@ -286,7 +276,8 @@ static int regulator_virtual_consumer_probe(struct platform_device *pdev)
 
 	drvdata = kzalloc(sizeof(struct virtual_consumer_data), GFP_KERNEL);
 	if (drvdata == NULL) {
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err;
 	}
 
 	mutex_init(&drvdata->lock);
@@ -294,18 +285,13 @@ static int regulator_virtual_consumer_probe(struct platform_device *pdev)
 	drvdata->regulator = regulator_get(&pdev->dev, reg_id);
 	if (IS_ERR(drvdata->regulator)) {
 		ret = PTR_ERR(drvdata->regulator);
-		dev_err(&pdev->dev, "Failed to obtain supply '%s': %d\n",
-			reg_id, ret);
 		goto err;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(attributes); i++) {
 		ret = device_create_file(&pdev->dev, attributes[i]);
-		if (ret != 0) {
-			dev_err(&pdev->dev, "Failed to create attr %d: %d\n",
-				i, ret);
-			goto err_regulator;
-		}
+		if (ret != 0)
+			goto err;
 	}
 
 	drvdata->mode = regulator_get_mode(drvdata->regulator);
@@ -314,8 +300,6 @@ static int regulator_virtual_consumer_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_regulator:
-	regulator_put(drvdata->regulator);
 err:
 	for (i = 0; i < ARRAY_SIZE(attributes); i++)
 		device_remove_file(&pdev->dev, attributes[i]);

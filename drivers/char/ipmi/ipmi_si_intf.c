@@ -310,14 +310,9 @@ static void deliver_recv_msg(struct smi_info *smi_info,
 {
 	/* Deliver the message to the upper layer with the lock
 	   released. */
-
-	if (smi_info->run_to_completion) {
-		ipmi_smi_msg_received(smi_info->intf, msg);
-	} else {
-		spin_unlock(&(smi_info->si_lock));
-		ipmi_smi_msg_received(smi_info->intf, msg);
-		spin_lock(&(smi_info->si_lock));
-	}
+	spin_unlock(&(smi_info->si_lock));
+	ipmi_smi_msg_received(smi_info->intf, msg);
+	spin_lock(&(smi_info->si_lock));
 }
 
 static void return_hosed_msg(struct smi_info *smi_info, int cCode)
@@ -1066,14 +1061,14 @@ static int smi_start_processing(void       *send_info,
 
 	new_smi->intf = intf;
 
+	/* Try to claim any interrupts. */
+	if (new_smi->irq_setup)
+		new_smi->irq_setup(new_smi);
+
 	/* Set up the timer that drives the interface. */
 	setup_timer(&new_smi->si_timer, smi_timeout, (long)new_smi);
 	new_smi->last_timeout_jiffies = jiffies;
 	mod_timer(&new_smi->si_timer, jiffies + SI_TIMEOUT_JIFFIES);
-
-	/* Try to claim any interrupts. */
-	if (new_smi->irq_setup)
-		new_smi->irq_setup(new_smi);
 
 	/*
 	 * Check if the user forcefully enabled the daemon.

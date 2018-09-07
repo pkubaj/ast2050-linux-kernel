@@ -2107,6 +2107,7 @@ static int ip6_mc_add_src(struct inet6_dev *idev, struct in6_addr *pmca,
 		for (j=0; j<i; j++)
 			(void) ip6_mc_del1_src(pmc, sfmode, &psfsrc[i]);
 	} else if (isexclude != (pmc->mca_sfcount[MCAST_EXCLUDE] != 0)) {
+		struct inet6_dev *idev = pmc->idev;
 		struct ip6_sf_list *psf;
 
 		/* filter mode change */
@@ -2208,7 +2209,7 @@ static void mld_gq_timer_expire(unsigned long data)
 
 	idev->mc_gq_running = 0;
 	mld_send_report(idev, NULL);
-	in6_dev_put(idev);
+	__in6_dev_put(idev);
 }
 
 static void mld_ifc_timer_expire(unsigned long data)
@@ -2221,7 +2222,7 @@ static void mld_ifc_timer_expire(unsigned long data)
 		if (idev->mc_ifc_count)
 			mld_ifc_start_timer(idev, idev->mc_maxdelay);
 	}
-	in6_dev_put(idev);
+	__in6_dev_put(idev);
 }
 
 static void mld_ifc_event(struct inet6_dev *idev)
@@ -2247,25 +2248,6 @@ static void igmp6_timer_handler(unsigned long data)
 	ma->mca_flags &= ~MAF_TIMER_RUNNING;
 	spin_unlock(&ma->mca_lock);
 	ma_put(ma);
-}
-
-/* Device changing type */
-
-void ipv6_mc_unmap(struct inet6_dev *idev)
-{
-	struct ifmcaddr6 *i;
-
-	/* Install multicast list, except for all-nodes (already installed) */
-
-	read_lock_bh(&idev->lock);
-	for (i = idev->mc_list; i; i = i->next)
-		igmp6_group_dropped(i);
-	read_unlock_bh(&idev->lock);
-}
-
-void ipv6_mc_remap(struct inet6_dev *idev)
-{
-	ipv6_mc_up(idev);
 }
 
 /* Device going down */

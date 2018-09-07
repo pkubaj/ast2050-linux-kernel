@@ -213,11 +213,14 @@ static int snd_vxpocket_assign_resources(struct vx_core *chip, int port, int irq
  * configuration callback
  */
 
+#define CS_CHECK(fn, ret) \
+do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
+
 static int vxpocket_config(struct pcmcia_device *link)
 {
 	struct vx_core *chip = link->priv;
 	struct snd_vxpocket *vxp = (struct snd_vxpocket *)chip;
-	int ret;
+	int last_fn, last_ret;
 
 	snd_printdd(KERN_DEBUG "vxpocket_config called\n");
 
@@ -232,17 +235,9 @@ static int vxpocket_config(struct pcmcia_device *link)
 		strcpy(chip->card->driver, vxp440_hw.name);
 	}
 
-	ret = pcmcia_request_io(link, &link->io);
-	if (ret)
-		goto failed;
-
-	ret = pcmcia_request_irq(link, &link->irq);
-	if (ret)
-		goto failed;
-
-	ret = pcmcia_request_configuration(link, &link->conf);
-	if (ret)
-		goto failed;
+	CS_CHECK(RequestIO, pcmcia_request_io(link, &link->io));
+	CS_CHECK(RequestIRQ, pcmcia_request_irq(link, &link->irq));
+	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link, &link->conf));
 
 	chip->dev = &handle_to_dev(link);
 	snd_card_set_dev(chip->card, chip->dev);
@@ -253,6 +248,8 @@ static int vxpocket_config(struct pcmcia_device *link)
 	link->dev_node = &vxp->node;
 	return 0;
 
+cs_failed:
+	cs_error(link, last_fn, last_ret);
 failed:
 	pcmcia_disable_device(link);
 	return -ENODEV;

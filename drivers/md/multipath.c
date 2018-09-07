@@ -90,7 +90,7 @@ static void multipath_end_request(struct bio *bio, int error)
 
 	if (uptodate)
 		multipath_end_bh_io(mp_bh, 0);
-	else if (!bio_rw_flagged(bio, BIO_RW_AHEAD)) {
+	else if (!bio_rw_ahead(bio)) {
 		/*
 		 * oops, IO error:
 		 */
@@ -144,7 +144,7 @@ static int multipath_make_request (struct request_queue *q, struct bio * bio)
 	const int rw = bio_data_dir(bio);
 	int cpu;
 
-	if (unlikely(bio_rw_flagged(bio, BIO_RW_BARRIER))) {
+	if (unlikely(bio_barrier(bio))) {
 		bio_endio(bio, -EOPNOTSUPP);
 		return 0;
 	}
@@ -197,9 +197,6 @@ static int multipath_congested(void *data, int bits)
 	mddev_t *mddev = data;
 	multipath_conf_t *conf = mddev->private;
 	int i, ret = 0;
-
-	if (mddev_congested(mddev, bits))
-		return 1;
 
 	rcu_read_lock();
 	for (i = 0; i < mddev->raid_disks ; i++) {
@@ -301,16 +298,14 @@ static int multipath_add_disk(mddev_t *mddev, mdk_rdev_t *rdev)
 					  rdev->data_offset << 9);
 
 		/* as we don't honour merge_bvec_fn, we must never risk
-		 * violating it, so limit ->max_phys_segments to one, lying
-		 * within a single page.
+		 * violating it, so limit ->max_sector to one PAGE, as
+		 * a one page request is never in violation.
 		 * (Note: it is very unlikely that a device with
 		 * merge_bvec_fn will be involved in multipath.)
 		 */
-			if (q->merge_bvec_fn) {
-				blk_queue_max_phys_segments(mddev->queue, 1);
-				blk_queue_segment_boundary(mddev->queue,
-							   PAGE_CACHE_SIZE - 1);
-			}
+			if (q->merge_bvec_fn &&
+			    queue_max_sectors(q) > (PAGE_SIZE>>9))
+				blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
 			conf->working_disks++;
 			mddev->degraded--;
@@ -478,11 +473,9 @@ static int multipath_run (mddev_t *mddev)
 		/* as we don't honour merge_bvec_fn, we must never risk
 		 * violating it, not that we ever expect a device with
 		 * a merge_bvec_fn to be involved in multipath */
-		if (rdev->bdev->bd_disk->queue->merge_bvec_fn) {
-			blk_queue_max_phys_segments(mddev->queue, 1);
-			blk_queue_segment_boundary(mddev->queue,
-						   PAGE_CACHE_SIZE - 1);
-		}
+		if (rdev->bdev->bd_disk->queue->merge_bvec_fn &&
+		    queue_max_sectors(mddev->queue) > (PAGE_SIZE>>9))
+			blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
 		if (!test_bit(Faulty, &rdev->flags))
 			conf->working_disks++;
@@ -500,7 +493,7 @@ static int multipath_run (mddev_t *mddev)
 	}
 	mddev->degraded = conf->raid_disks - conf->working_disks;
 
-	conf->pool = mempool_create_kmalloc_pool(NR_RESERVED_BUFS,
+	conf->pool = mempool_create_kzalloc_pool(NR_RESERVED_BUFS,
 						 sizeof(struct multipath_bh));
 	if (conf->pool == NULL) {
 		printk(KERN_ERR 
@@ -510,7 +503,7 @@ static int multipath_run (mddev_t *mddev)
 	}
 
 	{
-		mddev->thread = md_register_thread(multipathd, mddev, NULL);
+		mddev->thread = md_register_thread(multipathd, mddev, "%s_multipath");
 		if (!mddev->thread) {
 			printk(KERN_ERR "multipath: couldn't allocate thread"
 				" for %s\n", mdname(mddev));

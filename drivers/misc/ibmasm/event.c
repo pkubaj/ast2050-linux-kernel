@@ -22,7 +22,6 @@
  *
  */
 
-#include <linux/sched.h>
 #include "ibmasm.h"
 #include "lowlevel.h"
 

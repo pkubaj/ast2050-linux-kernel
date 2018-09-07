@@ -236,7 +236,7 @@ ext4_set_acl(handle_t *handle, struct inode *inode, int type,
 	return error;
 }
 
-int
+static int
 ext4_check_acl(struct inode *inode, int mask)
 {
 	struct posix_acl *acl = ext4_get_acl(inode, ACL_TYPE_ACCESS);
@@ -250,6 +250,12 @@ ext4_check_acl(struct inode *inode, int mask)
 	}
 
 	return -EAGAIN;
+}
+
+int
+ext4_permission(struct inode *inode, int mask)
+{
+	return generic_permission(inode, mask, ext4_check_acl);
 }
 
 /*
@@ -454,10 +460,8 @@ ext4_xattr_set_acl(struct inode *inode, int type, const void *value,
 
 retry:
 	handle = ext4_journal_start(inode, EXT4_DATA_TRANS_BLOCKS(inode->i_sb));
-	if (IS_ERR(handle)) {
-		error = PTR_ERR(handle);
-		goto release_and_out;
-	}
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
 	error = ext4_set_acl(handle, inode, type, acl);
 	ext4_journal_stop(handle);
 	if (error == -ENOSPC && ext4_should_retry_alloc(inode->i_sb, &retries))

@@ -8,7 +8,7 @@
  *		 Martin Schwidefsky <schwidefsky@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "tape_34xx"
+#define KMSG_COMPONENT "tape"
 
 #include <linux/module.h>
 #include <linux/init.h>

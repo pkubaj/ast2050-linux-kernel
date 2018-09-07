@@ -33,11 +33,11 @@ static int lifebook_set_serio_phys(const struct dmi_system_id *d)
 	return 0;
 }
 
-static bool lifebook_use_6byte_proto;
+static unsigned char lifebook_use_6byte_proto;
 
 static int lifebook_set_6byte_proto(const struct dmi_system_id *d)
 {
-	lifebook_use_6byte_proto = true;
+	lifebook_use_6byte_proto = 1;
 	return 0;
 }
 
@@ -107,7 +107,8 @@ static const struct dmi_system_id lifebook_dmi_table[] = {
 		.matches = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "CF-72"),
 		},
-		.callback = lifebook_set_6byte_proto,
+		.callback = lifebook_set_serio_phys,
+		.driver_data = "isa0060/serio3",
 	},
 	{
 		.ident = "Lifebook B142",
@@ -124,7 +125,7 @@ static psmouse_ret_t lifebook_process_byte(struct psmouse *psmouse)
 	struct input_dev *dev1 = psmouse->dev;
 	struct input_dev *dev2 = priv ? priv->dev2 : NULL;
 	unsigned char *packet = psmouse->packet;
-	bool relative_packet = packet[0] & 0x08;
+	int relative_packet = packet[0] & 0x08;
 
 	if (relative_packet || !lifebook_use_6byte_proto) {
 		if (psmouse->pktcnt != 3)
@@ -241,7 +242,7 @@ static void lifebook_disconnect(struct psmouse *psmouse)
 	psmouse->private = NULL;
 }
 
-int lifebook_detect(struct psmouse *psmouse, bool set_properties)
+int lifebook_detect(struct psmouse *psmouse, int set_properties)
 {
         if (!dmi_check_system(lifebook_dmi_table))
                 return -1;

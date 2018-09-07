@@ -25,9 +25,6 @@ static struct pci_device_id ath_pci_id_table[] __devinitdata = {
 	{ PCI_VDEVICE(ATHEROS, 0x0029) }, /* PCI   */
 	{ PCI_VDEVICE(ATHEROS, 0x002A) }, /* PCI-E */
 	{ PCI_VDEVICE(ATHEROS, 0x002B) }, /* PCI-E */
-	{ PCI_VDEVICE(ATHEROS, 0x002C) }, /* PCI-E 802.11n bonded out */
-	{ PCI_VDEVICE(ATHEROS, 0x002D) }, /* PCI   */
-	{ PCI_VDEVICE(ATHEROS, 0x002E) }, /* PCI-E */
 	{ 0 }
 };
 
@@ -36,7 +33,8 @@ static void ath_pci_read_cachesize(struct ath_softc *sc, int *csz)
 {
 	u8 u8tmp;
 
-	pci_read_config_byte(to_pci_dev(sc->dev), PCI_CACHE_LINE_SIZE, &u8tmp);
+	pci_read_config_byte(to_pci_dev(sc->dev), PCI_CACHE_LINE_SIZE,
+			     (u8 *)&u8tmp);
 	*csz = (int)u8tmp;
 
 	/*
@@ -89,7 +87,6 @@ static int ath_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct ath_softc *sc;
 	struct ieee80211_hw *hw;
 	u8 csz;
-	u16 subsysid;
 	u32 val;
 	int ret = 0;
 	struct ath_hw *ah;
@@ -161,9 +158,8 @@ static int ath_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	hw = ieee80211_alloc_hw(sizeof(struct ath_wiphy) +
 				sizeof(struct ath_softc), &ath9k_ops);
-	if (!hw) {
-		dev_err(&pdev->dev, "no memory for ieee80211_hw\n");
-		ret = -ENOMEM;
+	if (hw == NULL) {
+		printk(KERN_ERR "ath_pci: no memory for ieee80211_hw\n");
 		goto bad2;
 	}
 
@@ -180,18 +176,17 @@ static int ath_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	sc->mem = mem;
 	sc->bus_ops = &ath_pci_bus_ops;
 
-	pci_read_config_word(pdev, PCI_SUBSYSTEM_ID, &subsysid);
-	ret = ath_init_device(id->device, sc, subsysid);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to initialize device\n");
+	if (ath_attach(id->device, sc) != 0) {
+		ret = -ENODEV;
 		goto bad3;
 	}
 
 	/* setup interrupt service routine */
 
-	ret = request_irq(pdev->irq, ath_isr, IRQF_SHARED, "ath9k", sc);
-	if (ret) {
-		dev_err(&pdev->dev, "request_irq failed\n");
+	if (request_irq(pdev->irq, ath_isr, IRQF_SHARED, "ath", sc)) {
+		printk(KERN_ERR "%s: request_irq failed\n",
+			wiphy_name(hw->wiphy));
+		ret = -EIO;
 		goto bad4;
 	}
 
@@ -239,7 +234,7 @@ static int ath_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 	struct ath_wiphy *aphy = hw->priv;
 	struct ath_softc *sc = aphy->sc;
 
-	ath9k_hw_set_gpio(sc->sc_ah, sc->sc_ah->led_pin, 1);
+	ath9k_hw_set_gpio(sc->sc_ah, ATH_LED_PIN, 1);
 
 	pci_save_state(pdev);
 	pci_disable_device(pdev);
@@ -256,12 +251,10 @@ static int ath_pci_resume(struct pci_dev *pdev)
 	u32 val;
 	int err;
 
-	pci_restore_state(pdev);
-
 	err = pci_enable_device(pdev);
 	if (err)
 		return err;
-
+	pci_restore_state(pdev);
 	/*
 	 * Suspend/Resume resets the PCI configuration space, so we have to
 	 * re-disable the RETRY_TIMEOUT register (0x41) to keep
@@ -272,9 +265,9 @@ static int ath_pci_resume(struct pci_dev *pdev)
 		pci_write_config_dword(pdev, 0x40, val & 0xffff00ff);
 
 	/* Enable LED */
-	ath9k_hw_cfg_output(sc->sc_ah, sc->sc_ah->led_pin,
+	ath9k_hw_cfg_output(sc->sc_ah, ATH_LED_PIN,
 			    AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
-	ath9k_hw_set_gpio(sc->sc_ah, sc->sc_ah->led_pin, 1);
+	ath9k_hw_set_gpio(sc->sc_ah, ATH_LED_PIN, 1);
 
 	return 0;
 }

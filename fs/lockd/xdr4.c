@@ -9,6 +9,7 @@
 
 #include <linux/types.h>
 #include <linux/sched.h>
+#include <linux/utsname.h>
 #include <linux/nfs.h>
 
 #include <linux/sunrpc/xdr.h>

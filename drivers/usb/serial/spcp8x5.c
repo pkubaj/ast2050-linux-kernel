@@ -137,7 +137,7 @@ struct spcp8x5_usb_ctrl_arg {
 
 /* how come ??? */
 #define UART_STATE			0x08
-#define UART_STATE_TRANSIENT_MASK	0x75
+#define UART_STATE_TRANSIENT_MASK	0x74
 #define UART_DCD			0x01
 #define UART_DSR			0x02
 #define UART_BREAK_ERROR		0x04
@@ -544,7 +544,7 @@ static void spcp8x5_set_termios(struct tty_struct *tty,
 	}
 
 	/* Set Baud Rate */
-	baud = tty_get_baud_rate(tty);
+	baud = tty_get_baud_rate(tty);;
 	switch (baud) {
 	case 300:	buf[0] = 0x00;	break;
 	case 600:	buf[0] = 0x01;	break;
@@ -621,7 +621,8 @@ static void spcp8x5_set_termios(struct tty_struct *tty,
 
 /* open the serial port. do some usb system call. set termios and get the line
  * status of the device. then submit the read urb */
-static int spcp8x5_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int spcp8x5_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct ktermios tmp_termios;
 	struct usb_serial *serial = port->serial;
@@ -654,6 +655,8 @@ static int spcp8x5_open(struct tty_struct *tty, struct usb_serial_port *port)
 	spin_lock_irqsave(&priv->lock, flags);
 	priv->line_status = status & 0xf0 ;
 	spin_unlock_irqrestore(&priv->lock, flags);
+
+	/* FIXME: need to assert RTS and DTR if CRTSCTS off */
 
 	dbg("%s - submitting read urb", __func__);
 	port->read_urb->dev = serial->dev;
@@ -734,10 +737,6 @@ static void spcp8x5_read_bulk_callback(struct urb *urb)
 			tty_insert_flip_char(tty, data[i], tty_flag);
 		tty_flip_buffer_push(tty);
 	}
-
-	if (status & UART_DCD)
-		usb_serial_handle_dcd_change(port, tty,
-			   priv->line_status & MSR_STATUS_LINE_DCD);
 	tty_kref_put(tty);
 
 	/* Schedule the next read _if_ we are still open */

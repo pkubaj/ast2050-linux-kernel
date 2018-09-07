@@ -275,7 +275,7 @@ static void log_irqs(u32 evt)
 	    !(evt & OHCI1394_busReset))
 		return;
 
-	fw_notify("IRQ %08x%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n", evt,
+	fw_notify("IRQ %08x%s%s%s%s%s%s%s%s%s%s%s%s%s\n", evt,
 	    evt & OHCI1394_selfIDComplete	? " selfID"		: "",
 	    evt & OHCI1394_RQPkt		? " AR_req"		: "",
 	    evt & OHCI1394_RSPkt		? " AR_resp"		: "",
@@ -286,7 +286,6 @@ static void log_irqs(u32 evt)
 	    evt & OHCI1394_postedWriteErr	? " postedWriteErr"	: "",
 	    evt & OHCI1394_cycleTooLong		? " cycleTooLong"	: "",
 	    evt & OHCI1394_cycle64Seconds	? " cycle64Seconds"	: "",
-	    evt & OHCI1394_cycleInconsistent	? " cycleInconsistent"	: "",
 	    evt & OHCI1394_regAccessFail	? " regAccessFail"	: "",
 	    evt & OHCI1394_busReset		? " busReset"		: "",
 	    evt & ~(OHCI1394_selfIDComplete | OHCI1394_RQPkt |
@@ -294,7 +293,6 @@ static void log_irqs(u32 evt)
 		    OHCI1394_respTxComplete | OHCI1394_isochRx |
 		    OHCI1394_isochTx | OHCI1394_postedWriteErr |
 		    OHCI1394_cycleTooLong | OHCI1394_cycle64Seconds |
-		    OHCI1394_cycleInconsistent |
 		    OHCI1394_regAccessFail | OHCI1394_busReset)
 						? " ?"			: "");
 }
@@ -628,7 +626,7 @@ static void ar_context_tasklet(unsigned long data)
 	d = &ab->descriptor;
 
 	if (d->res_count == 0) {
-		size_t size, size2, rest, pktsize, size3, offset;
+		size_t size, rest, offset;
 		dma_addr_t start_bus;
 		void *start;
 
@@ -639,61 +637,25 @@ static void ar_context_tasklet(unsigned long data)
 		 */
 
 		offset = offsetof(struct ar_buffer, data);
-		start = ab;
+		start = buffer = ab;
 		start_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
-		buffer = ab->data;
 
 		ab = ab->next;
 		d = &ab->descriptor;
-		size = start + PAGE_SIZE - ctx->pointer;
-		/* valid buffer data in the next page */
+		size = buffer + PAGE_SIZE - ctx->pointer;
 		rest = le16_to_cpu(d->req_count) - le16_to_cpu(d->res_count);
-		/* what actually fits in this page */
-		size2 = min(rest, (size_t)PAGE_SIZE - offset - size);
 		memmove(buffer, ctx->pointer, size);
-		memcpy(buffer + size, ab->data, size2);
+		memcpy(buffer + size, ab->data, rest);
+		ctx->current_buffer = ab;
+		ctx->pointer = (void *) ab->data + rest;
+		end = buffer + size + rest;
 
-		while (size > 0) {
-			void *next = handle_ar_packet(ctx, buffer);
-			pktsize = next - buffer;
-			if (pktsize >= size) {
-				/*
-				 * We have handled all the data that was
-				 * originally in this page, so we can now
-				 * continue in the next page.
-				 */
-				buffer = next;
-				break;
-			}
-			/* move the next packet to the start of the buffer */
-			memmove(buffer, next, size + size2 - pktsize);
-			size -= pktsize;
-			/* fill up this page again */
-			size3 = min(rest - size2,
-				    (size_t)PAGE_SIZE - offset - size - size2);
-			memcpy(buffer + size + size2,
-			       (void *) ab->data + size2, size3);
-			size2 += size3;
-		}
+		while (buffer < end)
+			buffer = handle_ar_packet(ctx, buffer);
 
-		if (rest > 0) {
-			/* handle the packets that are fully in the next page */
-			buffer = (void *) ab->data +
-					(buffer - (start + offset + size));
-			end = (void *) ab->data + rest;
-
-			while (buffer < end)
-				buffer = handle_ar_packet(ctx, buffer);
-
-			ctx->current_buffer = ab;
-			ctx->pointer = end;
-
-			dma_free_coherent(ohci->card.device, PAGE_SIZE,
-					  start, start_bus);
-			ar_context_add_page(ctx);
-		} else {
-			ctx->pointer = start + PAGE_SIZE;
-		}
+		dma_free_coherent(ohci->card.device, PAGE_SIZE,
+				  start, start_bus);
+		ar_context_add_page(ctx);
 	} else {
 		buffer = ctx->pointer;
 		ctx->pointer = end =
@@ -1317,8 +1279,8 @@ static void bus_reset_tasklet(unsigned long data)
 	 * the inverted quadlets and a header quadlet, we shift one
 	 * bit extra to get the actual number of self IDs.
 	 */
-	self_id_count = (reg >> 3) & 0xff;
-	if (self_id_count == 0 || self_id_count > 252) {
+	self_id_count = (reg >> 3) & 0x3ff;
+	if (self_id_count == 0) {
 		fw_notify("inconsistent self IDs\n");
 		return;
 	}
@@ -1477,17 +1439,6 @@ static irqreturn_t irq_handler(int irq, void *data)
 			  OHCI1394_LinkControl_cycleMaster);
 	}
 
-	if (unlikely(event & OHCI1394_cycleInconsistent)) {
-		/*
-		 * We need to clear this event bit in order to make
-		 * cycleMatch isochronous I/O work.  In theory we should
-		 * stop active cycleMatch iso contexts now and restart
-		 * them at least two cycles later.  (FIXME?)
-		 */
-		if (printk_ratelimit())
-			fw_notify("isochronous cycle inconsistent\n");
-	}
-
 	if (event & OHCI1394_cycle64Seconds) {
 		cycle_time = reg_read(ohci, OHCI1394_IsochronousCycleTimer);
 		if ((cycle_time & 0x80000000) == 0)
@@ -1577,7 +1528,6 @@ static int ohci_enable(struct fw_card *card, u32 *config_rom, size_t length)
 		  OHCI1394_reqTxComplete | OHCI1394_respTxComplete |
 		  OHCI1394_isochRx | OHCI1394_isochTx |
 		  OHCI1394_postedWriteErr | OHCI1394_cycleTooLong |
-		  OHCI1394_cycleInconsistent |
 		  OHCI1394_cycle64Seconds | OHCI1394_regAccessFail |
 		  OHCI1394_masterIntEnable);
 	if (param_debug & OHCI_PARAM_DEBUG_BUSRESETS)
@@ -1940,30 +1890,15 @@ static int handle_it_packet(struct context *context,
 {
 	struct iso_context *ctx =
 		container_of(context, struct iso_context, context);
-	int i;
-	struct descriptor *pd;
 
-	for (pd = d; pd <= last; pd++)
-		if (pd->transfer_status)
-			break;
-	if (pd > last)
-		/* Descriptor(s) not done yet, stop iteration */
+	if (last->transfer_status == 0)
+		/* This descriptor isn't done yet, stop iteration. */
 		return 0;
 
-	i = ctx->header_length;
-	if (i + 4 < PAGE_SIZE) {
-		/* Present this value as big-endian to match the receive code */
-		*(__be32 *)(ctx->header + i) = cpu_to_be32(
-				((u32)le16_to_cpu(pd->transfer_status) << 16) |
-				le16_to_cpu(pd->res_count));
-		ctx->header_length += 4;
-	}
-	if (le16_to_cpu(last->control) & DESCRIPTOR_IRQ_ALWAYS) {
+	if (le16_to_cpu(last->control) & DESCRIPTOR_IRQ_ALWAYS)
 		ctx->base.callback(&ctx->base, le16_to_cpu(last->res_count),
-				   ctx->header_length, ctx->header,
-				   ctx->base.callback_data);
-		ctx->header_length = 0;
-	}
+				   0, NULL, ctx->base.callback_data);
+
 	return 1;
 }
 
@@ -2448,7 +2383,6 @@ static void ohci_pmac_off(struct pci_dev *dev)
 
 #define PCI_VENDOR_ID_AGERE		PCI_VENDOR_ID_ATT
 #define PCI_DEVICE_ID_AGERE_FW643	0x5901
-#define PCI_DEVICE_ID_TI_TSB43AB23	0x8024
 
 static int __devinit pci_probe(struct pci_dev *dev,
 			       const struct pci_device_id *ent)
@@ -2514,8 +2448,7 @@ static int __devinit pci_probe(struct pci_dev *dev,
 #if !defined(CONFIG_X86_32)
 	/* dual-buffer mode is broken with descriptor addresses above 2G */
 	if (dev->vendor == PCI_VENDOR_ID_TI &&
-	    (dev->device == PCI_DEVICE_ID_TI_TSB43AB22 ||
-	     dev->device == PCI_DEVICE_ID_TI_TSB43AB23))
+	    dev->device == PCI_DEVICE_ID_TI_TSB43AB22)
 		ohci->use_dualbuffer = false;
 #endif
 

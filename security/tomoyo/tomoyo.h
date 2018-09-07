@@ -31,7 +31,8 @@ int tomoyo_check_2path_perm(struct tomoyo_domain_info *domain,
 			    struct path *path2);
 int tomoyo_check_rewrite_permission(struct tomoyo_domain_info *domain,
 				    struct file *filp);
-int tomoyo_find_next_domain(struct linux_binprm *bprm);
+int tomoyo_find_next_domain(struct linux_binprm *bprm,
+			    struct tomoyo_domain_info **next_domain);
 
 /* Index numbers for Access Controls. */
 

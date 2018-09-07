@@ -144,8 +144,8 @@ static void 	tms380tr_exec_sifcmd(struct net_device *dev, unsigned int WriteValu
 /* "G" */
 static struct net_device_stats *tms380tr_get_stats(struct net_device *dev);
 /* "H" */
-static netdev_tx_t tms380tr_hardware_send_packet(struct sk_buff *skb,
-						       struct net_device *dev);
+static int 	tms380tr_hardware_send_packet(struct sk_buff *skb,
+			struct net_device *dev);
 /* "I" */
 static int 	tms380tr_init_adapter(struct net_device *dev);
 static void 	tms380tr_init_ipb(struct net_local *tp);
@@ -165,8 +165,7 @@ static int 	tms380tr_reset_adapter(struct net_device *dev);
 static void 	tms380tr_reset_interrupt(struct net_device *dev);
 static void 	tms380tr_ring_status_irq(struct net_device *dev);
 /* "S" */
-static netdev_tx_t tms380tr_send_packet(struct sk_buff *skb,
-					      struct net_device *dev);
+static int 	tms380tr_send_packet(struct sk_buff *skb, struct net_device *dev);
 static void 	tms380tr_set_multicast_list(struct net_device *dev);
 static int	tms380tr_set_mac_address(struct net_device *dev, void *addr);
 /* "T" */
@@ -600,23 +599,21 @@ static void tms380tr_timeout(struct net_device *dev)
 /*
  * Gets skb from system, queues it and checks if it can be sent
  */
-static netdev_tx_t tms380tr_send_packet(struct sk_buff *skb,
-					      struct net_device *dev)
+static int tms380tr_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
 	struct net_local *tp = netdev_priv(dev);
-	netdev_tx_t rc;
+	int err;
 
-	rc = tms380tr_hardware_send_packet(skb, dev);
+	err = tms380tr_hardware_send_packet(skb, dev);
 	if(tp->TplFree->NextTPLPtr->BusyFlag)
 		netif_stop_queue(dev);
-	return rc;
+	return (err);
 }
 
 /*
  * Move frames into adapter tx queue
  */
-static netdev_tx_t tms380tr_hardware_send_packet(struct sk_buff *skb,
-						       struct net_device *dev)
+static int tms380tr_hardware_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
 	TPL *tpl;
 	short length;
@@ -685,7 +682,7 @@ static netdev_tx_t tms380tr_hardware_send_packet(struct sk_buff *skb,
 	tms380tr_exec_sifcmd(dev, CMD_TX_VALID);
 	spin_unlock_irqrestore(&tp->lock, flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*
@@ -1363,8 +1360,6 @@ static int tms380tr_reset_adapter(struct net_device *dev)
 	printk(KERN_INFO "%s: Adapter Download Failed\n", dev->name);
 	return (-1);
 }
-
-MODULE_FIRMWARE("tms380tr.bin");
 
 /*
  * Starts bring up diagnostics of token ring adapter and evaluates

@@ -77,7 +77,7 @@ CPP		= $(CC) -E $(KBUILD_CFLAGS)
 CHECKFLAGS	+= -m$(CONFIG_WORD_SIZE) -D__powerpc__ -D__powerpc$(CONFIG_WORD_SIZE)__
 
 ifeq ($(CONFIG_PPC64),y)
-GCC_BROKEN_VEC	:= $(call cc-ifversion, -lt, 0400, y)
+GCC_BROKEN_VEC	:= $(shell if [ $(call cc-version) -lt 0400 ] ; then echo "y"; fi)
 
 ifeq ($(CONFIG_POWER4_ONLY),y)
 ifeq ($(CONFIG_ALTIVEC),y)
@@ -158,35 +158,16 @@ drivers-$(CONFIG_OPROFILE)	+= arch/powerpc/oprofile/
 # Default to zImage, override when needed
 all: zImage
 
-# With make 3.82 we cannot mix normal and wildcard targets
-BOOT_TARGETS1 := zImage zImage.initrd uImage
-BOOT_TARGETS2 := zImage% dtbImage% treeImage.% cuImage.% simpleImage.%
+BOOT_TARGETS = zImage zImage.initrd uImage zImage% dtbImage% treeImage.% cuImage.% simpleImage.%
 
-PHONY += $(BOOT_TARGETS1) $(BOOT_TARGETS2)
+PHONY += $(BOOT_TARGETS)
 
 boot := arch/$(ARCH)/boot
 
-ifeq ($(CONFIG_RELOCATABLE),y)
-quiet_cmd_relocs_check = CALL    $<
-      cmd_relocs_check = perl $< "$(OBJDUMP)" "$(obj)/vmlinux"
-
-PHONY += relocs_check
-relocs_check: arch/powerpc/relocs_check.pl vmlinux
-	$(call cmd,relocs_check)
-
-zImage: relocs_check
-endif
-
-$(BOOT_TARGETS1): vmlinux
-	$(Q)$(MAKE) ARCH=ppc64 $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
-$(BOOT_TARGETS2): vmlinux
+$(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) ARCH=ppc64 $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
 
-
-bootwrapper_install:
-	$(Q)$(MAKE) ARCH=ppc64 $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
-
-%.dtb:
+bootwrapper_install %.dtb:
 	$(Q)$(MAKE) ARCH=ppc64 $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
 
 define archhelp
@@ -199,8 +180,8 @@ define archhelp
   @echo '  simpleImage.<dt> - Firmware independent image.'
   @echo '  treeImage.<dt>  - Support for older IBM 4xx firmware (not U-Boot)'
   @echo '  install         - Install kernel using'
-  @echo '                    (your) ~/bin/$(INSTALLKERNEL) or'
-  @echo '                    (distribution) /sbin/$(INSTALLKERNEL) or'
+  @echo '                    (your) ~/bin/installkernel or'
+  @echo '                    (distribution) /sbin/installkernel or'
   @echo '                    install to $$(INSTALL_PATH) and run lilo'
   @echo '  *_defconfig     - Select default config from arch/$(ARCH)/configs'
   @echo ''

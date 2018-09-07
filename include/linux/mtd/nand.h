@@ -121,7 +121,6 @@ typedef enum {
 	NAND_ECC_SOFT,
 	NAND_ECC_HW,
 	NAND_ECC_HW_SYNDROME,
-	NAND_ECC_HW_OOB_FIRST,
 } nand_ecc_modes_t;
 
 /*
@@ -272,13 +271,13 @@ struct nand_ecc_ctrl {
 					   uint8_t *calc_ecc);
 	int			(*read_page_raw)(struct mtd_info *mtd,
 						 struct nand_chip *chip,
-						 uint8_t *buf, int page);
+						 uint8_t *buf);
 	void			(*write_page_raw)(struct mtd_info *mtd,
 						  struct nand_chip *chip,
 						  const uint8_t *buf);
 	int			(*read_page)(struct mtd_info *mtd,
 					     struct nand_chip *chip,
-					     uint8_t *buf, int page);
+					     uint8_t *buf);
 	int			(*read_subpage)(struct mtd_info *mtd,
 					     struct nand_chip *chip,
 					     uint32_t offs, uint32_t len,
@@ -607,6 +606,12 @@ struct platform_nand_ctrl {
 	void		(*select_chip)(struct mtd_info *mtd, int chip);
 	void		(*cmd_ctrl)(struct mtd_info *mtd, int dat,
 				    unsigned int ctrl);
+	int     (*calculate)(struct mtd_info *mtd,
+					const uint8_t *dat,
+					uint8_t *ecc_code);
+	int             (*correct)(struct mtd_info *mtd, uint8_t *dat,
+					uint8_t *read_ecc,
+					uint8_t *calc_ecc);
 	void		(*write_buf)(struct mtd_info *mtd,
 				    const uint8_t *buf, int len);
 	void		(*read_buf)(struct mtd_info *mtd,

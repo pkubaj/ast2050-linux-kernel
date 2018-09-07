@@ -16,7 +16,6 @@
 #include <asm/irq.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
-#include <mach/cpu.h>
 #include <mach/at91sam9261.h>
 #include <mach/at91_pmc.h>
 #include <mach/at91_rstc.h>
@@ -31,23 +30,10 @@ static struct map_desc at91sam9261_io_desc[] __initdata = {
 		.pfn		= __phys_to_pfn(AT91_BASE_SYS),
 		.length		= SZ_16K,
 		.type		= MT_DEVICE,
-	},
-};
-
-static struct map_desc at91sam9261_sram_desc[] __initdata = {
-	{
+	}, {
 		.virtual	= AT91_IO_VIRT_BASE - AT91SAM9261_SRAM_SIZE,
 		.pfn		= __phys_to_pfn(AT91SAM9261_SRAM_BASE),
 		.length		= AT91SAM9261_SRAM_SIZE,
-		.type		= MT_DEVICE,
-	},
-};
-
-static struct map_desc at91sam9g10_sram_desc[] __initdata = {
-	{
-		.virtual	= AT91_IO_VIRT_BASE - AT91SAM9G10_SRAM_SIZE,
-		.pfn		= __phys_to_pfn(AT91SAM9G10_SRAM_BASE),
-		.length		= AT91SAM9G10_SRAM_SIZE,
 		.type		= MT_DEVICE,
 	},
 };
@@ -276,12 +262,6 @@ void __init at91sam9261_initialize(unsigned long main_clock)
 {
 	/* Map peripherals */
 	iotable_init(at91sam9261_io_desc, ARRAY_SIZE(at91sam9261_io_desc));
-
-	if (cpu_is_at91sam9g10())
-		iotable_init(at91sam9g10_sram_desc, ARRAY_SIZE(at91sam9g10_sram_desc));
-	else
-		iotable_init(at91sam9261_sram_desc, ARRAY_SIZE(at91sam9261_sram_desc));
-
 
 	at91_arch_reset = at91sam9261_reset;
 	pm_power_off = at91sam9261_poweroff;

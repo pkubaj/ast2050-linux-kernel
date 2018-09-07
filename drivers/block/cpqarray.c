@@ -32,7 +32,6 @@
 #include <linux/blkpg.h>
 #include <linux/timer.h>
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/init.h>
 #include <linux/hdreg.h>
 #include <linux/spinlock.h>
@@ -178,6 +177,7 @@ static int cpqarray_register_ctlr(int ctlr, struct pci_dev *pdev);
 
 #ifdef CONFIG_PROC_FS
 static void ida_procinit(int i);
+static int ida_proc_get_info(char *buffer, char **start, off_t offset, int length, int *eof, void *data);
 #else
 static void ida_procinit(int i) {}
 #endif
@@ -193,7 +193,7 @@ static inline ctlr_info_t *get_host(struct gendisk *disk)
 }
 
 
-static const struct block_device_operations ida_fops  = {
+static struct block_device_operations ida_fops  = {
 	.owner		= THIS_MODULE,
 	.open		= ida_open,
 	.release	= ida_release,
@@ -206,7 +206,6 @@ static const struct block_device_operations ida_fops  = {
 #ifdef CONFIG_PROC_FS
 
 static struct proc_dir_entry *proc_array;
-static const struct file_operations ida_proc_fops;
 
 /*
  * Get us a file in /proc/array that says something about each controller.
@@ -219,16 +218,19 @@ static void __init ida_procinit(int i)
 		if (!proc_array) return;
 	}
 
-	proc_create_data(hba[i]->devname, 0, proc_array, &ida_proc_fops, hba[i]);
+	create_proc_read_entry(hba[i]->devname, 0, proc_array,
+			       ida_proc_get_info, hba[i]);
 }
 
 /*
  * Report information about this controller.
  */
-static int ida_proc_show(struct seq_file *m, void *v)
+static int ida_proc_get_info(char *buffer, char **start, off_t offset, int length, int *eof, void *data)
 {
-	int i, ctlr;
-	ctlr_info_t *h = (ctlr_info_t*)m->private;
+	off_t pos = 0;
+	off_t len = 0;
+	int size, i, ctlr;
+	ctlr_info_t *h = (ctlr_info_t*)data;
 	drv_info_t *drv;
 #ifdef CPQ_PROC_PRINT_QUEUES
 	cmdlist_t *c;
@@ -236,7 +238,7 @@ static int ida_proc_show(struct seq_file *m, void *v)
 #endif
 
 	ctlr = h->ctlr;
-	seq_printf(m, "%s:  Compaq %s Controller\n"
+	size = sprintf(buffer, "%s:  Compaq %s Controller\n"
 		"       Board ID: 0x%08lx\n"
 		"       Firmware Revision: %c%c%c%c\n"
 		"       Controller Sig: 0x%08lx\n"
@@ -256,54 +258,55 @@ static int ida_proc_show(struct seq_file *m, void *v)
 		h->log_drives, h->phys_drives,
 		h->Qdepth, h->maxQsinceinit);
 
-	seq_puts(m, "Logical Drive Info:\n");
+	pos += size; len += size;
+	
+	size = sprintf(buffer+len, "Logical Drive Info:\n");
+	pos += size; len += size;
 
 	for(i=0; i<h->log_drives; i++) {
 		drv = &h->drv[i];
-		seq_printf(m, "ida/c%dd%d: blksz=%d nr_blks=%d\n",
+		size = sprintf(buffer+len, "ida/c%dd%d: blksz=%d nr_blks=%d\n",
 				ctlr, i, drv->blk_size, drv->nr_blks);
+		pos += size; len += size;
 	}
 
 #ifdef CPQ_PROC_PRINT_QUEUES
 	spin_lock_irqsave(IDA_LOCK(h->ctlr), flags); 
-	seq_puts(m, "\nCurrent Queues:\n");
+	size = sprintf(buffer+len, "\nCurrent Queues:\n");
+	pos += size; len += size;
 
 	c = h->reqQ;
-	seq_printf(m, "reqQ = %p", c);
+	size = sprintf(buffer+len, "reqQ = %p", c); pos += size; len += size;
 	if (c) c=c->next;
 	while(c && c != h->reqQ) {
-		seq_printf(m, "->%p", c);
+		size = sprintf(buffer+len, "->%p", c);
+		pos += size; len += size;
 		c=c->next;
 	}
 
 	c = h->cmpQ;
-	seq_printf(m, "\ncmpQ = %p", c);
+	size = sprintf(buffer+len, "\ncmpQ = %p", c); pos += size; len += size;
 	if (c) c=c->next;
 	while(c && c != h->cmpQ) {
-		seq_printf(m, "->%p", c);
+		size = sprintf(buffer+len, "->%p", c);
+		pos += size; len += size;
 		c=c->next;
 	}
 
-	seq_putc(m, '\n');
+	size = sprintf(buffer+len, "\n"); pos += size; len += size;
 	spin_unlock_irqrestore(IDA_LOCK(h->ctlr), flags); 
 #endif
-	seq_printf(m, "nr_allocs = %d\nnr_frees = %d\n",
+	size = sprintf(buffer+len, "nr_allocs = %d\nnr_frees = %d\n",
 			h->nr_allocs, h->nr_frees);
-	return 0;
-}
+	pos += size; len += size;
 
-static int ida_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ida_proc_show, PDE(inode)->data);
+	*eof = 1;
+	*start = buffer+offset;
+	len -= offset;
+	if (len>length)
+		len = length;
+	return len;
 }
-
-static const struct file_operations ida_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ida_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 #endif /* CONFIG_PROC_FS */
 
 module_param_array(eisa, int, NULL, 0);
@@ -1181,7 +1184,6 @@ out_passthru:
 		ida_pci_info_struct pciinfo;
 
 		if (!arg) return -EINVAL;
-		memset(&pciinfo, 0, sizeof(pciinfo));
 		pciinfo.bus = host->pci_dev->bus->number;
 		pciinfo.dev_fn = host->pci_dev->devfn;
 		pciinfo.board_id = host->board_id;

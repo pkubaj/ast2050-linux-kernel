@@ -8,7 +8,6 @@
 #ifndef _NET_DST_H
 #define _NET_DST_H
 
-#include <net/dst_ops.h>
 #include <linux/netdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/rcupdate.h>
@@ -101,6 +100,28 @@ struct dst_entry
 		struct rt6_info   *rt6_next;
 		struct dn_route  *dn_next;
 	};
+};
+
+
+struct dst_ops
+{
+	unsigned short		family;
+	__be16			protocol;
+	unsigned		gc_thresh;
+
+	int			(*gc)(struct dst_ops *ops);
+	struct dst_entry *	(*check)(struct dst_entry *, __u32 cookie);
+	void			(*destroy)(struct dst_entry *);
+	void			(*ifdown)(struct dst_entry *,
+					  struct net_device *dev, int how);
+	struct dst_entry *	(*negative_advice)(struct dst_entry *);
+	void			(*link_failure)(struct sk_buff *);
+	void			(*update_pmtu)(struct dst_entry *dst, u32 mtu);
+	int			(*local_out)(struct sk_buff *skb);
+
+	atomic_t		entries;
+	struct kmem_cache 		*kmem_cachep;
+	struct net              *dst_net;
 };
 
 #ifdef __KERNEL__
@@ -286,22 +307,11 @@ static inline int __xfrm_lookup(struct net *net, struct dst_entry **dst_p,
 {
 	return 0;
 }
-static inline struct xfrm_state *dst_xfrm(const struct dst_entry *dst)
-{
-	return NULL;
-}
-
 #else
 extern int xfrm_lookup(struct net *net, struct dst_entry **dst_p,
 		       struct flowi *fl, struct sock *sk, int flags);
 extern int __xfrm_lookup(struct net *net, struct dst_entry **dst_p,
 			 struct flowi *fl, struct sock *sk, int flags);
-
-/* skb attached with this dst needs transformation if dst->xfrm is valid */
-static inline struct xfrm_state *dst_xfrm(const struct dst_entry *dst)
-{
-	return dst->xfrm;
-}
 #endif
 #endif
 

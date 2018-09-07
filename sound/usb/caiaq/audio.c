@@ -62,14 +62,10 @@ static void
 activate_substream(struct snd_usb_caiaqdev *dev,
 	           struct snd_pcm_substream *sub)
 {
-	spin_lock(&dev->spinlock);
-
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		dev->sub_playback[sub->number] = sub;
 	else
 		dev->sub_capture[sub->number] = sub;
-
-	spin_unlock(&dev->spinlock);
 }
 
 static void
@@ -138,12 +134,8 @@ static void stream_stop(struct snd_usb_caiaqdev *dev)
 
 	for (i = 0; i < N_URBS; i++) {
 		usb_kill_urb(dev->data_urbs_in[i]);
-
-		if (test_bit(i, &dev->outurb_active_mask))
-			usb_kill_urb(dev->data_urbs_out[i]);
+		usb_kill_urb(dev->data_urbs_out[i]);
 	}
-
-	dev->outurb_active_mask = 0;
 }
 
 static int snd_usb_caiaq_substream_open(struct snd_pcm_substream *substream)
@@ -277,22 +269,16 @@ snd_usb_caiaq_pcm_pointer(struct snd_pcm_substream *sub)
 {
 	int index = sub->number;
 	struct snd_usb_caiaqdev *dev = snd_pcm_substream_chip(sub);
-	snd_pcm_uframes_t ptr;
-
-	spin_lock(&dev->spinlock);
 
 	if (dev->input_panic || dev->output_panic)
-		ptr = SNDRV_PCM_POS_XRUN;
+		return SNDRV_PCM_POS_XRUN;
 
 	if (sub->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		ptr = bytes_to_frames(sub->runtime,
+		return bytes_to_frames(sub->runtime,
 					dev->audio_out_buf_pos[index]);
 	else
-		ptr = bytes_to_frames(sub->runtime,
+		return bytes_to_frames(sub->runtime,
 					dev->audio_in_buf_pos[index]);
-
-	spin_unlock(&dev->spinlock);
-	return ptr;
 }
 
 /* operators for both playback and capture */
@@ -470,9 +456,8 @@ static void read_completed(struct urb *urb)
 {
 	struct snd_usb_caiaq_cb_info *info = urb->context;
 	struct snd_usb_caiaqdev *dev;
-	struct urb *out = NULL;
-	int i, frame, len, send_it = 0, outframe = 0;
-	size_t offset = 0;
+	struct urb *out;
+	int frame, len, send_it = 0, outframe = 0;
 
 	if (urb->status || !info)
 		return;
@@ -482,17 +467,7 @@ static void read_completed(struct urb *urb)
 	if (!dev->streaming)
 		return;
 
-	/* find an unused output urb that is unused */
-	for (i = 0; i < N_URBS; i++)
-		if (test_and_set_bit(i, &dev->outurb_active_mask) == 0) {
-			out = dev->data_urbs_out[i];
-			break;
-		}
-
-	if (!out) {
-		log("Unable to find an output urb to use\n");
-		goto requeue;
-	}
+	out = dev->data_urbs_out[info->index];
 
 	/* read the recently received packet and send back one which has
 	 * the same layout */
@@ -503,8 +478,7 @@ static void read_completed(struct urb *urb)
 		len = urb->iso_frame_desc[outframe].actual_length;
 		out->iso_frame_desc[outframe].length = len;
 		out->iso_frame_desc[outframe].actual_length = 0;
-		out->iso_frame_desc[outframe].offset = offset;
-		offset += len;
+		out->iso_frame_desc[outframe].offset = BYTES_PER_FRAME * frame;
 
 		if (len > 0) {
 			spin_lock(&dev->spinlock);
@@ -520,15 +494,11 @@ static void read_completed(struct urb *urb)
 	}
 
 	if (send_it) {
-		out->number_of_packets = outframe;
+		out->number_of_packets = FRAMES_PER_URB;
 		out->transfer_flags = URB_ISO_ASAP;
 		usb_submit_urb(out, GFP_ATOMIC);
-	} else {
-		struct snd_usb_caiaq_cb_info *oinfo = out->context;
-		clear_bit(oinfo->index, &dev->outurb_active_mask);
 	}
 
-requeue:
 	/* re-submit inbound urb */
 	for (frame = 0; frame < FRAMES_PER_URB; frame++) {
 		urb->iso_frame_desc[frame].offset = BYTES_PER_FRAME * frame;
@@ -550,8 +520,6 @@ static void write_completed(struct urb *urb)
 		dev->output_running = 1;
 		wake_up(&dev->prepare_wait_queue);
 	}
-
-	clear_bit(info->index, &dev->outurb_active_mask);
 }
 
 static struct urb **alloc_urbs(struct snd_usb_caiaqdev *dev, int dir, int *ret)
@@ -661,7 +629,7 @@ int snd_usb_caiaq_audio_init(struct snd_usb_caiaqdev *dev)
 	}
 
 	dev->pcm->private_data = dev;
-	strlcpy(dev->pcm->name, dev->product_name, sizeof(dev->pcm->name));
+	strcpy(dev->pcm->name, dev->product_name);
 
 	memset(dev->sub_playback, 0, sizeof(dev->sub_playback));
 	memset(dev->sub_capture, 0, sizeof(dev->sub_capture));
@@ -701,9 +669,6 @@ int snd_usb_caiaq_audio_init(struct snd_usb_caiaqdev *dev)
 
 	if (!dev->data_cb_info)
 		return -ENOMEM;
-
-	dev->outurb_active_mask = 0;
-	BUILD_BUG_ON(N_URBS > (sizeof(dev->outurb_active_mask) * 8));
 
 	for (i = 0; i < N_URBS; i++) {
 		dev->data_cb_info[i].dev = dev;

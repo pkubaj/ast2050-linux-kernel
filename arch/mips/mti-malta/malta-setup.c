@@ -218,6 +218,7 @@ void __init plat_mem_setup(void)
 #if defined(CONFIG_VT) && defined(CONFIG_VGA_CONSOLE)
 	screen_info_setup();
 #endif
+	mips_reboot_setup();
 
 	board_be_init = malta_be_init;
 	board_be_handler = malta_be_handler;

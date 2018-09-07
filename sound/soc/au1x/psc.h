@@ -29,7 +29,6 @@ struct au1xpsc_audio_data {
 
 	unsigned long pm[2];
 	struct resource *ioarea;
-	struct mutex lock;
 };
 
 #define PCM_TX	0

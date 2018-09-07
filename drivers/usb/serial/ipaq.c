@@ -75,7 +75,7 @@ static int initial_wait;
 
 /* Function prototypes for an ipaq */
 static int  ipaq_open(struct tty_struct *tty,
-			struct usb_serial_port *port);
+			struct usb_serial_port *port, struct file *filp);
 static void ipaq_close(struct usb_serial_port *port);
 static int  ipaq_calc_num_ports(struct usb_serial *serial);
 static int  ipaq_startup(struct usb_serial *serial);
@@ -587,7 +587,7 @@ static int		bytes_in;
 static int		bytes_out;
 
 static int ipaq_open(struct tty_struct *tty,
-			struct usb_serial_port *port)
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct usb_serial	*serial = port->serial;
 	struct ipaq_private	*priv;
@@ -628,6 +628,11 @@ static int ipaq_open(struct tty_struct *tty,
 		priv->free_len += PACKET_SIZE;
 	}
 
+	if (tty) {
+		/* FIXME: These two are bogus */
+		tty->raw = 1;
+		tty->real_raw = 1;
+	}
 	/*
 	 * Lose the small buffers usbserial provides. Make larger ones.
 	 */
@@ -663,8 +668,8 @@ static int ipaq_open(struct tty_struct *tty,
 	 * through. Since this has a reasonably high failure rate, we retry
 	 * several times.
 	 */
-	while (retries) {
-		retries--;
+
+	while (retries--) {
 		result = usb_control_msg(serial->dev,
 				usb_sndctrlpipe(serial->dev, 0), 0x22, 0x21,
 				0x1, 0, NULL, 0, 100);

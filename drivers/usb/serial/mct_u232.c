@@ -93,7 +93,8 @@ static int debug;
  */
 static int  mct_u232_startup(struct usb_serial *serial);
 static void mct_u232_release(struct usb_serial *serial);
-static int  mct_u232_open(struct tty_struct *tty, struct usb_serial_port *port);
+static int  mct_u232_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp);
 static void mct_u232_close(struct usb_serial_port *port);
 static void mct_u232_dtr_rts(struct usb_serial_port *port, int on);
 static void mct_u232_read_int_callback(struct urb *urb);
@@ -420,7 +421,8 @@ static void mct_u232_release(struct usb_serial *serial)
 	}
 } /* mct_u232_release */
 
-static int  mct_u232_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int  mct_u232_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct usb_serial *serial = port->serial;
 	struct mct_u232_private *priv = usb_get_serial_port_data(port);
@@ -566,13 +568,10 @@ static void mct_u232_read_int_callback(struct urb *urb)
 	 * Work-a-round: handle the 'usual' bulk-in pipe here
 	 */
 	if (urb->transfer_buffer_length > 2) {
+		tty = tty_port_tty_get(&port->port);
 		if (urb->actual_length) {
-			tty = tty_port_tty_get(&port->port);
-			if (tty) {
-				tty_insert_flip_string(tty, data,
-						urb->actual_length);
-				tty_flip_buffer_push(tty);
-			}
+			tty_insert_flip_string(tty, data, urb->actual_length);
+			tty_flip_buffer_push(tty);
 			tty_kref_put(tty);
 		}
 		goto exit;
@@ -777,19 +776,20 @@ static void mct_u232_throttle(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct mct_u232_private *priv = usb_get_serial_port_data(port);
+	unsigned long flags;
 	unsigned int control_state;
 
 	dbg("%s - port %d", __func__, port->number);
 
-	spin_lock_irq(&priv->lock);
+	spin_lock_irqsave(&priv->lock, flags);
 	priv->rx_flags |= THROTTLED;
 	if (C_CRTSCTS(tty)) {
 		priv->control_state &= ~TIOCM_RTS;
 		control_state = priv->control_state;
-		spin_unlock_irq(&priv->lock);
+		spin_unlock_irqrestore(&priv->lock, flags);
 		(void) mct_u232_set_modem_ctrl(port->serial, control_state);
 	} else {
-		spin_unlock_irq(&priv->lock);
+		spin_unlock_irqrestore(&priv->lock, flags);
 	}
 }
 
@@ -798,19 +798,20 @@ static void mct_u232_unthrottle(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct mct_u232_private *priv = usb_get_serial_port_data(port);
+	unsigned long flags;
 	unsigned int control_state;
 
 	dbg("%s - port %d", __func__, port->number);
 
-	spin_lock_irq(&priv->lock);
+	spin_lock_irqsave(&priv->lock, flags);
 	if ((priv->rx_flags & THROTTLED) && C_CRTSCTS(tty)) {
 		priv->rx_flags &= ~THROTTLED;
 		priv->control_state |= TIOCM_RTS;
 		control_state = priv->control_state;
-		spin_unlock_irq(&priv->lock);
+		spin_unlock_irqrestore(&priv->lock, flags);
 		(void) mct_u232_set_modem_ctrl(port->serial, control_state);
 	} else {
-		spin_unlock_irq(&priv->lock);
+		spin_unlock_irqrestore(&priv->lock, flags);
 	}
 }
 

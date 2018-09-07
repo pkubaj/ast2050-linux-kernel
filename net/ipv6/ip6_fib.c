@@ -164,6 +164,12 @@ static __inline__ void rt6_release(struct rt6_info *rt)
 		dst_free(&rt->u.dst);
 }
 
+#ifdef CONFIG_IPV6_MULTIPLE_TABLES
+#define FIB_TABLE_HASHSZ 256
+#else
+#define FIB_TABLE_HASHSZ 1
+#endif
+
 static void fib6_link_table(struct net *net, struct fib6_table *tb)
 {
 	unsigned int h;
@@ -174,7 +180,7 @@ static void fib6_link_table(struct net *net, struct fib6_table *tb)
 	 */
 	rwlock_init(&tb->tb6_lock);
 
-	h = tb->tb6_id & (FIB6_TABLE_HASHSZ - 1);
+	h = tb->tb6_id & (FIB_TABLE_HASHSZ - 1);
 
 	/*
 	 * No protection necessary, this is the only list mutatation
@@ -225,7 +231,7 @@ struct fib6_table *fib6_get_table(struct net *net, u32 id)
 
 	if (id == 0)
 		id = RT6_TABLE_MAIN;
-	h = id & (FIB6_TABLE_HASHSZ - 1);
+	h = id & (FIB_TABLE_HASHSZ - 1);
 	rcu_read_lock();
 	head = &net->ipv6.fib_table_hash[h];
 	hlist_for_each_entry_rcu(tb, node, head, tb6_hlist) {
@@ -376,7 +382,7 @@ static int inet6_dump_fib(struct sk_buff *skb, struct netlink_callback *cb)
 	arg.net = net;
 	w->args = &arg;
 
-	for (h = s_h; h < FIB6_TABLE_HASHSZ; h++, s_e = 0) {
+	for (h = s_h; h < FIB_TABLE_HASHSZ; h++, s_e = 0) {
 		e = 0;
 		head = &net->ipv6.fib_table_hash[h];
 		hlist_for_each_entry(tb, node, head, tb6_hlist) {
@@ -846,22 +852,14 @@ static struct fib6_node * fib6_lookup_1(struct fib6_node *root,
 
 			if (ipv6_prefix_equal(&key->addr, args->addr, key->plen)) {
 #ifdef CONFIG_IPV6_SUBTREES
-				if (fn->subtree) {
-					struct fib6_node *sfn;
-					sfn = fib6_lookup_1(fn->subtree,
-							    args + 1);
-					if (!sfn)
-						goto backtrack;
-					fn = sfn;
-				}
+				if (fn->subtree)
+					fn = fib6_lookup_1(fn->subtree, args + 1);
 #endif
-				if (fn->fn_flags & RTN_RTINFO)
+				if (!fn || fn->fn_flags & RTN_RTINFO)
 					return fn;
 			}
 		}
-#ifdef CONFIG_IPV6_SUBTREES
-backtrack:
-#endif
+
 		if (fn->fn_flags & RTN_ROOT)
 			break;
 
@@ -1370,7 +1368,7 @@ void fib6_clean_all(struct net *net, int (*func)(struct rt6_info *, void *arg),
 	unsigned int h;
 
 	rcu_read_lock();
-	for (h = 0; h < FIB6_TABLE_HASHSZ; h++) {
+	for (h = 0; h < FIB_TABLE_HASHSZ; h++) {
 		head = &net->ipv6.fib_table_hash[h];
 		hlist_for_each_entry_rcu(table, node, head, tb6_hlist) {
 			write_lock_bh(&table->tb6_lock);
@@ -1485,7 +1483,7 @@ static int fib6_net_init(struct net *net)
 	if (!net->ipv6.rt6_stats)
 		goto out_timer;
 
-	net->ipv6.fib_table_hash = kcalloc(FIB6_TABLE_HASHSZ,
+	net->ipv6.fib_table_hash = kcalloc(FIB_TABLE_HASHSZ,
 					   sizeof(*net->ipv6.fib_table_hash),
 					   GFP_KERNEL);
 	if (!net->ipv6.fib_table_hash)

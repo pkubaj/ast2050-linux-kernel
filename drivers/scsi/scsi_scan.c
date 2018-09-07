@@ -293,7 +293,7 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
 		kfree(sdev);
 		goto out;
 	}
-	blk_get_queue(sdev->request_queue);
+
 	sdev->request_queue->queuedata = sdev;
 	scsi_adjust_queue_depth(sdev, 0, sdev->host->cmd_per_lun);
 
@@ -317,7 +317,6 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
 out_device_destroy:
 	scsi_device_set_state(sdev, SDEV_DEL);
 	transport_destroy_device(&sdev->sdev_gendev);
-	put_device(&sdev->sdev_dev);
 	put_device(&sdev->sdev_gendev);
 out:
 	if (display_failure_msg)
@@ -952,6 +951,15 @@ static int scsi_add_lun(struct scsi_device *sdev, unsigned char *inq_result,
 	return SCSI_SCAN_LUN_PRESENT;
 }
 
+static inline void scsi_destroy_sdev(struct scsi_device *sdev)
+{
+	scsi_device_set_state(sdev, SDEV_DEL);
+	if (sdev->host->hostt->slave_destroy)
+		sdev->host->hostt->slave_destroy(sdev);
+	transport_destroy_device(&sdev->sdev_gendev);
+	put_device(&sdev->sdev_gendev);
+}
+
 #ifdef CONFIG_SCSI_LOGGING
 /** 
  * scsi_inq_str - print INQUIRY data from min to max index, strip trailing whitespace
@@ -1129,7 +1137,7 @@ static int scsi_probe_and_add_lun(struct scsi_target *starget,
 			}
 		}
 	} else
-		__scsi_remove_device(sdev);
+		scsi_destroy_sdev(sdev);
  out:
 	return res;
 }
@@ -1336,10 +1344,8 @@ static int scsi_report_lun_scan(struct scsi_target *starget, int bflags,
 		sdev = scsi_alloc_sdev(starget, 0, NULL);
 		if (!sdev)
 			return 0;
-		if (scsi_device_get(sdev)) {
-			__scsi_remove_device(sdev);
+		if (scsi_device_get(sdev))
 			return 0;
-		}
 	}
 
 	sprintf(devname, "host %d channel %d id %d",
@@ -1492,7 +1498,7 @@ static int scsi_report_lun_scan(struct scsi_target *starget, int bflags,
 		/*
 		 * the sdev we used didn't appear in the report luns scan
 		 */
-		__scsi_remove_device(sdev);
+		scsi_destroy_sdev(sdev);
 	return ret;
 }
 
@@ -1702,7 +1708,7 @@ static void scsi_sysfs_add_devices(struct Scsi_Host *shost)
 	shost_for_each_device(sdev, shost) {
 		if (!scsi_host_scan_allowed(shost) ||
 		    scsi_sysfs_add_sdev(sdev) != 0)
-			__scsi_remove_device(sdev);
+			scsi_destroy_sdev(sdev);
 	}
 }
 
@@ -1906,9 +1912,10 @@ struct scsi_device *scsi_get_host_dev(struct Scsi_Host *shost)
 		goto out;
 
 	sdev = scsi_alloc_sdev(starget, 0, NULL);
-	if (sdev)
+	if (sdev) {
+		sdev->sdev_gendev.parent = get_device(&starget->dev);
 		sdev->borken = 0;
-	else
+	} else
 		scsi_target_reap(starget);
 	put_device(&starget->dev);
  out:
@@ -1934,7 +1941,7 @@ void scsi_free_host_dev(struct scsi_device *sdev)
 {
 	BUG_ON(sdev->id != sdev->host->this_id);
 
-	__scsi_remove_device(sdev);
+	scsi_destroy_sdev(sdev);
 }
 EXPORT_SYMBOL(scsi_free_host_dev);
 

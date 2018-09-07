@@ -140,8 +140,8 @@ static struct tty_struct *receive_chars(struct uart_port *port)
 	char flag;
 	u8 status;
 
-	if (port->state != NULL)		/* Unopened serial console */
-		tty = port->state->port.tty;
+	if (port->info != NULL)		/* Unopened serial console */
+		tty = port->info->port.tty;
 
 	while (limit-- > 0) {
 		status = READ_SC_PORT(port, SR);
@@ -190,10 +190,10 @@ static void transmit_chars(struct uart_port *port)
 {
 	struct circ_buf *xmit;
 
-	if (!port->state)
+	if (!port->info)
 		return;
 
-	xmit = &port->state->xmit;
+	xmit = &port->info->xmit;
 	if (uart_circ_empty(xmit) || uart_tx_stopped(port)) {
 		sc26xx_disable_irq(port, IMR_TXRDY);
 		return;
@@ -316,7 +316,7 @@ static void sc26xx_stop_tx(struct uart_port *port)
 /* port->lock held by caller.  */
 static void sc26xx_start_tx(struct uart_port *port)
 {
-	struct circ_buf *xmit = &port->state->xmit;
+	struct circ_buf *xmit = &port->info->xmit;
 
 	while (!uart_circ_empty(xmit)) {
 		if (!(READ_SC_PORT(port, SR) & SR_TXRDY)) {

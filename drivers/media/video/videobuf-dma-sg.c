@@ -21,7 +21,6 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 
@@ -395,7 +394,7 @@ videobuf_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return 0;
 }
 
-static const struct vm_operations_struct videobuf_vm_ops =
+static struct vm_operations_struct videobuf_vm_ops =
 {
 	.open     = videobuf_vm_open,
 	.close    = videobuf_vm_close,

@@ -8,10 +8,8 @@
  *
  */
 
-#include <linux/cred.h>
 #include <linux/file.h>
 #include <linux/poll.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/fs.h>
@@ -79,24 +77,28 @@ static const struct address_space_operations anon_aops = {
  *
  * Creates a new file by hooking it on a single inode. This is useful for files
  * that do not need to have a full-fledged inode in order to operate correctly.
- * All the files created with anon_inode_getfile() will share a single inode,
+ * All the files created with anon_inode_getfd() will share a single inode,
  * hence saving memory and avoiding code duplication for the file/inode/dentry
- * setup.  Returns the newly created file* or an error pointer.
+ * setup.  Returns new descriptor or -error.
  */
-struct file *anon_inode_getfile(const char *name,
-				const struct file_operations *fops,
-				void *priv, int flags)
+int anon_inode_getfd(const char *name, const struct file_operations *fops,
+		     void *priv, int flags)
 {
 	struct qstr this;
 	struct dentry *dentry;
 	struct file *file;
-	int error;
+	int error, fd;
 
 	if (IS_ERR(anon_inode_inode))
-		return ERR_PTR(-ENODEV);
+		return -ENODEV;
 
 	if (fops->owner && !try_module_get(fops->owner))
-		return ERR_PTR(-ENOENT);
+		return -ENOENT;
+
+	error = get_unused_fd_flags(flags);
+	if (error < 0)
+		goto err_module;
+	fd = error;
 
 	/*
 	 * Link the inode to a directory entry by creating a unique name
@@ -108,7 +110,7 @@ struct file *anon_inode_getfile(const char *name,
 	this.hash = 0;
 	dentry = d_alloc(anon_inode_mnt->mnt_sb->s_root, &this);
 	if (!dentry)
-		goto err_module;
+		goto err_put_unused_fd;
 
 	/*
 	 * We know the anon_inode inode count is always greater than zero,
@@ -134,54 +136,16 @@ struct file *anon_inode_getfile(const char *name,
 	file->f_version = 0;
 	file->private_data = priv;
 
-	return file;
-
-err_dput:
-	dput(dentry);
-err_module:
-	module_put(fops->owner);
-	return ERR_PTR(error);
-}
-EXPORT_SYMBOL_GPL(anon_inode_getfile);
-
-/**
- * anon_inode_getfd - creates a new file instance by hooking it up to an
- *                    anonymous inode, and a dentry that describe the "class"
- *                    of the file
- *
- * @name:    [in]    name of the "class" of the new file
- * @fops:    [in]    file operations for the new file
- * @priv:    [in]    private data for the new file (will be file's private_data)
- * @flags:   [in]    flags
- *
- * Creates a new file by hooking it on a single inode. This is useful for files
- * that do not need to have a full-fledged inode in order to operate correctly.
- * All the files created with anon_inode_getfd() will share a single inode,
- * hence saving memory and avoiding code duplication for the file/inode/dentry
- * setup.  Returns new descriptor or an error code.
- */
-int anon_inode_getfd(const char *name, const struct file_operations *fops,
-		     void *priv, int flags)
-{
-	int error, fd;
-	struct file *file;
-
-	error = get_unused_fd_flags(flags);
-	if (error < 0)
-		return error;
-	fd = error;
-
-	file = anon_inode_getfile(name, fops, priv, flags);
-	if (IS_ERR(file)) {
-		error = PTR_ERR(file);
-		goto err_put_unused_fd;
-	}
 	fd_install(fd, file);
 
 	return fd;
 
+err_dput:
+	dput(dentry);
 err_put_unused_fd:
 	put_unused_fd(fd);
+err_module:
+	module_put(fops->owner);
 	return error;
 }
 EXPORT_SYMBOL_GPL(anon_inode_getfd);

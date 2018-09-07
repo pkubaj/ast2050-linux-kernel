@@ -32,6 +32,14 @@ struct mtd_blkcore_priv {
 	spinlock_t queue_lock;
 };
 
+static int blktrans_discard_request(struct request_queue *q,
+				    struct request *req)
+{
+	req->cmd_type = REQ_TYPE_LINUX_BLOCK;
+	req->cmd[0] = REQ_LB_OP_DISCARD;
+	return 0;
+}
+
 static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 			       struct mtd_blktrans_dev *dev,
 			       struct request *req)
@@ -44,15 +52,16 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 
 	buf = req->buffer;
 
+	if (req->cmd_type == REQ_TYPE_LINUX_BLOCK &&
+	    req->cmd[0] == REQ_LB_OP_DISCARD)
+		return tr->discard(dev, block, nsect);
+
 	if (!blk_fs_request(req))
 		return -EIO;
 
 	if (blk_rq_pos(req) + blk_rq_cur_sectors(req) >
 	    get_capacity(req->rq_disk))
 		return -EIO;
-
-	if (blk_discard_rq(req))
-		return tr->discard(dev, block, nsect);
 
 	switch(rq_data_dir(req)) {
 	case READ:
@@ -201,7 +210,7 @@ static int blktrans_ioctl(struct block_device *bdev, fmode_t mode,
 	}
 }
 
-static const struct block_device_operations mtd_blktrans_ops = {
+static struct block_device_operations mtd_blktrans_ops = {
 	.owner		= THIS_MODULE,
 	.open		= blktrans_open,
 	.release	= blktrans_release,
@@ -371,8 +380,8 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 	tr->blkcore_priv->rq->queuedata = tr;
 	blk_queue_logical_block_size(tr->blkcore_priv->rq, tr->blksize);
 	if (tr->discard)
-		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD,
-					tr->blkcore_priv->rq);
+		blk_queue_set_discard(tr->blkcore_priv->rq,
+				      blktrans_discard_request);
 
 	tr->blkshift = ffs(tr->blksize) - 1;
 

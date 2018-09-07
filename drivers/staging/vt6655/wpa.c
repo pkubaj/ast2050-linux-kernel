@@ -32,15 +32,38 @@
  *
  */
 
+
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+#if !defined(__UMEM_H__)
+#include "umem.h"
+#endif
+#if !defined(__TMACRO_H__)
 #include "tmacro.h"
+#endif
+#if !defined(__TETHER_H__)
 #include "tether.h"
+#endif
+#if !defined(__DEVICE_H__)
 #include "device.h"
+#endif
+#if !defined(__80211HDR_H__)
 #include "80211hdr.h"
+#endif
+#if !defined(__BSSDB_H__)
 #include "bssdb.h"
+#endif
+#if !defined(__WMGR_H__)
 #include "wmgr.h"
+#endif
+#if !defined(__WPA_H__)
 #include "wpa.h"
+#endif
+#if !defined(__80211MGR_H__)
 #include "80211mgr.h"
+#endif
+
 
 /*---------------------  Static Variables  --------------------------*/
 static int          msglevel                =MSG_LEVEL_INFO;
@@ -116,47 +139,47 @@ WPA_ParseRSN (
 
     WPA_ClearRSN(pBSSList);
 
-    DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"WPA_ParseRSN: [%d]\n", pRSN->len);
+    DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"WPA_ParseRSN: [%d]\n", pRSN->len);
 
     // information element header makes sense
     if ((pRSN->len >= 6) // oui1(4)+ver(2)
-         && (pRSN->byElementID == WLAN_EID_RSN_WPA) &&  !memcmp(pRSN->abyOUI, abyOUI01, 4)
+         && (pRSN->byElementID == WLAN_EID_RSN_WPA) && MEMEqualMemory(pRSN->abyOUI, abyOUI01, 4)
          && (pRSN->wVersion == 1)) {
 
-        DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"Legal RSN\n");
+        DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"Legal RSN\n");
         // update each variable if pRSN is long enough to contain the variable
         if (pRSN->len >= 10) //oui1(4)+ver(2)+GKSuite(4)
         {
-            if ( !memcmp(pRSN->abyMulticast, abyOUI01, 4))
+            if (MEMEqualMemory(pRSN->abyMulticast, abyOUI01, 4))
                 pBSSList->byGKType = WPA_WEP40;
-            else if ( !memcmp(pRSN->abyMulticast, abyOUI02, 4))
+            else if (MEMEqualMemory(pRSN->abyMulticast, abyOUI02, 4))
                 pBSSList->byGKType = WPA_TKIP;
-            else if ( !memcmp(pRSN->abyMulticast, abyOUI03, 4))
+            else if (MEMEqualMemory(pRSN->abyMulticast, abyOUI03, 4))
                 pBSSList->byGKType = WPA_AESWRAP;
-            else if ( !memcmp(pRSN->abyMulticast, abyOUI04, 4))
+            else if (MEMEqualMemory(pRSN->abyMulticast, abyOUI04, 4))
                 pBSSList->byGKType = WPA_AESCCMP;
-            else if ( !memcmp(pRSN->abyMulticast, abyOUI05, 4))
+            else if (MEMEqualMemory(pRSN->abyMulticast, abyOUI05, 4))
                 pBSSList->byGKType = WPA_WEP104;
             else
                 // any vendor checks here
                 pBSSList->byGKType = WPA_NONE;
 
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"byGKType: %x\n", pBSSList->byGKType);
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"byGKType: %x\n", pBSSList->byGKType);
         }
 
         if (pRSN->len >= 12) //oui1(4)+ver(2)+GKS(4)+PKSCnt(2)
         {
             j = 0;
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wPKCount: %d, sizeof(pBSSList->abyPKType): %ld\n", pRSN->wPKCount, sizeof(pBSSList->abyPKType));
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wPKCount: %d, sizeof(pBSSList->abyPKType): %d\n", pRSN->wPKCount, sizeof(pBSSList->abyPKType));
             for(i = 0; (i < pRSN->wPKCount) && (j < sizeof(pBSSList->abyPKType)/sizeof(BYTE)); i++) {
                 if(pRSN->len >= 12+i*4+4) { //oui1(4)+ver(2)+GKS(4)+PKSCnt(2)+PKS(4*i)
-                    if ( !memcmp(pRSN->PKSList[i].abyOUI, abyOUI00, 4))
+                    if (MEMEqualMemory(pRSN->PKSList[i].abyOUI, abyOUI00, 4))
                         pBSSList->abyPKType[j++] = WPA_NONE;
-                    else if ( !memcmp(pRSN->PKSList[i].abyOUI, abyOUI02, 4))
+                    else if (MEMEqualMemory(pRSN->PKSList[i].abyOUI, abyOUI02, 4))
                         pBSSList->abyPKType[j++] = WPA_TKIP;
-                    else if ( !memcmp(pRSN->PKSList[i].abyOUI, abyOUI03, 4))
+                    else if (MEMEqualMemory(pRSN->PKSList[i].abyOUI, abyOUI03, 4))
                         pBSSList->abyPKType[j++] = WPA_AESWRAP;
-                    else if ( !memcmp(pRSN->PKSList[i].abyOUI, abyOUI04, 4))
+                    else if (MEMEqualMemory(pRSN->PKSList[i].abyOUI, abyOUI04, 4))
                         pBSSList->abyPKType[j++] = WPA_AESCCMP;
                     else
                         // any vendor checks here
@@ -167,24 +190,24 @@ WPA_ParseRSN (
                 //DBG_PRN_GRP14(("abyPKType[%d]: %X\n", j-1, pBSSList->abyPKType[j-1]));
             } //for
             pBSSList->wPKCount = (WORD)j;
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wPKCount: %d\n", pBSSList->wPKCount);
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wPKCount: %d\n", pBSSList->wPKCount);
         }
 
         m = pRSN->wPKCount;
-        DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"m: %d\n", m);
-        DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"14+m*4: %d\n", 14+m*4);
+        DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"m: %d\n", m);
+        DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"14+m*4: %d\n", 14+m*4);
 
         if (pRSN->len >= 14+m*4) { //oui1(4)+ver(2)+GKS(4)+PKSCnt(2)+PKS(4*m)+AKC(2)
             // overlay IE_RSN_Auth structure into correct place
             pIE_RSN_Auth = (PWLAN_IE_RSN_AUTH) pRSN->PKSList[m].abyOUI;
             j = 0;
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wAuthCount: %d, sizeof(pBSSList->abyAuthType): %ld\n",
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wAuthCount: %d, sizeof(pBSSList->abyAuthType): %d\n",
                           pIE_RSN_Auth->wAuthCount, sizeof(pBSSList->abyAuthType));
             for(i = 0; (i < pIE_RSN_Auth->wAuthCount) && (j < sizeof(pBSSList->abyAuthType)/sizeof(BYTE)); i++) {
                 if(pRSN->len >= 14+4+(m+i)*4) { //oui1(4)+ver(2)+GKS(4)+PKSCnt(2)+PKS(4*m)+AKC(2)+AKS(4*i)
-                    if ( !memcmp(pIE_RSN_Auth->AuthKSList[i].abyOUI, abyOUI01, 4))
+                    if (MEMEqualMemory(pIE_RSN_Auth->AuthKSList[i].abyOUI, abyOUI01, 4))
                         pBSSList->abyAuthType[j++] = WPA_AUTH_IEEE802_1X;
-                    else if ( !memcmp(pIE_RSN_Auth->AuthKSList[i].abyOUI, abyOUI02, 4))
+                    else if (MEMEqualMemory(pIE_RSN_Auth->AuthKSList[i].abyOUI, abyOUI02, 4))
                         pBSSList->abyAuthType[j++] = WPA_AUTH_PSK;
                     else
                     // any vendor checks here
@@ -196,15 +219,15 @@ WPA_ParseRSN (
             }
             if(j > 0)
                 pBSSList->wAuthCount = (WORD)j;
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wAuthCount: %d\n", pBSSList->wAuthCount);
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"wAuthCount: %d\n", pBSSList->wAuthCount);
         }
 
         if (pIE_RSN_Auth != NULL) {
 
             n = pIE_RSN_Auth->wAuthCount;
 
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"n: %d\n", n);
-            DBG_PRT(MSG_LEVEL_DEBUG, KERN_INFO"14+4+(m+n)*4: %d\n", 14+4+(m+n)*4);
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"n: %d\n", n);
+            DEVICE_PRT(MSG_LEVEL_DEBUG, KERN_INFO"14+4+(m+n)*4: %d\n", 14+4+(m+n)*4);
 
             if(pRSN->len+2 >= 14+4+(m+n)*4) { //oui1(4)+ver(2)+GKS(4)+PKSCnt(2)+PKS(4*m)+AKC(2)+AKS(4*n)+Cap(2)
                 pbyCaps = (PBYTE)pIE_RSN_Auth->AuthKSList[n].abyOUI;
@@ -306,7 +329,7 @@ WPAb_Is_RSN (
         return FALSE;
 
     if ((pRSN->len >= 6) && // oui1(4)+ver(2)
-        (pRSN->byElementID == WLAN_EID_RSN_WPA) &&  !memcmp(pRSN->abyOUI, abyOUI01, 4) &&
+        (pRSN->byElementID == WLAN_EID_RSN_WPA) && MEMEqualMemory(pRSN->abyOUI, abyOUI01, 4) &&
         (pRSN->wVersion == 1)) {
         return TRUE;
     }

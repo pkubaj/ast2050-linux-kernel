@@ -459,8 +459,14 @@ smb_show_options(struct seq_file *s, struct vfsmount *m)
 static void
 smb_unload_nls(struct smb_sb_info *server)
 {
-	unload_nls(server->remote_nls);
-	unload_nls(server->local_nls);
+	if (server->remote_nls) {
+		unload_nls(server->remote_nls);
+		server->remote_nls = NULL;
+	}
+	if (server->local_nls) {
+		unload_nls(server->local_nls);
+		server->local_nls = NULL;
+	}
 }
 
 static void

@@ -401,7 +401,7 @@ static int dataflash_write(struct mtd_info *mtd, loff_t to, size_t len,
 		(void) dataflash_waitready(priv->spi);
 
 
-#ifdef CONFIG_MTD_DATAFLASH_WRITE_VERIFY
+#ifdef CONFIG_MTD_DATAFLASH_VERIFY_WRITE
 
 		/* (3) Compare to Buffer1 */
 		addr = pageaddr << priv->page_offset;
@@ -430,7 +430,7 @@ static int dataflash_write(struct mtd_info *mtd, loff_t to, size_t len,
 		} else
 			status = 0;
 
-#endif	/* CONFIG_MTD_DATAFLASH_WRITE_VERIFY */
+#endif	/* CONFIG_MTD_DATAFLASH_VERIFY_WRITE */
 
 		remaining = remaining - writelen;
 		pageaddr++;
@@ -966,4 +966,3 @@ module_exit(dataflash_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andrew Victor, David Brownell");
 MODULE_DESCRIPTION("MTD DataFlash driver");
-MODULE_ALIAS("spi:mtd_dataflash");

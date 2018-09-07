@@ -238,7 +238,7 @@ static int dm_write_shared_word(struct usbnet *dev, int phy, u8 reg, __le16 valu
 		goto out;
 
 	dm_write_reg(dev, DM_SHARED_ADDR, phy ? (reg | 0x40) : reg);
-	dm_write_reg(dev, DM_SHARED_CTRL, phy ? 0x1a : 0x12);
+	dm_write_reg(dev, DM_SHARED_CTRL, phy ? 0x1c : 0x14);
 
 	for (i = 0; i < DM_TIMEOUT; i++) {
 		u8 tmp;
@@ -356,7 +356,7 @@ static int dm9601_ioctl(struct net_device *net, struct ifreq *rq, int cmd)
 	return generic_mii_ioctl(&dev->mii, if_mii(rq), cmd, NULL);
 }
 
-static const struct ethtool_ops dm9601_ethtool_ops = {
+static struct ethtool_ops dm9601_ethtool_ops = {
 	.get_drvinfo	= dm9601_get_drvinfo,
 	.get_link	= dm9601_get_link,
 	.get_msglevel	= usbnet_get_msglevel,
@@ -382,7 +382,7 @@ static void dm9601_set_multicast(struct net_device *net)
 	if (net->flags & IFF_PROMISC) {
 		rx_ctl |= 0x02;
 	} else if (net->flags & IFF_ALLMULTI || net->mc_count > DM_MAX_MCAST) {
-		rx_ctl |= 0x08;
+		rx_ctl |= 0x04;
 	} else if (net->mc_count) {
 		struct dev_mc_list *mc_list = net->mc_list;
 		int i;
@@ -648,10 +648,6 @@ static const struct usb_device_id products[] = {
 	{
 	USB_DEVICE(0x0fe6, 0x8101),	/* DM9601 USB to Fast Ethernet Adapter */
 	.driver_info = (unsigned long)&dm9601_info,
-	 },
-	{
-	 USB_DEVICE(0x0a46, 0x9000),	/* DM9000E */
-	 .driver_info = (unsigned long)&dm9601_info,
 	 },
 	{},			// END
 };

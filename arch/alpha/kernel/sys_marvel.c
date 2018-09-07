@@ -170,7 +170,7 @@ marvel_irq_noop_return(unsigned int irq)
 }
 
 static struct irq_chip marvel_legacy_irq_type = {
-	.name		= "LEGACY",
+	.typename	= "LEGACY",
 	.startup	= marvel_irq_noop_return,
 	.shutdown	= marvel_irq_noop,
 	.enable		= marvel_irq_noop,
@@ -180,7 +180,7 @@ static struct irq_chip marvel_legacy_irq_type = {
 };
 
 static struct irq_chip io7_lsi_irq_type = {
-	.name		= "LSI",
+	.typename	= "LSI",
 	.startup	= io7_startup_irq,
 	.shutdown	= io7_disable_irq,
 	.enable		= io7_enable_irq,
@@ -190,7 +190,7 @@ static struct irq_chip io7_lsi_irq_type = {
 };
 
 static struct irq_chip io7_msi_irq_type = {
-	.name		= "MSI",
+	.typename	= "MSI",
 	.startup	= io7_startup_irq,
 	.shutdown	= io7_disable_irq,
 	.enable		= io7_enable_irq,

@@ -698,6 +698,9 @@ static struct stateentry downstl[] =
 	 CC_T308_2, l3_1tr6_t308_2},
 };
 
+#define DOWNSTL_LEN \
+	(sizeof(downstl) / sizeof(struct stateentry))
+
 static struct stateentry datastln1[] =
 {
 	{SBIT(0),
@@ -732,6 +735,9 @@ static struct stateentry datastln1[] =
 	 MT_N1_REL_ACK, l3_1tr6_rel_ack}
 };
 
+#define DATASTLN1_LEN \
+	(sizeof(datastln1) / sizeof(struct stateentry))
+
 static struct stateentry manstatelist[] =
 {
         {SBIT(2),
@@ -740,6 +746,8 @@ static struct stateentry manstatelist[] =
          DL_RELEASE | INDICATION, l3_1tr6_dl_release},
 };
  
+#define MANSLLEN \
+        (sizeof(manstatelist) / sizeof(struct stateentry))
 /* *INDENT-ON* */
 
 static void
@@ -832,11 +840,11 @@ up1tr6(struct PStack *st, int pr, void *arg)
 				mt = MT_N1_INVALID;
 			}
 		}
-		for (i = 0; i < ARRAY_SIZE(datastln1); i++)
+		for (i = 0; i < DATASTLN1_LEN; i++)
 			if ((mt == datastln1[i].primitive) &&
 			    ((1 << proc->state) & datastln1[i].state))
 				break;
-		if (i == ARRAY_SIZE(datastln1)) {
+		if (i == DATASTLN1_LEN) {
 			dev_kfree_skb(skb);
 			if (st->l3.debug & L3_DEB_STATE) {
 				sprintf(tmp, "up1tr6%sstate %d mt %x unhandled",
@@ -884,11 +892,11 @@ down1tr6(struct PStack *st, int pr, void *arg)
 		proc = arg;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(downstl); i++)
+	for (i = 0; i < DOWNSTL_LEN; i++)
 		if ((pr == downstl[i].primitive) &&
 		    ((1 << proc->state) & downstl[i].state))
 			break;
-	if (i == ARRAY_SIZE(downstl)) {
+	if (i == DOWNSTL_LEN) {
 		if (st->l3.debug & L3_DEB_STATE) {
 			sprintf(tmp, "down1tr6 state %d prim %d unhandled",
 				proc->state, pr);
@@ -914,11 +922,11 @@ man1tr6(struct PStack *st, int pr, void *arg)
                 printk(KERN_ERR "HiSax man1tr6 without proc pr=%04x\n", pr);
                 return;
         }
-        for (i = 0; i < ARRAY_SIZE(manstatelist); i++)
+        for (i = 0; i < MANSLLEN; i++)
                 if ((pr == manstatelist[i].primitive) &&
                     ((1 << proc->state) & manstatelist[i].state))
                         break;
-        if (i == ARRAY_SIZE(manstatelist)) {
+        if (i == MANSLLEN) {
                 if (st->l3.debug & L3_DEB_STATE) {
                         l3_debug(st, "cr %d man1tr6 state %d prim %d unhandled",
                                 proc->callref & 0x7f, proc->state, pr);

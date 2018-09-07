@@ -1920,16 +1920,14 @@ static int airo_open(struct net_device *dev) {
 	return 0;
 }
 
-static netdev_tx_t mpi_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
-{
+static int mpi_start_xmit(struct sk_buff *skb, struct net_device *dev) {
 	int npacks, pending;
 	unsigned long flags;
 	struct airo_info *ai = dev->ml_priv;
 
 	if (!skb) {
 		airo_print_err(dev->name, "%s: skb == NULL!",__func__);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	npacks = skb_queue_len (&ai->txq);
 
@@ -1940,7 +1938,7 @@ static netdev_tx_t mpi_start_xmit(struct sk_buff *skb,
 			return NETDEV_TX_BUSY;
 		}
 		skb_queue_tail (&ai->txq, skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	spin_lock_irqsave(&ai->aux_lock, flags);
@@ -1953,7 +1951,7 @@ static netdev_tx_t mpi_start_xmit(struct sk_buff *skb,
 		set_bit(FLAG_PENDING_XMIT, &ai->flags);
 		mpi_send_packet (dev);
 	}
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*
@@ -2121,9 +2119,7 @@ static void airo_end_xmit(struct net_device *dev) {
 	dev_kfree_skb(skb);
 }
 
-static netdev_tx_t airo_start_xmit(struct sk_buff *skb,
-					 struct net_device *dev)
-{
+static int airo_start_xmit(struct sk_buff *skb, struct net_device *dev) {
 	s16 len;
 	int i, j;
 	struct airo_info *priv = dev->ml_priv;
@@ -2131,7 +2127,7 @@ static netdev_tx_t airo_start_xmit(struct sk_buff *skb,
 
 	if ( skb == NULL ) {
 		airo_print_err(dev->name, "%s: skb == NULL!", __func__);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	/* Find a vacant FID */
@@ -2159,7 +2155,7 @@ static netdev_tx_t airo_start_xmit(struct sk_buff *skb,
 		wake_up_interruptible(&priv->thr_wait);
 	} else
 		airo_end_xmit(dev);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void airo_end_xmit11(struct net_device *dev) {
@@ -2188,9 +2184,7 @@ static void airo_end_xmit11(struct net_device *dev) {
 	dev_kfree_skb(skb);
 }
 
-static netdev_tx_t airo_start_xmit11(struct sk_buff *skb,
-					   struct net_device *dev)
-{
+static int airo_start_xmit11(struct sk_buff *skb, struct net_device *dev) {
 	s16 len;
 	int i, j;
 	struct airo_info *priv = dev->ml_priv;
@@ -2205,7 +2199,7 @@ static netdev_tx_t airo_start_xmit11(struct sk_buff *skb,
 
 	if ( skb == NULL ) {
 		airo_print_err(dev->name, "%s: skb == NULL!", __func__);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	/* Find a vacant FID */
@@ -2233,7 +2227,7 @@ static netdev_tx_t airo_start_xmit11(struct sk_buff *skb,
 		wake_up_interruptible(&priv->thr_wait);
 	} else
 		airo_end_xmit11(dev);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void airo_read_stats(struct net_device *dev)
@@ -4790,8 +4784,9 @@ static int proc_stats_rid_open( struct inode *inode,
 static int get_dec_u16( char *buffer, int *start, int limit ) {
 	u16 value;
 	int valid = 0;
-	for (value = 0; *start < limit && buffer[*start] >= '0' &&
-			buffer[*start] <= '9'; (*start)++) {
+	for( value = 0; buffer[*start] >= '0' &&
+		     buffer[*start] <= '9' &&
+		     *start < limit; (*start)++ ) {
 		valid = 1;
 		value *= 10;
 		value += buffer[*start] - '0';

@@ -35,6 +35,7 @@
 #include <linux/security.h>
 #include <linux/mutex.h>
 #include <linux/if_addr.h>
+#include <linux/nsproxy.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -51,7 +52,6 @@
 #include <net/pkt_sched.h>
 #include <net/fib_rules.h>
 #include <net/rtnetlink.h>
-#include <net/net_namespace.h>
 
 struct rtnl_link
 {
@@ -606,6 +606,7 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb, struct net_device *dev,
 			    int type, u32 pid, u32 seq, u32 change,
 			    unsigned int flags)
 {
+	struct netdev_queue *txq;
 	struct ifinfomsg *ifm;
 	struct nlmsghdr *nlh;
 	const struct net_device_stats *stats;
@@ -636,8 +637,9 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb, struct net_device *dev,
 	if (dev->master)
 		NLA_PUT_U32(skb, IFLA_MASTER, dev->master->ifindex);
 
-	if (dev->qdisc)
-		NLA_PUT_STRING(skb, IFLA_QDISC, dev->qdisc->ops->id);
+	txq = netdev_get_tx_queue(dev, 0);
+	if (txq->qdisc_sleeping)
+		NLA_PUT_STRING(skb, IFLA_QDISC, txq->qdisc_sleeping->ops->id);
 
 	if (dev->ifalias)
 		NLA_PUT_STRING(skb, IFLA_IFALIAS, dev->ifalias);
@@ -722,6 +724,25 @@ static const struct nla_policy ifla_info_policy[IFLA_INFO_MAX+1] = {
 	[IFLA_INFO_KIND]	= { .type = NLA_STRING },
 	[IFLA_INFO_DATA]	= { .type = NLA_NESTED },
 };
+
+static struct net *get_net_ns_by_pid(pid_t pid)
+{
+	struct task_struct *tsk;
+	struct net *net;
+
+	/* Lookup the network namespace */
+	net = ERR_PTR(-ESRCH);
+	rcu_read_lock();
+	tsk = find_task_by_vpid(pid);
+	if (tsk) {
+		struct nsproxy *nsproxy;
+		nsproxy = task_nsproxy(tsk);
+		if (nsproxy)
+			net = get_net(nsproxy->net_ns);
+	}
+	rcu_read_unlock();
+	return net;
+}
 
 static int validate_linkmsg(struct net_device *dev, struct nlattr *tb[])
 {
@@ -817,7 +838,6 @@ static int do_setlink(struct net_device *dev, struct ifinfomsg *ifm,
 			goto errout;
 		send_addr_notify = 1;
 		modified = 1;
-		add_device_randomness(dev->dev_addr, dev->addr_len);
 	}
 
 	if (tb[IFLA_MTU]) {
@@ -973,20 +993,12 @@ struct net_device *rtnl_create_link(struct net *net, char *ifname,
 {
 	int err;
 	struct net_device *dev;
-	unsigned int num_queues = 1;
-	unsigned int real_num_queues = 1;
 
-	if (ops->get_tx_queues) {
-		err = ops->get_tx_queues(net, tb, &num_queues, &real_num_queues);
-		if (err)
-			goto err;
-	}
 	err = -ENOMEM;
-	dev = alloc_netdev_mq(ops->priv_size, ifname, ops->setup, num_queues);
+	dev = alloc_netdev(ops->priv_size, ifname, ops->setup);
 	if (!dev)
 		goto err;
 
-	dev->real_num_tx_queues = real_num_queues;
 	if (strchr(dev->name, '%')) {
 		err = dev_alloc_name(dev, dev->name);
 		if (err < 0)

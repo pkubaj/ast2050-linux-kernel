@@ -108,9 +108,6 @@ static int linear_congested(void *data, int bits)
 	linear_conf_t *conf;
 	int i, ret = 0;
 
-	if (mddev_congested(mddev, bits))
-		return 1;
-
 	rcu_read_lock();
 	conf = rcu_dereference(mddev->private);
 
@@ -172,14 +169,12 @@ static linear_conf_t *linear_conf(mddev_t *mddev, int raid_disks)
 		disk_stack_limits(mddev->gendisk, rdev->bdev,
 				  rdev->data_offset << 9);
 		/* as we don't honour merge_bvec_fn, we must never risk
-		 * violating it, so limit max_phys_segments to 1 lying within
-		 * a single page.
+		 * violating it, so limit ->max_sector to one PAGE, as
+		 * a one page request is never in violation.
 		 */
-		if (rdev->bdev->bd_disk->queue->merge_bvec_fn) {
-			blk_queue_max_phys_segments(mddev->queue, 1);
-			blk_queue_segment_boundary(mddev->queue,
-						   PAGE_CACHE_SIZE - 1);
-		}
+		if (rdev->bdev->bd_disk->queue->merge_bvec_fn &&
+		    queue_max_sectors(mddev->queue) > (PAGE_SIZE>>9))
+			blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
 		conf->array_sectors += rdev->sectors;
 		cnt++;
@@ -293,7 +288,7 @@ static int linear_make_request (struct request_queue *q, struct bio *bio)
 	sector_t start_sector;
 	int cpu;
 
-	if (unlikely(bio_rw_flagged(bio, BIO_RW_BARRIER))) {
+	if (unlikely(bio_barrier(bio))) {
 		bio_endio(bio, -EOPNOTSUPP);
 		return 0;
 	}

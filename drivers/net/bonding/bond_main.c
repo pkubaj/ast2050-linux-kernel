@@ -695,9 +695,6 @@ static int bond_check_dev_link(struct bonding *bond,
 	struct ifreq ifr;
 	struct mii_ioctl_data *mii;
 
-	if (!reporting && !netif_running(slave_dev))
-		return 0;
-
 	if (bond->params.use_carrier)
 		return netif_carrier_ok(slave_dev) ? BMSR_LSTATUS : 0;
 
@@ -1093,8 +1090,15 @@ static struct slave *bond_find_best_slave(struct bonding *bond)
 			return NULL; /* still no slave, return NULL */
 	}
 
+	/*
+	 * first try the primary link; if arping, a link must tx/rx
+	 * traffic before it can be considered the curr_active_slave.
+	 * also, we would skip slaves between the curr_active_slave
+	 * and primary_slave that may be up and able to arp
+	 */
 	if ((bond->primary_slave) &&
-	    bond->primary_slave->link == BOND_LINK_UP) {
+	    (!bond->params.arp_interval) &&
+	    (IS_UP(bond->primary_slave->dev))) {
 		new_active = bond->primary_slave;
 	}
 
@@ -1102,14 +1106,15 @@ static struct slave *bond_find_best_slave(struct bonding *bond)
 	old_active = new_active;
 
 	bond_for_each_slave_from(bond, new_active, i, old_active) {
-		if (new_active->link == BOND_LINK_UP) {
-			return new_active;
-		} else if (new_active->link == BOND_LINK_BACK &&
-			   IS_UP(new_active->dev)) {
-			/* link up, but waiting for stabilization */
-			if (new_active->delay < mintime) {
-				mintime = new_active->delay;
-				bestslave = new_active;
+		if (IS_UP(new_active->dev)) {
+			if (new_active->link == BOND_LINK_UP) {
+				return new_active;
+			} else if (new_active->link == BOND_LINK_BACK) {
+				/* link up, but waiting for stabilization */
+				if (new_active->delay < mintime) {
+					mintime = new_active->delay;
+					bestslave = new_active;
+				}
 			}
 		}
 	}
@@ -1203,7 +1208,7 @@ void bond_change_active_slave(struct bonding *bond, struct slave *new_active)
 			write_unlock_bh(&bond->curr_slave_lock);
 			read_unlock(&bond->lock);
 
-			netdev_bonding_change(bond->dev, NETDEV_BONDING_FAILOVER);
+			netdev_bonding_change(bond->dev);
 
 			read_lock(&bond->lock);
 			write_lock_bh(&bond->curr_slave_lock);
@@ -1326,7 +1331,6 @@ static int bond_compute_features(struct bonding *bond)
 	struct slave *slave;
 	struct net_device *bond_dev = bond->dev;
 	unsigned long features = bond_dev->features;
-	unsigned long vlan_features = 0;
 	unsigned short max_hard_header_len = max((u16)ETH_HLEN,
 						bond_dev->hard_header_len);
 	int i;
@@ -1339,14 +1343,10 @@ static int bond_compute_features(struct bonding *bond)
 
 	features &= ~NETIF_F_ONE_FOR_ALL;
 
-	vlan_features = bond->first_slave->dev->vlan_features;
 	bond_for_each_slave(bond, slave, i) {
 		features = netdev_increment_features(features,
 						     slave->dev->features,
 						     NETIF_F_ONE_FOR_ALL);
-		vlan_features = netdev_increment_features(vlan_features,
-							slave->dev->vlan_features,
-							NETIF_F_ONE_FOR_ALL);
 		if (slave->dev->hard_header_len > max_hard_header_len)
 			max_hard_header_len = slave->dev->hard_header_len;
 	}
@@ -1354,7 +1354,6 @@ static int bond_compute_features(struct bonding *bond)
 done:
 	features |= (bond_dev->features & BOND_VLAN_FEATURES);
 	bond_dev->features = netdev_fix_features(features, NULL);
-	bond_dev->vlan_features = netdev_fix_features(vlan_features, NULL);
 	bond_dev->hard_header_len = max_hard_header_len;
 
 	return 0;
@@ -1461,17 +1460,14 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	 */
 	if (bond->slave_cnt == 0) {
 		if (bond_dev->type != slave_dev->type) {
+			dev_close(bond_dev);
 			pr_debug("%s: change device type from %d to %d\n",
 				bond_dev->name, bond_dev->type, slave_dev->type);
-
-			netdev_bonding_change(bond_dev, NETDEV_BONDING_OLDTYPE);
-
 			if (slave_dev->type != ARPHRD_ETHER)
 				bond_setup_by_slave(bond_dev, slave_dev);
 			else
 				ether_setup(bond_dev);
-
-			netdev_bonding_change(bond_dev, NETDEV_BONDING_NEWTYPE);
+			dev_open(bond_dev);
 		}
 	} else if (bond_dev->type != slave_dev->type) {
 		pr_err(DRV_NAME ": %s ether type (%d) is different "
@@ -1794,7 +1790,7 @@ int bond_release(struct net_device *bond_dev, struct net_device *slave_dev)
 	struct bonding *bond = netdev_priv(bond_dev);
 	struct slave *slave, *oldcurrent;
 	struct sockaddr addr;
-	int old_flags = bond_dev->flags;
+	int mac_addr_differ;
 
 	/* slave is not a slave or master is not master of this slave */
 	if (!(slave_dev->flags & IFF_SLAVE) ||
@@ -1818,8 +1814,9 @@ int bond_release(struct net_device *bond_dev, struct net_device *slave_dev)
 	}
 
 	if (!bond->params.fail_over_mac) {
-		if (!compare_ether_addr(bond_dev->dev_addr, slave->perm_hwaddr)
-		    && bond->slave_cnt > 1)
+		mac_addr_differ = memcmp(bond_dev->dev_addr, slave->perm_hwaddr,
+					 ETH_ALEN);
+		if (!mac_addr_differ && (bond->slave_cnt > 1))
 			pr_warning(DRV_NAME
 			       ": %s: Warning: the permanent HWaddr of %s - "
 			       "%pM - is still in use by %s. "
@@ -1930,18 +1927,12 @@ int bond_release(struct net_device *bond_dev, struct net_device *slave_dev)
 	 * already taken care of above when we detached the slave
 	 */
 	if (!USES_PRIMARY(bond->params.mode)) {
-		/* unset promiscuity level from slave
-		 * NOTE: The NETDEV_CHANGEADDR call above may change the value
-		 * of the IFF_PROMISC flag in the bond_dev, but we need the
-		 * value of that flag before that change, as that was the value
-		 * when this slave was attached, so we cache at the start of the
-		 * function and use it here. Same goes for ALLMULTI below
-		 */
-		if (old_flags & IFF_PROMISC)
+		/* unset promiscuity level from slave */
+		if (bond_dev->flags & IFF_PROMISC)
 			dev_set_promiscuity(slave_dev, -1);
 
 		/* unset allmulti level from slave */
-		if (old_flags & IFF_ALLMULTI)
+		if (bond_dev->flags & IFF_ALLMULTI)
 			dev_set_allmulti(slave_dev, -1);
 
 		/* flush master's mc_list from slave */
@@ -2699,10 +2690,6 @@ static int bond_arp_rcv(struct sk_buff *skb, struct net_device *dev, struct pack
 	if (!slave || !slave_do_arp_validate(bond, slave))
 		goto out_unlock;
 
-	skb = skb_share_check(skb, GFP_ATOMIC);
-	if (!skb)
-		goto out_unlock;
-
 	if (!pskb_may_pull(skb, arp_hdr_len(dev)))
 		goto out_unlock;
 
@@ -2935,6 +2922,18 @@ static int bond_ab_arp_inspect(struct bonding *bond, int delta_in_ticks)
 		}
 	}
 
+	read_lock(&bond->curr_slave_lock);
+
+	/*
+	 * Trigger a commit if the primary option setting has changed.
+	 */
+	if (bond->primary_slave &&
+	    (bond->primary_slave != bond->curr_active_slave) &&
+	    (bond->primary_slave->link == BOND_LINK_UP))
+		commit++;
+
+	read_unlock(&bond->curr_slave_lock);
+
 	return commit;
 }
 
@@ -2955,58 +2954,90 @@ static void bond_ab_arp_commit(struct bonding *bond, int delta_in_ticks)
 			continue;
 
 		case BOND_LINK_UP:
-			if ((!bond->curr_active_slave &&
-			     time_before_eq(jiffies,
-					    dev_trans_start(slave->dev) +
-					    delta_in_ticks)) ||
-			    bond->curr_active_slave != slave) {
+			write_lock_bh(&bond->curr_slave_lock);
+
+			if (!bond->curr_active_slave &&
+			    time_before_eq(jiffies, dev_trans_start(slave->dev) +
+					   delta_in_ticks)) {
 				slave->link = BOND_LINK_UP;
+				bond_change_active_slave(bond, slave);
 				bond->current_arp_slave = NULL;
 
 				pr_info(DRV_NAME
-					": %s: link status definitely "
-					"up for interface %s.\n",
-					bond->dev->name, slave->dev->name);
+				       ": %s: %s is up and now the "
+				       "active interface\n",
+				       bond->dev->name, slave->dev->name);
 
-				if (!bond->curr_active_slave ||
-				    (slave == bond->primary_slave))
-					goto do_failover;
+			} else if (bond->curr_active_slave != slave) {
+				/* this slave has just come up but we
+				 * already have a current slave; this can
+				 * also happen if bond_enslave adds a new
+				 * slave that is up while we are searching
+				 * for a new slave
+				 */
+				slave->link = BOND_LINK_UP;
+				bond_set_slave_inactive_flags(slave);
+				bond->current_arp_slave = NULL;
 
+				pr_info(DRV_NAME
+				       ": %s: backup interface %s is now up\n",
+				       bond->dev->name, slave->dev->name);
 			}
 
-			continue;
+			write_unlock_bh(&bond->curr_slave_lock);
+
+			break;
 
 		case BOND_LINK_DOWN:
 			if (slave->link_failure_count < UINT_MAX)
 				slave->link_failure_count++;
 
 			slave->link = BOND_LINK_DOWN;
-			bond_set_slave_inactive_flags(slave);
-
-			pr_info(DRV_NAME
-				": %s: link status definitely down for "
-				"interface %s, disabling it\n",
-				bond->dev->name, slave->dev->name);
 
 			if (slave == bond->curr_active_slave) {
-				bond->current_arp_slave = NULL;
-				goto do_failover;
-			}
+				pr_info(DRV_NAME
+				       ": %s: link status down for active "
+				       "interface %s, disabling it\n",
+				       bond->dev->name, slave->dev->name);
 
-			continue;
+				bond_set_slave_inactive_flags(slave);
+
+				write_lock_bh(&bond->curr_slave_lock);
+
+				bond_select_active_slave(bond);
+				if (bond->curr_active_slave)
+					bond->curr_active_slave->jiffies =
+						jiffies;
+
+				write_unlock_bh(&bond->curr_slave_lock);
+
+				bond->current_arp_slave = NULL;
+
+			} else if (slave->state == BOND_STATE_BACKUP) {
+				pr_info(DRV_NAME
+				       ": %s: backup interface %s is now down\n",
+				       bond->dev->name, slave->dev->name);
+
+				bond_set_slave_inactive_flags(slave);
+			}
+			break;
 
 		default:
 			pr_err(DRV_NAME
 			       ": %s: impossible: new_link %d on slave %s\n",
 			       bond->dev->name, slave->new_link,
 			       slave->dev->name);
-			continue;
 		}
+	}
 
-do_failover:
-		ASSERT_RTNL();
+	/*
+	 * No race with changes to primary via sysfs, as we hold rtnl.
+	 */
+	if (bond->primary_slave &&
+	    (bond->primary_slave != bond->curr_active_slave) &&
+	    (bond->primary_slave->link == BOND_LINK_UP)) {
 		write_lock_bh(&bond->curr_slave_lock);
-		bond_select_active_slave(bond);
+		bond_change_active_slave(bond, bond->primary_slave);
 		write_unlock_bh(&bond->curr_slave_lock);
 	}
 
@@ -4254,7 +4285,7 @@ out:
 		dev_kfree_skb(skb);
 	}
 	read_unlock(&bond->lock);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 
@@ -4285,7 +4316,7 @@ out:
 
 	read_unlock(&bond->curr_slave_lock);
 	read_unlock(&bond->lock);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*
@@ -4331,7 +4362,7 @@ out:
 		dev_kfree_skb(skb);
 	}
 	read_unlock(&bond->lock);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*
@@ -4391,7 +4422,7 @@ out:
 
 	/* frame sent to all suitable interfaces */
 	read_unlock(&bond->lock);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*------------------------- Device initialization ---------------------------*/
@@ -4412,7 +4443,7 @@ static void bond_set_xmit_hash_policy(struct bonding *bond)
 	}
 }
 
-static netdev_tx_t bond_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int bond_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	const struct bonding *bond = netdev_priv(dev);
 
@@ -4724,7 +4755,7 @@ static int bond_check_params(struct bond_params *params)
 		params->ad_select = BOND_AD_STABLE;
 	}
 
-	if (max_bonds < 0) {
+	if (max_bonds < 0 || max_bonds > INT_MAX) {
 		pr_warning(DRV_NAME
 		       ": Warning: max_bonds (%d) not in range %d-%d, so it "
 		       "was reset to BOND_DEFAULT_MAX_BONDS (%d)\n",
@@ -4806,7 +4837,7 @@ static int bond_check_params(struct bond_params *params)
 	}
 
 	if (bond_mode == BOND_MODE_ALB) {
-		pr_notice(DRV_NAME
+		printk(KERN_NOTICE DRV_NAME
 		       ": In ALB mode you might experience client "
 		       "disconnections upon reconnection of a link if the "
 		       "bonding module updelay parameter (%d msec) is "
@@ -4930,9 +4961,9 @@ static int bond_check_params(struct bond_params *params)
 		       arp_ip_count);
 
 		for (i = 0; i < arp_ip_count; i++)
-			pr_info(" %s", arp_ip_target[i]);
+			printk(" %s", arp_ip_target[i]);
 
-		pr_info("\n");
+		printk("\n");
 
 	} else if (max_bonds) {
 		/* miimon and arp_interval not set, we need one so things

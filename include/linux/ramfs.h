@@ -17,7 +17,7 @@ extern int ramfs_nommu_mmap(struct file *file, struct vm_area_struct *vma);
 #endif
 
 extern const struct file_operations ramfs_file_operations;
-extern const struct vm_operations_struct generic_file_vm_ops;
+extern struct vm_operations_struct generic_file_vm_ops;
 extern int __init init_rootfs(void);
 
 #endif

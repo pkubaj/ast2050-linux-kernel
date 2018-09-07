@@ -23,7 +23,6 @@
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/slab.h>
-#include <linux/ctype.h>
 
 #if 0
 #define DEBUGP printk
@@ -88,7 +87,7 @@ static char *next_arg(char *args, char **param, char **val)
 	}
 
 	for (i = 0; args[i]; i++) {
-		if (isspace(args[i]) && !in_quote)
+		if (args[i] == ' ' && !in_quote)
 			break;
 		if (equals == 0) {
 			if (args[i] == '=')
@@ -122,7 +121,7 @@ static char *next_arg(char *args, char **param, char **val)
 		next = args + i;
 
 	/* Chew up trailing spaces. */
-	while (isspace(*next))
+	while (*next == ' ')
 		next++;
 	return next;
 }
@@ -139,7 +138,7 @@ int parse_args(const char *name,
 	DEBUGP("Parsing ARGS: %s\n", args);
 
 	/* Chew leading spaces */
-	while (isspace(*args))
+	while (*args == ' ')
 		args++;
 
 	while (*args) {

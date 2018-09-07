@@ -131,10 +131,15 @@ void settlbcam(int index, unsigned long virt, phys_addr_t phys,
 	TLBCAM[index].MAS3 = (phys & PAGE_MASK) | MAS3_SX | MAS3_SR;
 	TLBCAM[index].MAS3 |= ((flags & _PAGE_RW) ? MAS3_SW : 0);
 
+#ifndef CONFIG_KGDB /* want user access for breakpoints */
 	if (flags & _PAGE_USER) {
 	   TLBCAM[index].MAS3 |= MAS3_UX | MAS3_UR;
 	   TLBCAM[index].MAS3 |= ((flags & _PAGE_RW) ? MAS3_UW : 0);
 	}
+#else
+	TLBCAM[index].MAS3 |= MAS3_UX | MAS3_UR;
+	TLBCAM[index].MAS3 |= ((flags & _PAGE_RW) ? MAS3_UW : 0);
+#endif
 
 	tlbcam_addrs[index].start = virt;
 	tlbcam_addrs[index].limit = virt + size - 1;
@@ -156,7 +161,7 @@ unsigned long __init mmu_mapin_ram(void)
 	unsigned long virt = PAGE_OFFSET;
 	phys_addr_t phys = memstart_addr;
 
-	while (tlbcam_index < ARRAY_SIZE(cam) && cam[tlbcam_index]) {
+	while (cam[tlbcam_index] && tlbcam_index < ARRAY_SIZE(cam)) {
 		settlbcam(tlbcam_index, virt, phys, cam[tlbcam_index], PAGE_KERNEL_X, 0);
 		virt += cam[tlbcam_index];
 		phys += cam[tlbcam_index];

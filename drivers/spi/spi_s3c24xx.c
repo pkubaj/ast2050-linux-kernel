@@ -20,27 +20,16 @@
 #include <linux/clk.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
-#include <linux/io.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_bitbang.h>
 
+#include <asm/io.h>
+#include <asm/dma.h>
+#include <mach/hardware.h>
+
 #include <plat/regs-spi.h>
 #include <mach/spi.h>
-
-/**
- * s3c24xx_spi_devstate - per device data
- * @hz: Last frequency calculated for @sppre field.
- * @mode: Last mode setting for the @spcon field.
- * @spcon: Value to write to the SPCON register.
- * @sppre: Value to write to the SPPRE register.
- */
-struct s3c24xx_spi_devstate {
-	unsigned int	hz;
-	unsigned int	mode;
-	u8		spcon;
-	u8		sppre;
-};
 
 struct s3c24xx_spi {
 	/* bitbang has to be first */
@@ -82,31 +71,43 @@ static void s3c24xx_spi_gpiocs(struct s3c2410_spi_info *spi, int cs, int pol)
 
 static void s3c24xx_spi_chipsel(struct spi_device *spi, int value)
 {
-	struct s3c24xx_spi_devstate *cs = spi->controller_state;
 	struct s3c24xx_spi *hw = to_hw(spi);
 	unsigned int cspol = spi->mode & SPI_CS_HIGH ? 1 : 0;
-
-	/* change the chipselect state and the state of the spi engine clock */
+	unsigned int spcon;
 
 	switch (value) {
 	case BITBANG_CS_INACTIVE:
 		hw->set_cs(hw->pdata, spi->chip_select, cspol^1);
-		writeb(cs->spcon, hw->regs + S3C2410_SPCON);
 		break;
 
 	case BITBANG_CS_ACTIVE:
-		writeb(cs->spcon | S3C2410_SPCON_ENSCK,
-		       hw->regs + S3C2410_SPCON);
+		spcon = readb(hw->regs + S3C2410_SPCON);
+
+		if (spi->mode & SPI_CPHA)
+			spcon |= S3C2410_SPCON_CPHA_FMTB;
+		else
+			spcon &= ~S3C2410_SPCON_CPHA_FMTB;
+
+		if (spi->mode & SPI_CPOL)
+			spcon |= S3C2410_SPCON_CPOL_HIGH;
+		else
+			spcon &= ~S3C2410_SPCON_CPOL_HIGH;
+
+		spcon |= S3C2410_SPCON_ENSCK;
+
+		/* write new configration */
+
+		writeb(spcon, hw->regs + S3C2410_SPCON);
 		hw->set_cs(hw->pdata, spi->chip_select, cspol);
+
 		break;
 	}
 }
 
-static int s3c24xx_spi_update_state(struct spi_device *spi,
-				    struct spi_transfer *t)
+static int s3c24xx_spi_setupxfer(struct spi_device *spi,
+				 struct spi_transfer *t)
 {
 	struct s3c24xx_spi *hw = to_hw(spi);
-	struct s3c24xx_spi_devstate *cs = spi->controller_state;
 	unsigned int bpw;
 	unsigned int hz;
 	unsigned int div;
@@ -126,73 +127,17 @@ static int s3c24xx_spi_update_state(struct spi_device *spi,
 		return -EINVAL;
 	}
 
-	if (spi->mode != cs->mode) {
-		u8 spcon = SPCON_DEFAULT;
+	clk = clk_get_rate(hw->clk);
+	div = DIV_ROUND_UP(clk, hz * 2) - 1;
 
-		if (spi->mode & SPI_CPHA)
-			spcon |= S3C2410_SPCON_CPHA_FMTB;
+	if (div > 255)
+		div = 255;
 
-		if (spi->mode & SPI_CPOL)
-			spcon |= S3C2410_SPCON_CPOL_HIGH;
+	dev_dbg(&spi->dev, "setting pre-scaler to %d (wanted %d, got %ld)\n",
+		div, hz, clk / (2 * (div + 1)));
 
-		cs->mode = spi->mode;
-		cs->spcon = spcon;
-	}
 
-	if (cs->hz != hz) {
-		clk = clk_get_rate(hw->clk);
-		div = DIV_ROUND_UP(clk, hz * 2) - 1;
-
-		if (div > 255)
-			div = 255;
-
-		dev_dbg(&spi->dev, "pre-scaler=%d (wanted %d, got %ld)\n",
-			div, hz, clk / (2 * (div + 1)));
-
-		cs->hz = hz;
-		cs->sppre = div;
-	}
-
-	return 0;
-}
-
-static int s3c24xx_spi_setupxfer(struct spi_device *spi,
-				 struct spi_transfer *t)
-{
-	struct s3c24xx_spi_devstate *cs = spi->controller_state;
-	struct s3c24xx_spi *hw = to_hw(spi);
-	int ret;
-
-	ret = s3c24xx_spi_update_state(spi, t);
-	if (!ret)
-		writeb(cs->sppre, hw->regs + S3C2410_SPPRE);
-
-	return ret;
-}
-
-static int s3c24xx_spi_setup(struct spi_device *spi)
-{
-	struct s3c24xx_spi_devstate *cs = spi->controller_state;
-	struct s3c24xx_spi *hw = to_hw(spi);
-	int ret;
-
-	/* allocate settings on the first call */
-	if (!cs) {
-		cs = kzalloc(sizeof(struct s3c24xx_spi_devstate), GFP_KERNEL);
-		if (!cs) {
-			dev_err(&spi->dev, "no memory for controller state\n");
-			return -ENOMEM;
-		}
-
-		cs->spcon = SPCON_DEFAULT;
-		cs->hz = -1;
-		spi->controller_state = cs;
-	}
-
-	/* initialise the state from the device */
-	ret = s3c24xx_spi_update_state(spi, NULL);
-	if (ret)
-		return ret;
+	writeb(div, hw->regs + S3C2410_SPPRE);
 
 	spin_lock(&hw->bitbang.lock);
 	if (!hw->bitbang.busy) {
@@ -204,9 +149,17 @@ static int s3c24xx_spi_setup(struct spi_device *spi)
 	return 0;
 }
 
-static void s3c24xx_spi_cleanup(struct spi_device *spi)
+static int s3c24xx_spi_setup(struct spi_device *spi)
 {
-	kfree(spi->controller_state);
+	int ret;
+
+	ret = s3c24xx_spi_setupxfer(spi, NULL);
+	if (ret < 0) {
+		dev_err(&spi->dev, "setupxfer returned %d\n", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 static inline unsigned int hw_txbyte(struct s3c24xx_spi *hw, int count)
@@ -336,9 +289,7 @@ static int __init s3c24xx_spi_probe(struct platform_device *pdev)
 	hw->bitbang.setup_transfer = s3c24xx_spi_setupxfer;
 	hw->bitbang.chipselect     = s3c24xx_spi_chipsel;
 	hw->bitbang.txrx_bufs      = s3c24xx_spi_txrx;
-
-	hw->master->setup  = s3c24xx_spi_setup;
-	hw->master->cleanup = s3c24xx_spi_cleanup;
+	hw->bitbang.master->setup  = s3c24xx_spi_setup;
 
 	dev_dbg(hw->dev, "bitbang at %p\n", &hw->bitbang);
 
@@ -351,7 +302,7 @@ static int __init s3c24xx_spi_probe(struct platform_device *pdev)
 		goto err_no_iores;
 	}
 
-	hw->ioarea = request_mem_region(res->start, resource_size(res),
+	hw->ioarea = request_mem_region(res->start, (res->end - res->start)+1,
 					pdev->name);
 
 	if (hw->ioarea == NULL) {
@@ -360,7 +311,7 @@ static int __init s3c24xx_spi_probe(struct platform_device *pdev)
 		goto err_no_iores;
 	}
 
-	hw->regs = ioremap(res->start, resource_size(res));
+	hw->regs = ioremap(res->start, (res->end - res->start)+1);
 	if (hw->regs == NULL) {
 		dev_err(&pdev->dev, "Cannot map IO\n");
 		err = -ENXIO;
@@ -437,7 +388,7 @@ static int __init s3c24xx_spi_probe(struct platform_device *pdev)
 
  err_no_iores:
  err_no_pdata:
-	spi_master_put(hw->master);
+	spi_master_put(hw->master);;
 
  err_nomem:
 	return err;
@@ -470,9 +421,9 @@ static int __exit s3c24xx_spi_remove(struct platform_device *dev)
 
 #ifdef CONFIG_PM
 
-static int s3c24xx_spi_suspend(struct device *dev)
+static int s3c24xx_spi_suspend(struct platform_device *pdev, pm_message_t msg)
 {
-	struct s3c24xx_spi *hw = platform_get_drvdata(to_platform_device(dev));
+	struct s3c24xx_spi *hw = platform_get_drvdata(pdev);
 
 	if (hw->pdata && hw->pdata->gpio_setup)
 		hw->pdata->gpio_setup(hw->pdata, 0);
@@ -481,31 +432,27 @@ static int s3c24xx_spi_suspend(struct device *dev)
 	return 0;
 }
 
-static int s3c24xx_spi_resume(struct device *dev)
+static int s3c24xx_spi_resume(struct platform_device *pdev)
 {
-	struct s3c24xx_spi *hw = platform_get_drvdata(to_platform_device(dev));
+	struct s3c24xx_spi *hw = platform_get_drvdata(pdev);
 
 	s3c24xx_spi_initialsetup(hw);
 	return 0;
 }
 
-static struct dev_pm_ops s3c24xx_spi_pmops = {
-	.suspend	= s3c24xx_spi_suspend,
-	.resume		= s3c24xx_spi_resume,
-};
-
-#define S3C24XX_SPI_PMOPS &s3c24xx_spi_pmops
 #else
-#define S3C24XX_SPI_PMOPS NULL
-#endif /* CONFIG_PM */
+#define s3c24xx_spi_suspend NULL
+#define s3c24xx_spi_resume  NULL
+#endif
 
 MODULE_ALIAS("platform:s3c2410-spi");
 static struct platform_driver s3c24xx_spi_driver = {
 	.remove		= __exit_p(s3c24xx_spi_remove),
+	.suspend	= s3c24xx_spi_suspend,
+	.resume		= s3c24xx_spi_resume,
 	.driver		= {
 		.name	= "s3c2410-spi",
 		.owner	= THIS_MODULE,
-		.pm	= S3C24XX_SPI_PMOPS,
 	},
 };
 

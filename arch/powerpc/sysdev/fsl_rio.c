@@ -832,6 +832,7 @@ fsl_rio_dbell_handler(int irq, void *dev_instance)
 	if (dsr & DOORBELL_DSR_QFI) {
 		pr_info("RIO: doorbell queue full\n");
 		out_be32(&priv->msg_regs->dsr, DOORBELL_DSR_QFI);
+		goto out;
 	}
 
 	/* XXX Need to check/dispatch until queue empty */
@@ -1056,10 +1057,6 @@ int fsl_rio_setup(struct of_device *dev)
 			law_start, law_size);
 
 	ops = kmalloc(sizeof(struct rio_ops), GFP_KERNEL);
-	if (!ops) {
-		rc = -ENOMEM;
-		goto err_ops;
-	}
 	ops->lcread = fsl_local_config_read;
 	ops->lcwrite = fsl_local_config_write;
 	ops->cread = fsl_rio_config_read;
@@ -1067,10 +1064,6 @@ int fsl_rio_setup(struct of_device *dev)
 	ops->dsend = fsl_rio_doorbell_send;
 
 	port = kzalloc(sizeof(struct rio_mport), GFP_KERNEL);
-	if (!port) {
-		rc = -ENOMEM;
-		goto err_port;
-	}
 	port->id = 0;
 	port->index = 0;
 
@@ -1078,7 +1071,7 @@ int fsl_rio_setup(struct of_device *dev)
 	if (!priv) {
 		printk(KERN_ERR "Can't alloc memory for 'priv'\n");
 		rc = -ENOMEM;
-		goto err_priv;
+		goto err;
 	}
 
 	INIT_LIST_HEAD(&port->dbells);
@@ -1176,13 +1169,11 @@ int fsl_rio_setup(struct of_device *dev)
 
 	return 0;
 err:
-	iounmap(priv->regs_win);
-	kfree(priv);
-err_priv:
-	kfree(port);
-err_port:
+	if (priv)
+		iounmap(priv->regs_win);
 	kfree(ops);
-err_ops:
+	kfree(priv);
+	kfree(port);
 	return rc;
 }
 

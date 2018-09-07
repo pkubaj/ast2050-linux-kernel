@@ -1,8 +1,4 @@
-/*
- * Copyright 2004-2009 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
- */
+/* Changes made by  LG Soft Oct 2004*/
 
 #ifndef __ASMBFIN_ELF_H
 #define __ASMBFIN_ELF_H
@@ -27,7 +23,7 @@ typedef unsigned long elf_greg_t;
 #define ELF_NGREG 40 /* (sizeof(struct user_regs_struct) / sizeof(elf_greg_t)) */
 typedef elf_greg_t elf_gregset_t[ELF_NGREG];
 
-typedef struct { } elf_fpregset_t;
+typedef struct user_bfinfp_struct elf_fpregset_t;
 /*
  * This is used to ensure we don't load something for the wrong architecture.
  */

@@ -134,7 +134,7 @@ netx_eth_hard_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	spin_unlock_irq(&priv->lock);
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void netx_eth_receive(struct net_device *ndev)
@@ -510,6 +510,3 @@ module_exit(netx_eth_cleanup);
 MODULE_AUTHOR("Sascha Hauer, Pengutronix");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:" CARDNAME);
-MODULE_FIRMWARE("xc0.bin");
-MODULE_FIRMWARE("xc1.bin");
-MODULE_FIRMWARE("xc2.bin");

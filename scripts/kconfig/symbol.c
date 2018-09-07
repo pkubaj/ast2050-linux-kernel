@@ -36,7 +36,7 @@ tristate modules_val;
 
 struct expr *sym_env_list;
 
-static void sym_add_default(struct symbol *sym, const char *def)
+void sym_add_default(struct symbol *sym, const char *def)
 {
 	struct property *prop = prop_alloc(P_DEFAULT, sym);
 
@@ -125,7 +125,7 @@ struct property *sym_get_default_prop(struct symbol *sym)
 	return NULL;
 }
 
-static struct property *sym_get_range_prop(struct symbol *sym)
+struct property *sym_get_range_prop(struct symbol *sym)
 {
 	struct property *prop;
 
@@ -943,7 +943,7 @@ const char *prop_get_type_name(enum prop_type type)
 	return "unknown";
 }
 
-static void prop_add_env(const char *env)
+void prop_add_env(const char *env)
 {
 	struct symbol *sym, *sym2;
 	struct property *prop;

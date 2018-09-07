@@ -188,7 +188,6 @@ int radeon_object_kmap(struct radeon_object *robj, void **ptr)
 	if (ptr) {
 		*ptr = robj->kptr;
 	}
-	radeon_object_check_tiling(robj, 0, 0);
 	return 0;
 }
 
@@ -201,7 +200,6 @@ void radeon_object_kunmap(struct radeon_object *robj)
 	}
 	robj->kptr = NULL;
 	spin_unlock(&robj->tobj.lock);
-	radeon_object_check_tiling(robj, 0, 0);
 	ttm_bo_kunmap(&robj->kmap);
 }
 
@@ -371,14 +369,6 @@ void radeon_object_force_delete(struct radeon_device *rdev)
 
 int radeon_object_init(struct radeon_device *rdev)
 {
-	/* Add an MTRR for the VRAM */
-	rdev->mc.vram_mtrr = mtrr_add(rdev->mc.aper_base, rdev->mc.aper_size,
-			MTRR_TYPE_WRCOMB, 1);
-	DRM_INFO("Detected VRAM RAM=%lluM, BAR=%lluM\n",
-		rdev->mc.mc_vram_size >> 20,
-		(unsigned long long)rdev->mc.aper_size >> 20);
-	DRM_INFO("RAM width %dbits %cDR\n",
-			rdev->mc.vram_width, rdev->mc.vram_is_ddr ? 'D' : 'S');
 	return radeon_ttm_init(rdev);
 }
 
@@ -400,9 +390,11 @@ void radeon_object_list_add_object(struct radeon_object_list *lobj,
 int radeon_object_list_reserve(struct list_head *head)
 {
 	struct radeon_object_list *lobj;
+	struct list_head *i;
 	int r;
 
-	list_for_each_entry(lobj, head, list){
+	list_for_each(i, head) {
+		lobj = list_entry(i, struct radeon_object_list, list);
 		if (!lobj->robj->pin_count) {
 			r = radeon_object_reserve(lobj->robj, true);
 			if (unlikely(r != 0)) {
@@ -418,10 +410,13 @@ int radeon_object_list_reserve(struct list_head *head)
 void radeon_object_list_unreserve(struct list_head *head)
 {
 	struct radeon_object_list *lobj;
+	struct list_head *i;
 
-	list_for_each_entry(lobj, head, list) {
+	list_for_each(i, head) {
+		lobj = list_entry(i, struct radeon_object_list, list);
 		if (!lobj->robj->pin_count) {
 			radeon_object_unreserve(lobj->robj);
+		} else {
 		}
 	}
 }
@@ -431,6 +426,7 @@ int radeon_object_list_validate(struct list_head *head, void *fence)
 	struct radeon_object_list *lobj;
 	struct radeon_object *robj;
 	struct radeon_fence *old_fence = NULL;
+	struct list_head *i;
 	int r;
 
 	r = radeon_object_list_reserve(head);
@@ -438,7 +434,8 @@ int radeon_object_list_validate(struct list_head *head, void *fence)
 		radeon_object_list_unreserve(head);
 		return r;
 	}
-	list_for_each_entry(lobj, head, list) {
+	list_for_each(i, head) {
+		lobj = list_entry(i, struct radeon_object_list, list);
 		robj = lobj->robj;
 		if (!robj->pin_count) {
 			if (lobj->wdomain) {
@@ -475,8 +472,10 @@ void radeon_object_list_unvalidate(struct list_head *head)
 {
 	struct radeon_object_list *lobj;
 	struct radeon_fence *old_fence = NULL;
+	struct list_head *i;
 
-	list_for_each_entry(lobj, head, list) {
+	list_for_each(i, head) {
+		lobj = list_entry(i, struct radeon_object_list, list);
 		old_fence = (struct radeon_fence *)lobj->robj->tobj.sync_obj;
 		lobj->robj->tobj.sync_obj = NULL;
 		if (old_fence) {

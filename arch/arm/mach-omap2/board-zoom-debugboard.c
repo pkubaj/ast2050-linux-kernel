@@ -12,7 +12,6 @@
 #include <linux/gpio.h>
 #include <linux/serial_8250.h>
 #include <linux/smsc911x.h>
-#include <linux/interrupt.h>
 
 #include <mach/gpmc.h>
 
@@ -85,7 +84,6 @@ static struct plat_serial8250_port serial_platform_data[] = {
 		.mapbase	= 0x10000000,
 		.irq		= OMAP_GPIO_IRQ(102),
 		.flags		= UPF_BOOT_AUTOCONF|UPF_IOREMAP|UPF_SHARE_IRQ,
-		.irqflags	= IRQF_SHARED | IRQF_TRIGGER_RISING,
 		.iotype		= UPIO_MEM,
 		.regshift	= 1,
 		.uartclk	= QUART_CLK,
@@ -96,7 +94,7 @@ static struct plat_serial8250_port serial_platform_data[] = {
 
 static struct platform_device zoom2_debugboard_serial_device = {
 	.name			= "serial8250",
-	.id			= 3,
+	.id			= PLAT8250_DEV_PLATFORM1,
 	.dev			= {
 		.platform_data	= serial_platform_data,
 	},
@@ -129,7 +127,6 @@ static inline void __init zoom2_init_quaduart(void)
 static inline int omap_zoom2_debugboard_detect(void)
 {
 	int debug_board_detect = 0;
-	int ret = 1;
 
 	debug_board_detect = ZOOM2_SMSC911X_GPIO;
 
@@ -141,10 +138,10 @@ static inline int omap_zoom2_debugboard_detect(void)
 	gpio_direction_input(debug_board_detect);
 
 	if (!gpio_get_value(debug_board_detect)) {
-		ret = 0;
+		gpio_free(debug_board_detect);
+		return 0;
 	}
-	gpio_free(debug_board_detect);
-	return ret;
+	return 1;
 }
 
 static struct platform_device *zoom2_devices[] __initdata = {

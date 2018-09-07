@@ -655,9 +655,7 @@ static int __nbd_ioctl(struct block_device *bdev, struct nbd_device *lo,
 
 		mutex_unlock(&lo->tx_lock);
 
-		thread = kthread_create(nbd_thread, lo, "%s",
-					lo->disk->disk_name);
-
+		thread = kthread_create(nbd_thread, lo, lo->disk->disk_name);
 		if (IS_ERR(thread)) {
 			mutex_lock(&lo->tx_lock);
 			return PTR_ERR(thread);
@@ -724,7 +722,7 @@ static int nbd_ioctl(struct block_device *bdev, fmode_t mode,
 	return error;
 }
 
-static const struct block_device_operations nbd_fops =
+static struct block_device_operations nbd_fops =
 {
 	.owner =	THIS_MODULE,
 	.locked_ioctl =	nbd_ioctl,
@@ -755,12 +753,6 @@ static int __init nbd_init(void)
 	part_shift = 0;
 	if (max_part > 0)
 		part_shift = fls(max_part);
-
-	if ((1UL << part_shift) > DISK_MAX_PARTS)
-		return -EINVAL;
-
-	if (nbds_max > 1UL << (MINORBITS - part_shift))
-		return -EINVAL;
 
 	for (i = 0; i < nbds_max; i++) {
 		struct gendisk *disk = alloc_disk(1 << part_shift);

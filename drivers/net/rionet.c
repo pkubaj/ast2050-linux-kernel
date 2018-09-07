@@ -72,7 +72,7 @@ static int rionet_check = 0;
 static int rionet_capable = 1;
 
 /*
- * This is a fast lookup table for translating TX
+ * This is a fast lookup table for for translating TX
  * Ethernet packets into a destination RIO device. It
  * could be made into a hash table to save memory depending
  * on system trade-offs.
@@ -87,8 +87,8 @@ static struct rio_dev **rionet_active;
 #define dev_rionet_capable(dev) \
 	is_rionet_capable(dev->pef, dev->src_ops, dev->dst_ops)
 
-#define RIONET_MAC_MATCH(x)	(!memcmp((x), "\00\01\00\01", 4))
-#define RIONET_GET_DESTID(x)	((*((u8 *)x + 4) << 8) | *((u8 *)x + 5))
+#define RIONET_MAC_MATCH(x)	(*(u32 *)x == 0x00010001)
+#define RIONET_GET_DESTID(x)	(*(u16 *)(x + 4))
 
 static int rionet_rx_clean(struct net_device *ndev)
 {
@@ -114,6 +114,11 @@ static int rionet_rx_clean(struct net_device *ndev)
 
 		if (error == NET_RX_DROP) {
 			ndev->stats.rx_dropped++;
+		} else if (error == NET_RX_BAD) {
+			if (netif_msg_rx_err(rnet))
+				printk(KERN_WARNING "%s: bad rx packet\n",
+				       DRV_NAME);
+			ndev->stats.rx_errors++;
 		} else {
 			ndev->stats.rx_packets++;
 			ndev->stats.rx_bytes += RIO_MAX_MSG_SIZE;
@@ -203,7 +208,7 @@ static int rionet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 
 	spin_unlock_irqrestore(&rnet->tx_lock, flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void rionet_dbell_event(struct rio_mport *mport, void *dev_id, u16 sid, u16 tid,

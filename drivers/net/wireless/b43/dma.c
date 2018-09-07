@@ -856,6 +856,7 @@ struct b43_dmaring *b43_setup_dmaring(struct b43_wldev *dev,
 		} else
 			B43_WARN_ON(1);
 	}
+	spin_lock_init(&ring->lock);
 #ifdef CONFIG_B43_DEBUG
 	ring->last_injected_overflow = jiffies;
 #endif
@@ -1188,7 +1189,7 @@ static int dma_tx_fragment(struct b43_dmaring *ring,
 	header = &(ring->txhdr_cache[(slot / TX_SLOTS_PER_FRAME) * hdrsize]);
 	cookie = generate_cookie(ring, slot);
 	err = b43_generate_txhdr(ring->dev, header,
-				 skb, info, cookie);
+				 skb->data, skb->len, info, cookie);
 	if (unlikely(err)) {
 		ring->current_slot = old_top_slot;
 		ring->used_slots = old_used_slots;
@@ -1321,6 +1322,7 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 	struct b43_dmaring *ring;
 	struct ieee80211_hdr *hdr;
 	int err = 0;
+	unsigned long flags;
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 
 	hdr = (struct ieee80211_hdr *)skb->data;
@@ -1336,6 +1338,8 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 			dev, skb_get_queue_mapping(skb));
 	}
 
+	spin_lock_irqsave(&ring->lock, flags);
+
 	B43_WARN_ON(!ring->tx);
 
 	if (unlikely(ring->stopped)) {
@@ -1346,7 +1350,7 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 		if (b43_debug(dev, B43_DBG_DMAVERBOSE))
 			b43err(dev->wl, "Packet after queue stopped\n");
 		err = -ENOSPC;
-		goto out;
+		goto out_unlock;
 	}
 
 	if (unlikely(WARN_ON(free_slots(ring) < TX_SLOTS_PER_FRAME))) {
@@ -1354,7 +1358,7 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 		 * full, but queues not stopped. */
 		b43err(dev->wl, "DMA queue overflow\n");
 		err = -ENOSPC;
-		goto out;
+		goto out_unlock;
 	}
 
 	/* Assign the queue number to the ring (if not already done before)
@@ -1372,11 +1376,11 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 		 * anymore and must not transmit it unencrypted. */
 		dev_kfree_skb_any(skb);
 		err = 0;
-		goto out;
+		goto out_unlock;
 	}
 	if (unlikely(err)) {
 		b43err(dev->wl, "DMA tx mapping failure\n");
-		goto out;
+		goto out_unlock;
 	}
 	ring->nr_tx_packets++;
 	if ((free_slots(ring) < TX_SLOTS_PER_FRAME) ||
@@ -1388,11 +1392,13 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 			b43dbg(dev->wl, "Stopped TX ring %d\n", ring->index);
 		}
 	}
-out:
+out_unlock:
+	spin_unlock_irqrestore(&ring->lock, flags);
 
 	return err;
 }
 
+/* Called with IRQs disabled. */
 void b43_dma_handle_txstatus(struct b43_wldev *dev,
 			     const struct b43_txstatus *status)
 {
@@ -1406,6 +1412,8 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 	ring = parse_cookie(dev, status->cookie, &slot);
 	if (unlikely(!ring))
 		return;
+
+	spin_lock(&ring->lock); /* IRQs are already disabled. */
 
 	B43_WARN_ON(!ring->tx);
 	ops = ring->ops;
@@ -1439,9 +1447,9 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 				ring->nr_failed_tx_packets++;
 			ring->nr_total_packet_tries += status->frame_count;
 #endif /* DEBUG */
-			ieee80211_tx_status(dev->wl->hw, meta->skb);
+			ieee80211_tx_status_irqsafe(dev->wl->hw, meta->skb);
 
-			/* skb is freed by ieee80211_tx_status() */
+			/* skb is freed by ieee80211_tx_status_irqsafe() */
 			meta->skb = NULL;
 		} else {
 			/* No need to call free_descriptor_buffer here, as
@@ -1465,6 +1473,8 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 			b43dbg(dev->wl, "Woke up TX ring %d\n", ring->index);
 		}
 	}
+
+	spin_unlock(&ring->lock);
 }
 
 void b43_dma_get_tx_stats(struct b43_wldev *dev,
@@ -1472,14 +1482,17 @@ void b43_dma_get_tx_stats(struct b43_wldev *dev,
 {
 	const int nr_queues = dev->wl->hw->queues;
 	struct b43_dmaring *ring;
+	unsigned long flags;
 	int i;
 
 	for (i = 0; i < nr_queues; i++) {
 		ring = select_ring_by_priority(dev, i);
 
+		spin_lock_irqsave(&ring->lock, flags);
 		stats[i].len = ring->used_slots / TX_SLOTS_PER_FRAME;
 		stats[i].limit = ring->nr_slots / TX_SLOTS_PER_FRAME;
 		stats[i].count = ring->nr_tx_packets;
+		spin_unlock_irqrestore(&ring->lock, flags);
 	}
 }
 
@@ -1521,7 +1534,7 @@ static void dma_rx(struct b43_dmaring *ring, int *slot)
 		dmaaddr = meta->dmaaddr;
 		goto drop_recycle_buffer;
 	}
-	if (unlikely(len + ring->frameoffset > ring->rx_buffersize)) {
+	if (unlikely(len > ring->rx_buffersize)) {
 		/* The data did not fit into one descriptor buffer
 		 * and is split over multiple buffers.
 		 * This should never happen, as we try to allocate buffers
@@ -1590,14 +1603,22 @@ void b43_dma_rx(struct b43_dmaring *ring)
 
 static void b43_dma_tx_suspend_ring(struct b43_dmaring *ring)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&ring->lock, flags);
 	B43_WARN_ON(!ring->tx);
 	ring->ops->tx_suspend(ring);
+	spin_unlock_irqrestore(&ring->lock, flags);
 }
 
 static void b43_dma_tx_resume_ring(struct b43_dmaring *ring)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&ring->lock, flags);
 	B43_WARN_ON(!ring->tx);
 	ring->ops->tx_resume(ring);
+	spin_unlock_irqrestore(&ring->lock, flags);
 }
 
 void b43_dma_tx_suspend(struct b43_wldev *dev)
@@ -1620,6 +1641,7 @@ void b43_dma_tx_resume(struct b43_wldev *dev)
 	b43_power_saving_ctl_bits(dev, 0);
 }
 
+#ifdef CONFIG_B43_PIO
 static void direct_fifo_rx(struct b43_wldev *dev, enum b43_dmatype type,
 			   u16 mmio_base, bool enable)
 {
@@ -1653,3 +1675,4 @@ void b43_dma_direct_fifo_rx(struct b43_wldev *dev,
 	mmio_base = b43_dmacontroller_base(type, engine_index);
 	direct_fifo_rx(dev, type, mmio_base, enable);
 }
+#endif /* CONFIG_B43_PIO */

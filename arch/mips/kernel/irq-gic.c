@@ -14,23 +14,38 @@
 
 
 static unsigned long _gic_base;
-static unsigned int _irqbase;
-static unsigned int gic_irq_flags[GIC_NUM_INTRS];
-#define GIC_IRQ_FLAG_EDGE      0x0001
+static unsigned int _irqbase, _mapsize, numvpes, numintrs;
+static struct gic_intr_map *_intrmap;
 
-struct gic_pcpu_mask pcpu_masks[NR_CPUS];
+static struct gic_pcpu_mask pcpu_masks[NR_CPUS];
 static struct gic_pending_regs pending_regs[NR_CPUS];
 static struct gic_intrmask_regs intrmask_regs[NR_CPUS];
 
+#define gic_wedgeb2bok 0	/*
+				 * Can GIC handle b2b writes to wedge register?
+				 */
+#if gic_wedgeb2bok == 0
+static DEFINE_SPINLOCK(gic_wedgeb2b_lock);
+#endif
+
 void gic_send_ipi(unsigned int intr)
 {
+#if gic_wedgeb2bok == 0
+	unsigned long flags;
+#endif
 	pr_debug("CPU%d: %s status %08x\n", smp_processor_id(), __func__,
 		 read_c0_status());
+	if (!gic_wedgeb2bok)
+		spin_lock_irqsave(&gic_wedgeb2b_lock, flags);
 	GICWRITE(GIC_REG(SHARED, GIC_SH_WEDGE), 0x80000000 | intr);
+	if (!gic_wedgeb2bok) {
+		(void) GIC_REG(SHARED, GIC_SH_CONFIG);
+		spin_unlock_irqrestore(&gic_wedgeb2b_lock, flags);
+	}
 }
 
 /* This is Malta specific and needs to be exported */
-static void __init vpe_local_setup(unsigned int numvpes)
+static void vpe_local_setup(unsigned int numvpes)
 {
 	int i;
 	unsigned long timer_interrupt = 5, perf_interrupt = 5;
@@ -90,34 +105,44 @@ unsigned int gic_get_int(void)
 
 static unsigned int gic_irq_startup(unsigned int irq)
 {
-	irq -= _irqbase;
 	pr_debug("CPU%d: %s: irq%d\n", smp_processor_id(), __func__, irq);
-	GIC_SET_INTR_MASK(irq);
+	irq -= _irqbase;
+	GIC_SET_INTR_MASK(irq, 1);
 	return 0;
 }
 
 static void gic_irq_ack(unsigned int irq)
 {
-	irq -= _irqbase;
+#if gic_wedgeb2bok == 0
+	unsigned long flags;
+#endif
 	pr_debug("CPU%d: %s: irq%d\n", smp_processor_id(), __func__, irq);
-	GIC_CLR_INTR_MASK(irq);
+	irq -= _irqbase;
+	GIC_CLR_INTR_MASK(irq, 1);
 
-	if (gic_irq_flags[irq] & GIC_IRQ_FLAG_EDGE)
+	if (_intrmap[irq].trigtype == GIC_TRIG_EDGE) {
+		if (!gic_wedgeb2bok)
+			spin_lock_irqsave(&gic_wedgeb2b_lock, flags);
 		GICWRITE(GIC_REG(SHARED, GIC_SH_WEDGE), irq);
+		if (!gic_wedgeb2bok) {
+			(void) GIC_REG(SHARED, GIC_SH_CONFIG);
+			spin_unlock_irqrestore(&gic_wedgeb2b_lock, flags);
+		}
+	}
 }
 
 static void gic_mask_irq(unsigned int irq)
 {
-	irq -= _irqbase;
 	pr_debug("CPU%d: %s: irq%d\n", smp_processor_id(), __func__, irq);
-	GIC_CLR_INTR_MASK(irq);
+	irq -= _irqbase;
+	GIC_CLR_INTR_MASK(irq, 1);
 }
 
 static void gic_unmask_irq(unsigned int irq)
 {
-	irq -= _irqbase;
 	pr_debug("CPU%d: %s: irq%d\n", smp_processor_id(), __func__, irq);
-	GIC_SET_INTR_MASK(irq);
+	irq -= _irqbase;
+	GIC_SET_INTR_MASK(irq, 1);
 }
 
 #ifdef CONFIG_SMP
@@ -130,8 +155,9 @@ static int gic_set_affinity(unsigned int irq, const struct cpumask *cpumask)
 	unsigned long	flags;
 	int		i;
 
+	pr_debug(KERN_DEBUG "%s called\n", __func__);
 	irq -= _irqbase;
-	pr_debug(KERN_DEBUG "%s(%d) called\n", __func__, irq);
+
 	cpumask_and(&tmp, cpumask, cpu_online_mask);
 	if (cpus_empty(tmp))
 		return -1;
@@ -141,6 +167,13 @@ static int gic_set_affinity(unsigned int irq, const struct cpumask *cpumask)
 	for (;;) {
 		/* Re-route this IRQ */
 		GIC_SH_MAP_TO_VPE_SMASK(irq, first_cpu(tmp));
+
+		/*
+		 * FIXME: assumption that _intrmap is ordered and has no holes
+		 */
+
+		/* Update the intr_map */
+		_intrmap[irq].cpunum = first_cpu(tmp);
 
 		/* Update the pcpu_masks */
 		for (i = 0; i < NR_CPUS; i++)
@@ -168,9 +201,8 @@ static struct irq_chip gic_irq_controller = {
 #endif
 };
 
-static void __init gic_setup_intr(unsigned int intr, unsigned int cpu,
-	unsigned int pin, unsigned int polarity, unsigned int trigtype,
-	unsigned int flags)
+static void __init setup_intr(unsigned int intr, unsigned int cpu,
+	unsigned int pin, unsigned int polarity, unsigned int trigtype)
 {
 	/* Setup Intr to Pin mapping */
 	if (pin & GIC_MAP_TO_NMI_MSK) {
@@ -195,43 +227,38 @@ static void __init gic_setup_intr(unsigned int intr, unsigned int cpu,
 	GIC_SET_TRIGGER(intr, trigtype);
 
 	/* Init Intr Masks */
-	GIC_CLR_INTR_MASK(intr);
-	/* Initialise per-cpu Interrupt software masks */
-	if (flags & GIC_FLAG_IPI)
-		set_bit(intr, pcpu_masks[cpu].pcpu_mask);
-	if (flags & GIC_FLAG_TRANSPARENT)
-		GIC_SET_INTR_MASK(intr);
-	if (trigtype == GIC_TRIG_EDGE)
-		gic_irq_flags[intr] |= GIC_IRQ_FLAG_EDGE;
+	GIC_SET_INTR_MASK(intr, 0);
 }
 
-static void __init gic_basic_init(int numintrs, int numvpes,
-			struct gic_intr_map *intrmap, int mapsize)
+static void __init gic_basic_init(void)
 {
 	unsigned int i, cpu;
 
 	/* Setup defaults */
-	for (i = 0; i < numintrs; i++) {
+	for (i = 0; i < GIC_NUM_INTRS; i++) {
 		GIC_SET_POLARITY(i, GIC_POL_POS);
 		GIC_SET_TRIGGER(i, GIC_TRIG_LEVEL);
-		GIC_CLR_INTR_MASK(i);
-		if (i < GIC_NUM_INTRS)
-			gic_irq_flags[i] = 0;
+		GIC_SET_INTR_MASK(i, 0);
 	}
 
 	/* Setup specifics */
-	for (i = 0; i < mapsize; i++) {
-		cpu = intrmap[i].cpunum;
+	for (i = 0; i < _mapsize; i++) {
+		cpu = _intrmap[i].cpunum;
 		if (cpu == X)
 			continue;
-		if (cpu == 0 && i != 0 && intrmap[i].flags == 0)
+
+		if (cpu == 0 && i != 0 && _intrmap[i].intrnum == 0 &&
+					_intrmap[i].ipiflag == 0)
 			continue;
-		gic_setup_intr(i,
-			intrmap[i].cpunum,
-			intrmap[i].pin,
-			intrmap[i].polarity,
-			intrmap[i].trigtype,
-			intrmap[i].flags);
+
+		setup_intr(_intrmap[i].intrnum,
+				_intrmap[i].cpunum,
+				_intrmap[i].pin,
+				_intrmap[i].polarity,
+				_intrmap[i].trigtype);
+		/* Initialise per-cpu Interrupt software masks */
+		if (_intrmap[i].ipiflag)
+			set_bit(_intrmap[i].intrnum, pcpu_masks[cpu].pcpu_mask);
 	}
 
 	vpe_local_setup(numvpes);
@@ -246,11 +273,12 @@ void __init gic_init(unsigned long gic_base_addr,
 		     unsigned int irqbase)
 {
 	unsigned int gicconfig;
-	int numvpes, numintrs;
 
 	_gic_base = (unsigned long) ioremap_nocache(gic_base_addr,
 						    gic_addrspace_size);
 	_irqbase = irqbase;
+	_intrmap = intr_map;
+	_mapsize = intr_map_size;
 
 	GICREAD(GIC_REG(SHARED, GIC_SH_CONFIG), gicconfig);
 	numintrs = (gicconfig & GIC_SH_CONFIG_NUMINTRS_MSK) >>
@@ -262,5 +290,5 @@ void __init gic_init(unsigned long gic_base_addr,
 
 	pr_debug("%s called\n", __func__);
 
-	gic_basic_init(numintrs, numvpes, intr_map, intr_map_size);
+	gic_basic_init();
 }

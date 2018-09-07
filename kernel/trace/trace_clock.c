@@ -66,14 +66,10 @@ u64 notrace trace_clock(void)
  * Used by plugins that need globally coherent timestamps.
  */
 
-/* keep prev_time and lock in the same cacheline. */
-static struct {
-	u64 prev_time;
-	raw_spinlock_t lock;
-} trace_clock_struct ____cacheline_aligned_in_smp =
-	{
-		.lock = (raw_spinlock_t)__RAW_SPIN_LOCK_UNLOCKED,
-	};
+static u64 prev_trace_clock_time;
+
+static raw_spinlock_t trace_clock_lock ____cacheline_aligned_in_smp =
+	(raw_spinlock_t)__RAW_SPIN_LOCK_UNLOCKED;
 
 u64 notrace trace_clock_global(void)
 {
@@ -92,19 +88,19 @@ u64 notrace trace_clock_global(void)
 	if (unlikely(in_nmi()))
 		goto out;
 
-	__raw_spin_lock(&trace_clock_struct.lock);
+	__raw_spin_lock(&trace_clock_lock);
 
 	/*
 	 * TODO: if this happens often then maybe we should reset
-	 * my_scd->clock to prev_time+1, to make sure
+	 * my_scd->clock to prev_trace_clock_time+1, to make sure
 	 * we start ticking with the local clock from now on?
 	 */
-	if ((s64)(now - trace_clock_struct.prev_time) < 0)
-		now = trace_clock_struct.prev_time + 1;
+	if ((s64)(now - prev_trace_clock_time) < 0)
+		now = prev_trace_clock_time + 1;
 
-	trace_clock_struct.prev_time = now;
+	prev_trace_clock_time = now;
 
-	__raw_spin_unlock(&trace_clock_struct.lock);
+	__raw_spin_unlock(&trace_clock_lock);
 
  out:
 	raw_local_irq_restore(flags);

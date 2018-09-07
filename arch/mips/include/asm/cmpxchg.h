@@ -16,7 +16,7 @@
 ({									\
 	__typeof(*(m)) __ret;						\
 									\
-	if (kernel_uses_llsc && R10000_LLSC_WAR) {				\
+	if (cpu_has_llsc && R10000_LLSC_WAR) {				\
 		__asm__ __volatile__(					\
 		"	.set	push				\n"	\
 		"	.set	noat				\n"	\
@@ -33,7 +33,7 @@
 		: "=&r" (__ret), "=R" (*m)				\
 		: "R" (*m), "Jr" (old), "Jr" (new)			\
 		: "memory");						\
-	} else if (kernel_uses_llsc) {					\
+	} else if (cpu_has_llsc) {					\
 		__asm__ __volatile__(					\
 		"	.set	push				\n"	\
 		"	.set	noat				\n"	\

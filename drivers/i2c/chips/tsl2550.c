@@ -24,9 +24,10 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
+#include <linux/delay.h>
 
 #define TSL2550_DRV_NAME	"tsl2550"
-#define DRIVER_VERSION		"1.2"
+#define DRIVER_VERSION		"1.1.2"
 
 /*
  * Defines
@@ -95,13 +96,32 @@ static int tsl2550_set_power_state(struct i2c_client *client, int state)
 
 static int tsl2550_get_adc_value(struct i2c_client *client, u8 cmd)
 {
-	int ret;
+	unsigned long end;
+	int loop = 0, ret = 0;
 
-	ret = i2c_smbus_read_byte_data(client, cmd);
-	if (ret < 0)
-		return ret;
+	/*
+	 * Read ADC channel waiting at most 400ms (see data sheet for further
+	 * info).
+	 * To avoid long busy wait we spin for few milliseconds then
+	 * start sleeping.
+	 */
+	end = jiffies + msecs_to_jiffies(400);
+	while (time_before(jiffies, end)) {
+		i2c_smbus_write_byte(client, cmd);
+
+		if (loop++ < 5)
+			mdelay(1);
+		else
+			msleep(1);
+
+		ret = i2c_smbus_read_byte(client);
+		if (ret < 0)
+			return ret;
+		else if (ret & 0x0080)
+			break;
+	}
 	if (!(ret & 0x80))
-		return -EAGAIN;
+		return -EIO;
 	return ret & 0x7f;	/* remove the "valid" bit */
 }
 
@@ -266,6 +286,8 @@ static ssize_t __tsl2550_show_lux(struct i2c_client *client, char *buf)
 		return ret;
 	ch0 = ret;
 
+	mdelay(1);
+
 	ret = tsl2550_get_adc_value(client, TSL2550_READ_ADC1);
 	if (ret < 0)
 		return ret;
@@ -326,10 +348,11 @@ static int tsl2550_init_client(struct i2c_client *client)
 	 * Probe the chip. To do so we try to power up the device and then to
 	 * read back the 0x03 code
 	 */
-	err = i2c_smbus_read_byte_data(client, TSL2550_POWER_UP);
+	err = i2c_smbus_write_byte(client, TSL2550_POWER_UP);
 	if (err < 0)
 		return err;
-	if (err != TSL2550_POWER_UP)
+	mdelay(1);
+	if (i2c_smbus_read_byte(client) != TSL2550_POWER_UP)
 		return -ENODEV;
 	data->power_state = 1;
 
@@ -354,8 +377,7 @@ static int __devinit tsl2550_probe(struct i2c_client *client,
 	struct tsl2550_data *data;
 	int *opmode, err = 0;
 
-	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_WRITE_BYTE
-					    | I2C_FUNC_SMBUS_READ_BYTE_DATA)) {
+	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE)) {
 		err = -EIO;
 		goto exit;
 	}

@@ -22,8 +22,7 @@
 static inline int should_deliver(const struct net_bridge_port *p,
 				 const struct sk_buff *skb)
 {
-	return (((p->flags & BR_HAIRPIN_MODE) || skb->dev != p->dev) &&
-		p->state == BR_STATE_FORWARDING);
+	return (skb->dev != p->dev && p->state == BR_STATE_FORWARDING);
 }
 
 static inline unsigned packet_length(const struct sk_buff *skb)

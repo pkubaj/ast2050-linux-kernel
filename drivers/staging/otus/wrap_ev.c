@@ -28,7 +28,10 @@
 #include "usbdrv.h"
 
 #include <linux/netlink.h>
+
+#if WIRELESS_EXT > 12
 #include <net/iw_handler.h>
+#endif
 
 
 /***** Management *****/
@@ -72,6 +75,7 @@ u16_t zfLnxAsocNotify(zdev_t* dev, u16_t* macAddr, u8_t* body, u16_t bodySize, u
     //            //wireless_send_event(macp->device, SIOCGIWSCAN, &wreq, NULL);
     //    wireless_send_event(macp->device, SIOCGIWAP, &wreq, NULL);
     //}
+#if WIRELESS_EXT >= 15
     //else if(macp->cardSetting.BssType == AP_BSS) {
 //        if (port == 0)
 //        {
@@ -90,6 +94,7 @@ u16_t zfLnxAsocNotify(zdev_t* dev, u16_t* macAddr, u8_t* body, u16_t bodySize, u
 //            }
 //        }
     //}
+#endif
 //#endif
 
     return 0;
@@ -180,6 +185,7 @@ void zfLnxConnectNotify(zdev_t* dev, u16_t status, u16_t* bssid)
         //            //wireless_send_event(dev, SIOCGIWSCAN, &wreq, NULL);
             wireless_send_event(dev, SIOCGIWAP, &wreq, NULL);
         }
+#if WIRELESS_EXT >= 15
         else if(zfiWlanQueryWlanMode(dev) == ZM_MODE_AP) {
             //if (port == 0)
             //{
@@ -198,6 +204,7 @@ void zfLnxConnectNotify(zdev_t* dev, u16_t status, u16_t* bssid)
             //    }
             //}
         }
+#endif
     }
     //return 0;
 }

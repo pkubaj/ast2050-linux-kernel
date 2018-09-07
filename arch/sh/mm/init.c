@@ -106,31 +106,27 @@ void __init page_table_range_init(unsigned long start, unsigned long end,
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
-	pte_t *pte;
-	int i, j, k;
+	int pgd_idx;
 	unsigned long vaddr;
 
-	vaddr = start;
-	i = __pgd_offset(vaddr);
-	j = __pud_offset(vaddr);
-	k = __pmd_offset(vaddr);
-	pgd = pgd_base + i;
+	vaddr = start & PMD_MASK;
+	end = (end + PMD_SIZE - 1) & PMD_MASK;
+	pgd_idx = pgd_index(vaddr);
+	pgd = pgd_base + pgd_idx;
 
-	for ( ; (i < PTRS_PER_PGD) && (vaddr != end); pgd++, i++) {
-		pud = (pud_t *)pgd;
-		for ( ; (j < PTRS_PER_PUD) && (vaddr != end); pud++, j++) {
-			pmd = (pmd_t *)pud;
-			for (; (k < PTRS_PER_PMD) && (vaddr != end); pmd++, k++) {
-				if (pmd_none(*pmd)) {
-					pte = (pte_t *) alloc_bootmem_low_pages(PAGE_SIZE);
-					pmd_populate_kernel(&init_mm, pmd, pte);
-					BUG_ON(pte != pte_offset_kernel(pmd, 0));
-				}
-				vaddr += PMD_SIZE;
-			}
-			k = 0;
+	for ( ; (pgd_idx < PTRS_PER_PGD) && (vaddr != end); pgd++, pgd_idx++) {
+		BUG_ON(pgd_none(*pgd));
+		pud = pud_offset(pgd, 0);
+		BUG_ON(pud_none(*pud));
+		pmd = pmd_offset(pud, 0);
+
+		if (!pmd_present(*pmd)) {
+			pte_t *pte_table;
+			pte_table = (pte_t *)alloc_bootmem_low_pages(PAGE_SIZE);
+			pmd_populate_kernel(&init_mm, pmd, pte_table);
 		}
-		j = 0;
+
+		vaddr += PMD_SIZE;
 	}
 }
 #endif	/* CONFIG_MMU */
@@ -141,7 +137,7 @@ void __init page_table_range_init(unsigned long start, unsigned long end,
 void __init paging_init(void)
 {
 	unsigned long max_zone_pfns[MAX_NR_ZONES];
-	unsigned long vaddr, end;
+	unsigned long vaddr;
 	int nid;
 
 	/* We don't need to map the kernel through the TLB, as
@@ -159,8 +155,7 @@ void __init paging_init(void)
 	 * pte's will be filled in by __set_fixmap().
 	 */
 	vaddr = __fix_to_virt(__end_of_fixed_addresses - 1) & PMD_MASK;
-	end = (FIXADDR_TOP + PMD_SIZE - 1) & PMD_MASK;
-	page_table_range_init(vaddr, end, swapper_pg_dir);
+	page_table_range_init(vaddr, 0, swapper_pg_dir);
 
 	kmap_coherent_init();
 
@@ -185,6 +180,8 @@ void __init paging_init(void)
 	/* Set up the uncached fixmap */
 	set_fixmap_nocache(FIX_UNCACHED, __pa(&__uncached_start));
 }
+
+static struct kcore_list kcore_mem, kcore_vmalloc;
 
 void __init mem_init(void)
 {
@@ -213,9 +210,6 @@ void __init mem_init(void)
 			high_memory = node_high_memory;
 	}
 
-	/* Set this up early, so we can take care of the zero page */
-	cpu_cache_init();
-
 	/* clear the zero-page */
 	memset(empty_zero_page, 0, PAGE_SIZE);
 	__flush_wback_region(empty_zero_page, PAGE_SIZE);
@@ -224,13 +218,19 @@ void __init mem_init(void)
 	datasize =  (unsigned long) &_edata - (unsigned long) &_etext;
 	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
 
+	kclist_add(&kcore_mem, __va(0), max_low_pfn << PAGE_SHIFT);
+	kclist_add(&kcore_vmalloc, (void *)VMALLOC_START,
+		   VMALLOC_END - VMALLOC_START);
+
 	printk(KERN_INFO "Memory: %luk/%luk available (%dk kernel code, "
 	       "%dk data, %dk init)\n",
-		nr_free_pages() << (PAGE_SHIFT-10),
+		(unsigned long) nr_free_pages() << (PAGE_SHIFT-10),
 		num_physpages << (PAGE_SHIFT-10),
 		codesize >> 10,
 		datasize >> 10,
 		initsize >> 10);
+
+	p3_cache_init();
 
 	/* Initialize the vDSO */
 	vsyscall_init();

@@ -80,9 +80,6 @@ static irqreturn_t sh_keysc_isr(int irq, void *dev_id)
 		iowrite16(KYCR2_IRQ_LEVEL | (keyin_set << 8),
 			  priv->iomem_base + KYCR2_OFFS);
 
-		if (pdata->kycr2_delay)
-			udelay(pdata->kycr2_delay);
-
 		keys ^= ~0;
 		keys &= (1 << (sh_keysc_mode[pdata->mode].keyin *
 			       sh_keysc_mode[pdata->mode].keyout)) - 1;
@@ -131,7 +128,7 @@ static int __devinit sh_keysc_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct input_dev *input;
 	char clk_name[8];
-	int i;
+	int i, k;
 	int irq, error;
 
 	if (!pdev->dev.platform_data) {
@@ -198,19 +195,17 @@ static int __devinit sh_keysc_probe(struct platform_device *pdev)
 	input->id.product = 0x0001;
 	input->id.version = 0x0100;
 
-	input->keycode = pdata->keycodes;
-	input->keycodesize = sizeof(pdata->keycodes[0]);
-	input->keycodemax = ARRAY_SIZE(pdata->keycodes);
-
 	error = request_irq(irq, sh_keysc_isr, 0, pdev->name, pdev);
 	if (error) {
 		dev_err(&pdev->dev, "failed to request IRQ\n");
 		goto err4;
 	}
 
-	for (i = 0; i < SH_KEYSC_MAXKEYS; i++)
-		__set_bit(pdata->keycodes[i], input->keybit);
-	__clear_bit(KEY_RESERVED, input->keybit);
+	for (i = 0; i < SH_KEYSC_MAXKEYS; i++) {
+		k = pdata->keycodes[i];
+		if (k)
+			input_set_capability(input, EV_KEY, k);
+	}
 
 	error = input_register_device(input);
 	if (error) {
@@ -226,9 +221,7 @@ static int __devinit sh_keysc_probe(struct platform_device *pdev)
 	iowrite16(KYCR2_IRQ_LEVEL, priv->iomem_base + KYCR2_OFFS);
 
 	device_init_wakeup(&pdev->dev, 1);
-
 	return 0;
-
  err5:
 	free_irq(irq, pdev);
  err4:
@@ -259,7 +252,6 @@ static int __devexit sh_keysc_remove(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, NULL);
 	kfree(priv);
-
 	return 0;
 }
 
@@ -275,12 +267,11 @@ static int sh_keysc_suspend(struct device *dev)
 	if (device_may_wakeup(dev)) {
 		value |= 0x80;
 		enable_irq_wake(irq);
-	} else {
-		value &= ~0x80;
 	}
+	else
+		value &= ~0x80;
 
 	iowrite16(value, priv->iomem_base + KYCR1_OFFS);
-
 	return 0;
 }
 

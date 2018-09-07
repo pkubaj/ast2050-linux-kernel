@@ -20,6 +20,12 @@
 
 /***************************************************************************/
 
+extern unsigned int mcf_timervector;
+extern unsigned int mcf_profilevector;
+extern unsigned int mcf_timerlevel;
+
+/***************************************************************************/
+
 /*
  *	Some platforms need software versions of the GPIO data registers.
  */
@@ -31,11 +37,11 @@ unsigned char ledbank = 0xff;
 static struct mcf_platform_uart m5272_uart_platform[] = {
 	{
 		.mapbase	= MCF_MBAR + MCFUART_BASE1,
-		.irq		= MCF_IRQ_UART1,
+		.irq		= 73,
 	},
 	{
 		.mapbase 	= MCF_MBAR + MCFUART_BASE2,
-		.irq		= MCF_IRQ_UART2,
+		.irq		= 74,
 	},
 	{ },
 };
@@ -53,18 +59,18 @@ static struct resource m5272_fec_resources[] = {
 		.flags		= IORESOURCE_MEM,
 	},
 	{
-		.start		= MCF_IRQ_ERX,
-		.end		= MCF_IRQ_ERX,
+		.start		= 86,
+		.end		= 86,
 		.flags		= IORESOURCE_IRQ,
 	},
 	{
-		.start		= MCF_IRQ_ETX,
-		.end		= MCF_IRQ_ETX,
+		.start		= 87,
+		.end		= 87,
 		.flags		= IORESOURCE_IRQ,
 	},
 	{
-		.start		= MCF_IRQ_ENTC,
-		.end		= MCF_IRQ_ENTC,
+		.start		= 88,
+		.end		= 88,
 		.flags		= IORESOURCE_IRQ,
 	},
 };
@@ -88,6 +94,9 @@ static void __init m5272_uart_init_line(int line, int irq)
 	u32 v;
 
 	if ((line >= 0) && (line < 2)) {
+		v = (line) ? 0x0e000000 : 0xe0000000;
+		writel(v, MCF_MBAR + MCFSIM_ICR2);
+
 		/* Enable the output lines for the serial ports */
 		v = readl(MCF_MBAR + MCFSIM_PBCNT);
 		v = (v & ~0x000000ff) | 0x00000055;
@@ -106,6 +115,54 @@ static void __init m5272_uarts_init(void)
 
 	for (line = 0; (line < nrlines); line++)
 		m5272_uart_init_line(line, m5272_uart_platform[line].irq);
+}
+
+/***************************************************************************/
+
+static void __init m5272_fec_init(void)
+{
+	u32 imr;
+
+	/* Unmask FEC interrupts at ColdFire interrupt controller */
+	imr = readl(MCF_MBAR + MCFSIM_ICR3);
+	imr = (imr & ~0x00000fff) | 0x00000ddd;
+	writel(imr, MCF_MBAR + MCFSIM_ICR3);
+
+	imr = readl(MCF_MBAR + MCFSIM_ICR1);
+	imr = (imr & ~0x0f000000) | 0x0d000000;
+	writel(imr, MCF_MBAR + MCFSIM_ICR1);
+}
+
+/***************************************************************************/
+
+void mcf_disableall(void)
+{
+	volatile unsigned long	*icrp;
+
+	icrp = (volatile unsigned long *) (MCF_MBAR + MCFSIM_ICR1);
+	icrp[0] = 0x88888888;
+	icrp[1] = 0x88888888;
+	icrp[2] = 0x88888888;
+	icrp[3] = 0x88888888;
+}
+
+/***************************************************************************/
+
+void mcf_autovector(unsigned int vec)
+{
+	/* Everything is auto-vectored on the 5272 */
+}
+
+/***************************************************************************/
+
+void mcf_settimericr(int timer, int level)
+{
+	volatile unsigned long *icrp;
+
+	if ((timer >= 1 ) && (timer <= 4)) {
+		icrp = (volatile unsigned long *) (MCF_MBAR + MCFSIM_ICR1);
+		*icrp = (0x8 | level) << ((4 - timer) * 4);
+	}
 }
 
 /***************************************************************************/
@@ -133,6 +190,8 @@ void __init config_BSP(char *commandp, int size)
 	*pivrp = 0x40;
 #endif
 
+	mcf_disableall();
+
 #if defined(CONFIG_NETtel) || defined(CONFIG_SCALES)
 	/* Copy command line from FLASH to local buffer... */
 	memcpy(commandp, (char *) 0xf0004000, size);
@@ -143,6 +202,8 @@ void __init config_BSP(char *commandp, int size)
 	commandp[size-1] = 0;
 #endif
 
+	mcf_timervector = 69;
+	mcf_profilevector = 70;
 	mach_reset = m5272_cpu_reset;
 }
 
@@ -151,6 +212,7 @@ void __init config_BSP(char *commandp, int size)
 static int __init init_BSP(void)
 {
 	m5272_uarts_init();
+	m5272_fec_init();
 	platform_add_devices(m5272_devices, ARRAY_SIZE(m5272_devices));
 	return 0;
 }

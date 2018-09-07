@@ -57,9 +57,6 @@ static LIST_HEAD(card_list);
 static LIST_HEAD(descriptor_list);
 static int descriptor_count;
 
-/* ROM header, bus info block, root dir header, capabilities = 7 quadlets */
-static size_t config_rom_length = 1 + 4 + 1 + 1;
-
 #define BIB_CRC(v)		((v) <<  0)
 #define BIB_CRC_LENGTH(v)	((v) << 16)
 #define BIB_INFO_LENGTH(v)	((v) << 24)
@@ -75,7 +72,7 @@ static size_t config_rom_length = 1 + 4 + 1 + 1;
 #define BIB_CMC			((1) << 30)
 #define BIB_IMC			((1) << 31)
 
-static u32 *generate_config_rom(struct fw_card *card)
+static u32 *generate_config_rom(struct fw_card *card, size_t *config_rom_length)
 {
 	struct fw_descriptor *desc;
 	static u32 config_rom[256];
@@ -134,7 +131,7 @@ static u32 *generate_config_rom(struct fw_card *card)
 	for (i = 0; i < j; i += length + 1)
 		length = fw_compute_block_crc(config_rom + i);
 
-	WARN_ON(j != config_rom_length);
+	*config_rom_length = j;
 
 	return config_rom;
 }
@@ -143,24 +140,17 @@ static void update_config_roms(void)
 {
 	struct fw_card *card;
 	u32 *config_rom;
+	size_t length;
 
 	list_for_each_entry (card, &card_list, link) {
-		config_rom = generate_config_rom(card);
-		card->driver->set_config_rom(card, config_rom,
-					     config_rom_length);
+		config_rom = generate_config_rom(card, &length);
+		card->driver->set_config_rom(card, config_rom, length);
 	}
-}
-
-static size_t required_space(struct fw_descriptor *desc)
-{
-	/* descriptor + entry into root dir + optional immediate entry */
-	return desc->length + 1 + (desc->immediate > 0 ? 1 : 0);
 }
 
 int fw_core_add_descriptor(struct fw_descriptor *desc)
 {
 	size_t i;
-	int ret;
 
 	/*
 	 * Check descriptor is valid; the length of all blocks in the
@@ -176,21 +166,15 @@ int fw_core_add_descriptor(struct fw_descriptor *desc)
 
 	mutex_lock(&card_mutex);
 
-	if (config_rom_length + required_space(desc) > 256) {
-		ret = -EBUSY;
-	} else {
-		list_add_tail(&desc->link, &descriptor_list);
-		config_rom_length += required_space(desc);
+	list_add_tail(&desc->link, &descriptor_list);
+	descriptor_count++;
+	if (desc->immediate > 0)
 		descriptor_count++;
-		if (desc->immediate > 0)
-			descriptor_count++;
-		update_config_roms();
-		ret = 0;
-	}
+	update_config_roms();
 
 	mutex_unlock(&card_mutex);
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL(fw_core_add_descriptor);
 
@@ -199,7 +183,6 @@ void fw_core_remove_descriptor(struct fw_descriptor *desc)
 	mutex_lock(&card_mutex);
 
 	list_del(&desc->link);
-	config_rom_length -= required_space(desc);
 	descriptor_count--;
 	if (desc->immediate > 0)
 		descriptor_count--;
@@ -239,7 +222,7 @@ void fw_schedule_bm_work(struct fw_card *card, unsigned long delay)
 static void fw_card_bm_work(struct work_struct *work)
 {
 	struct fw_card *card = container_of(work, struct fw_card, work.work);
-	struct fw_device *root_device, *irm_device;
+	struct fw_device *root_device;
 	struct fw_node *root_node;
 	unsigned long flags;
 	int root_id, new_root_id, irm_id, local_id;
@@ -247,7 +230,6 @@ static void fw_card_bm_work(struct work_struct *work)
 	bool do_reset = false;
 	bool root_device_is_running;
 	bool root_device_is_cmc;
-	bool irm_is_1394_1995_only;
 
 	spin_lock_irqsave(&card->lock, flags);
 
@@ -257,18 +239,12 @@ static void fw_card_bm_work(struct work_struct *work)
 	}
 
 	generation = card->generation;
-
 	root_node = card->root_node;
 	fw_node_get(root_node);
 	root_device = root_node->data;
 	root_device_is_running = root_device &&
 			atomic_read(&root_device->state) == FW_DEVICE_RUNNING;
 	root_device_is_cmc = root_device && root_device->cmc;
-
-	irm_device = card->irm_node->data;
-	irm_is_1394_1995_only = irm_device && irm_device->config_rom &&
-			(irm_device->config_rom[2] & 0x000000f0) == 0;
-
 	root_id  = root_node->node_id;
 	irm_id   = card->irm_node->node_id;
 	local_id = card->local_node->node_id;
@@ -291,15 +267,8 @@ static void fw_card_bm_work(struct work_struct *work)
 
 		if (!card->irm_node->link_on) {
 			new_root_id = local_id;
-			fw_notify("%s, making local node (%02x) root.\n",
-				  "IRM has link off", new_root_id);
-			goto pick_me;
-		}
-
-		if (irm_is_1394_1995_only) {
-			new_root_id = local_id;
-			fw_notify("%s, making local node (%02x) root.\n",
-				  "IRM is not 1394a compliant", new_root_id);
+			fw_notify("IRM has link off, making local node (%02x) root.\n",
+				  new_root_id);
 			goto pick_me;
 		}
 
@@ -338,8 +307,8 @@ static void fw_card_bm_work(struct work_struct *work)
 			 * root, and thus, IRM.
 			 */
 			new_root_id = local_id;
-			fw_notify("%s, making local node (%02x) root.\n",
-				  "BM lock failed", new_root_id);
+			fw_notify("BM lock failed, making local node (%02x) root.\n",
+				  new_root_id);
 			goto pick_me;
 		}
 	} else if (card->bm_generation != generation) {
@@ -467,6 +436,7 @@ int fw_card_add(struct fw_card *card,
 		u32 max_receive, u32 link_speed, u64 guid)
 {
 	u32 *config_rom;
+	size_t length;
 	int ret;
 
 	card->max_receive = max_receive;
@@ -474,13 +444,16 @@ int fw_card_add(struct fw_card *card,
 	card->guid = guid;
 
 	mutex_lock(&card_mutex);
-
-	config_rom = generate_config_rom(card);
-	ret = card->driver->enable(card, config_rom, config_rom_length);
-	if (ret == 0)
-		list_add_tail(&card->link, &card_list);
-
+	config_rom = generate_config_rom(card, &length);
+	list_add_tail(&card->link, &card_list);
 	mutex_unlock(&card_mutex);
+
+	ret = card->driver->enable(card, config_rom, length);
+	if (ret < 0) {
+		mutex_lock(&card_mutex);
+		list_del(&card->link);
+		mutex_unlock(&card_mutex);
+	}
 
 	return ret;
 }

@@ -278,6 +278,8 @@ static int decompress_exec(
 		ret = bprm->file->f_op->read(bprm->file, buf, LBUFSIZE, &fpos);
 		if (ret <= 0)
 			break;
+		if (ret >= (unsigned long) -4096)
+			break;
 		len -= ret;
 
 		strm.next_in = buf;
@@ -333,7 +335,7 @@ calc_reloc(unsigned long r, struct lib_info *p, int curid, int internalp)
 					"(%d != %d)", (unsigned) r, curid, id);
 			goto failed;
 		} else if ( ! p->lib_list[id].loaded &&
-				IS_ERR_VALUE(load_flat_shared_library(id, p))) {
+				load_flat_shared_library(id, p) > (unsigned long) -4096) {
 			printk("BINFMT_FLAT: failed to load library %d", id);
 			goto failed;
 		}
@@ -544,7 +546,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 		textpos = do_mmap(bprm->file, 0, text_len, PROT_READ|PROT_EXEC,
 				  MAP_PRIVATE|MAP_EXECUTABLE, 0);
 		up_write(&current->mm->mmap_sem);
-		if (!textpos || IS_ERR_VALUE(textpos)) {
+		if (!textpos  || textpos >= (unsigned long) -4096) {
 			if (!textpos)
 				textpos = (unsigned long) -ENOMEM;
 			printk("Unable to mmap process text, errno %d\n", (int)-textpos);
@@ -559,7 +561,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 			PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE, 0);
 		up_write(&current->mm->mmap_sem);
 
-		if (realdatastart == 0 || IS_ERR_VALUE(realdatastart)) {
+		if (realdatastart == 0 || realdatastart >= (unsigned long)-4096) {
 			if (!realdatastart)
 				realdatastart = (unsigned long) -ENOMEM;
 			printk("Unable to allocate RAM for process data, errno %d\n",
@@ -586,7 +588,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 			result = bprm->file->f_op->read(bprm->file, (char *) datapos,
 					data_len + (relocs * sizeof(unsigned long)), &fpos);
 		}
-		if (IS_ERR_VALUE(result)) {
+		if (result >= (unsigned long)-4096) {
 			printk("Unable to read data+bss, errno %d\n", (int)-result);
 			do_munmap(current->mm, textpos, text_len);
 			do_munmap(current->mm, realdatastart, data_len + extra);
@@ -606,7 +608,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 			PROT_READ | PROT_EXEC | PROT_WRITE, MAP_PRIVATE, 0);
 		up_write(&current->mm->mmap_sem);
 
-		if (!textpos || IS_ERR_VALUE(textpos)) {
+		if (!textpos  || textpos >= (unsigned long) -4096) {
 			if (!textpos)
 				textpos = (unsigned long) -ENOMEM;
 			printk("Unable to allocate RAM for process text/data, errno %d\n",
@@ -640,7 +642,7 @@ static int load_flat_file(struct linux_binprm * bprm,
 			fpos = 0;
 			result = bprm->file->f_op->read(bprm->file,
 					(char *) textpos, text_len, &fpos);
-			if (!IS_ERR_VALUE(result))
+			if (result < (unsigned long) -4096)
 				result = decompress_exec(bprm, text_len, (char *) datapos,
 						 data_len + (relocs * sizeof(unsigned long)), 0);
 		}
@@ -650,13 +652,13 @@ static int load_flat_file(struct linux_binprm * bprm,
 			fpos = 0;
 			result = bprm->file->f_op->read(bprm->file,
 					(char *) textpos, text_len, &fpos);
-			if (!IS_ERR_VALUE(result)) {
+			if (result < (unsigned long) -4096) {
 				fpos = ntohl(hdr->data_start);
 				result = bprm->file->f_op->read(bprm->file, (char *) datapos,
 					data_len + (relocs * sizeof(unsigned long)), &fpos);
 			}
 		}
-		if (IS_ERR_VALUE(result)) {
+		if (result >= (unsigned long)-4096) {
 			printk("Unable to read code+data+bss, errno %d\n",(int)-result);
 			do_munmap(current->mm, textpos, text_len + data_len + extra +
 				MAX_SHARED_LIBS * sizeof(unsigned long));
@@ -834,7 +836,7 @@ static int load_flat_shared_library(int id, struct lib_info *libs)
 
 	res = prepare_binprm(&bprm);
 
-	if (!IS_ERR_VALUE(res))
+	if (res <= (unsigned long)-4096)
 		res = load_flat_file(&bprm, libs, id, NULL);
 
 	abort_creds(bprm.cred);
@@ -879,7 +881,7 @@ static int load_flat_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	stack_len += FLAT_DATA_ALIGN - 1;  /* reserve for upcoming alignment */
 	
 	res = load_flat_file(bprm, &libinfo, 0, &stack_len);
-	if (IS_ERR_VALUE(res))
+	if (res > (unsigned long)-4096)
 		return res;
 	
 	/* Update data segment pointers for all libraries */

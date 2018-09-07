@@ -53,8 +53,7 @@ void hostap_dump_tx_80211(const char *name, struct sk_buff *skb)
 /* hard_start_xmit function for data interfaces (wlan#, wlan#wds#, wlan#sta)
  * Convert Ethernet header into a suitable IEEE 802.11 header depending on
  * device configuration. */
-netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
-				   struct net_device *dev)
+int hostap_data_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
@@ -76,7 +75,7 @@ netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
 		printk(KERN_DEBUG "%s: hostap_data_start_xmit: short skb "
 		       "(len=%d)\n", dev->name, skb->len);
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	if (local->ddev != dev) {
@@ -90,14 +89,14 @@ netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
 			printk(KERN_DEBUG "%s: prism2_tx: trying to use "
 			       "AP device with Ethernet net dev\n", dev->name);
 			kfree_skb(skb);
-			return NETDEV_TX_OK;
+			return 0;
 		}
 	} else {
 		if (local->iw_mode == IW_MODE_REPEAT) {
 			printk(KERN_DEBUG "%s: prism2_tx: trying to use "
 			       "non-WDS link in Repeater mode\n", dev->name);
 			kfree_skb(skb);
-			return NETDEV_TX_OK;
+			return 0;
 		} else if (local->iw_mode == IW_MODE_INFRA &&
 			   (local->wds_type & HOSTAP_WDS_AP_CLIENT) &&
 			   memcmp(skb->data + ETH_ALEN, dev->dev_addr,
@@ -211,13 +210,13 @@ netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
 		skb = skb_unshare(skb, GFP_ATOMIC);
 		if (skb == NULL) {
 			iface->stats.tx_dropped++;
-			return NETDEV_TX_OK;
+			return 0;
 		}
 		if (pskb_expand_head(skb, need_headroom, need_tailroom,
 				     GFP_ATOMIC)) {
 			kfree_skb(skb);
 			iface->stats.tx_dropped++;
-			return NETDEV_TX_OK;
+			return 0;
 		}
 	} else if (skb_headroom(skb) < need_headroom) {
 		struct sk_buff *tmp = skb;
@@ -225,13 +224,13 @@ netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
 		kfree_skb(tmp);
 		if (skb == NULL) {
 			iface->stats.tx_dropped++;
-			return NETDEV_TX_OK;
+			return 0;
 		}
 	} else {
 		skb = skb_unshare(skb, GFP_ATOMIC);
 		if (skb == NULL) {
 			iface->stats.tx_dropped++;
-			return NETDEV_TX_OK;
+			return 0;
 		}
 	}
 
@@ -257,13 +256,12 @@ netdev_tx_t hostap_data_start_xmit(struct sk_buff *skb,
 	/* Send IEEE 802.11 encapsulated frame using the master radio device */
 	skb->dev = local->dev;
 	dev_queue_xmit(skb);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 
 /* hard_start_xmit function for hostapd wlan#ap interfaces */
-netdev_tx_t hostap_mgmt_start_xmit(struct sk_buff *skb,
-				   struct net_device *dev)
+int hostap_mgmt_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
@@ -278,7 +276,7 @@ netdev_tx_t hostap_mgmt_start_xmit(struct sk_buff *skb,
 		printk(KERN_DEBUG "%s: hostap_mgmt_start_xmit: short skb "
 		       "(len=%d)\n", dev->name, skb->len);
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	iface->stats.tx_packets++;
@@ -303,7 +301,7 @@ netdev_tx_t hostap_mgmt_start_xmit(struct sk_buff *skb,
 	/* Send IEEE 802.11 encapsulated frame using the master radio device */
 	skb->dev = local->dev;
 	dev_queue_xmit(skb);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 
@@ -375,12 +373,11 @@ static struct sk_buff * hostap_tx_encrypt(struct sk_buff *skb,
 /* hard_start_xmit function for master radio interface wifi#.
  * AP processing (TX rate control, power save buffering, etc.).
  * Use hardware TX function to send the frame. */
-netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
-				     struct net_device *dev)
+int hostap_master_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	netdev_tx_t ret = NETDEV_TX_BUSY;
+	int ret = NETDEV_TX_BUSY;
 	u16 fc;
 	struct hostap_tx_data tx;
 	ap_tx_ret tx_ret;
@@ -399,7 +396,7 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 		printk(KERN_DEBUG "%s: invalid skb->cb magic (0x%08x, "
 		       "expected 0x%08x)\n",
 		       dev->name, meta->magic, HOSTAP_SKB_TX_DATA_MAGIC);
-		ret = NETDEV_TX_OK;
+		ret = 0;
 		iface->stats.tx_dropped++;
 		goto fail;
 	}
@@ -417,7 +414,7 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 	if (skb->len < 24) {
 		printk(KERN_DEBUG "%s: hostap_master_start_xmit: short skb "
 		       "(len=%d)\n", dev->name, skb->len);
-		ret = NETDEV_TX_OK;
+		ret = 0;
 		iface->stats.tx_dropped++;
 		goto fail;
 	}
@@ -444,13 +441,13 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 			       dev->name, meta->ethertype);
 			hostap_dump_tx_80211(dev->name, skb);
 
-			ret = NETDEV_TX_OK; /* drop packet */
+			ret = 0; /* drop packet */
 			iface->stats.tx_dropped++;
 			goto fail;
 		}
 		break;
 	case AP_TX_DROP:
-		ret = NETDEV_TX_OK; /* drop packet */
+		ret = 0; /* drop packet */
 		iface->stats.tx_dropped++;
 		goto fail;
 	case AP_TX_RETRY:
@@ -458,7 +455,7 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 	case AP_TX_BUFFERED:
 		/* do not free skb here, it will be freed when the
 		 * buffered frame is sent/timed out */
-		ret = NETDEV_TX_OK;
+		ret = 0;
 		goto tx_exit;
 	}
 
@@ -504,7 +501,7 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 			       "frame (drop_unencrypted=1)\n", dev->name);
 		}
 		iface->stats.tx_dropped++;
-		ret = NETDEV_TX_OK;
+		ret = 0;
 		goto fail;
 	}
 
@@ -513,7 +510,7 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 		if (skb == NULL) {
 			printk(KERN_DEBUG "%s: TX - encryption failed\n",
 			       dev->name);
-			ret = NETDEV_TX_OK;
+			ret = 0;
 			goto fail;
 		}
 		meta = (struct hostap_skb_tx_data *) skb->cb;
@@ -522,23 +519,23 @@ netdev_tx_t hostap_master_start_xmit(struct sk_buff *skb,
 			       "expected 0x%08x) after hostap_tx_encrypt\n",
 			       dev->name, meta->magic,
 			       HOSTAP_SKB_TX_DATA_MAGIC);
-			ret = NETDEV_TX_OK;
+			ret = 0;
 			iface->stats.tx_dropped++;
 			goto fail;
 		}
 	}
 
 	if (local->func->tx == NULL || local->func->tx(skb, dev)) {
-		ret = NETDEV_TX_OK;
+		ret = 0;
 		iface->stats.tx_dropped++;
 	} else {
-		ret = NETDEV_TX_OK;
+		ret = 0;
 		iface->stats.tx_packets++;
 		iface->stats.tx_bytes += skb->len;
 	}
 
  fail:
-	if (ret == NETDEV_TX_OK && skb)
+	if (!ret && skb)
 		dev_kfree_skb(skb);
  tx_exit:
 	if (tx.sta_ptr)

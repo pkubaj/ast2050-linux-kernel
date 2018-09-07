@@ -276,7 +276,7 @@ static int __devinit of_pci_phb_probe(struct of_device *dev,
 #endif /* CONFIG_EEH */
 
 	/* Scan the bus */
-	pcibios_scan_phb(phb, dev->node);
+	scan_phb(phb);
 	if (phb->bus == NULL)
 		return -ENXIO;
 

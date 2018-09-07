@@ -56,12 +56,12 @@ int sysctl_lasatstring(ctl_table *table,
 
 
 /* And the same for proc */
-int proc_dolasatstring(ctl_table *table, int write,
+int proc_dolasatstring(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
 
-	r = proc_dostring(table, write, buffer, lenp, ppos);
+	r = proc_dostring(table, write, filp, buffer, lenp, ppos);
 	if ((!write) || r)
 		return r;
 
@@ -71,12 +71,12 @@ int proc_dolasatstring(ctl_table *table, int write,
 }
 
 /* proc function to write EEPROM after changing int entry */
-int proc_dolasatint(ctl_table *table, int write,
+int proc_dolasatint(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
 
-	r = proc_dointvec(table, write, buffer, lenp, ppos);
+	r = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if ((!write) || r)
 		return r;
 
@@ -89,20 +89,18 @@ int proc_dolasatint(ctl_table *table, int write,
 static int rtctmp;
 
 /* proc function to read/write RealTime Clock */
-int proc_dolasatrtc(ctl_table *table, int write,
+int proc_dolasatrtc(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct timespec ts;
 	int r;
 
 	if (!write) {
-		read_persistent_clock(&ts);
-		rtctmp = ts.tv_sec;
+		rtctmp = read_persistent_clock();
 		/* check for time < 0 and set to 0 */
 		if (rtctmp < 0)
 			rtctmp = 0;
 	}
-	r = proc_dointvec(table, write, buffer, lenp, ppos);
+	r = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if (r)
 		return r;
 
@@ -136,11 +134,9 @@ int sysctl_lasat_rtc(ctl_table *table,
 		    void *oldval, size_t *oldlenp,
 		    void *newval, size_t newlen)
 {
-	struct timespec ts;
 	int r;
 
-	read_persistent_clock(&ts);
-	rtctmp = ts.tv_sec;
+	rtctmp = read_persistent_clock();
 	if (rtctmp < 0)
 		rtctmp = 0;
 	r = sysctl_intvec(table, oldval, oldlenp, newval, newlen);
@@ -154,7 +150,7 @@ int sysctl_lasat_rtc(ctl_table *table,
 #endif
 
 #ifdef CONFIG_INET
-int proc_lasat_ip(ctl_table *table, int write,
+int proc_lasat_ip(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	unsigned int ip;
@@ -231,12 +227,12 @@ static int sysctl_lasat_prid(ctl_table *table,
 	return 0;
 }
 
-int proc_lasat_prid(ctl_table *table, int write,
+int proc_lasat_prid(ctl_table *table, int write, struct file *filp,
 		       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int r;
 
-	r = proc_dointvec(table, write, buffer, lenp, ppos);
+	r = proc_dointvec(table, write, filp, buffer, lenp, ppos);
 	if (r < 0)
 		return r;
 	if (write) {

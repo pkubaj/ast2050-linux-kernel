@@ -15,7 +15,6 @@
 #include <linux/completion.h>
 #include <linux/sched.h>
 #include <linux/freezer.h>
-#include <linux/kthread.h>
 #include "nodelist.h"
 
 
@@ -32,7 +31,7 @@ void jffs2_garbage_collect_trigger(struct jffs2_sb_info *c)
 /* This must only ever be called when no GC thread is currently running */
 int jffs2_start_garbage_collect_thread(struct jffs2_sb_info *c)
 {
-	struct task_struct *tsk;
+	pid_t pid;
 	int ret = 0;
 
 	BUG_ON(c->gc_task);
@@ -40,16 +39,15 @@ int jffs2_start_garbage_collect_thread(struct jffs2_sb_info *c)
 	init_completion(&c->gc_thread_start);
 	init_completion(&c->gc_thread_exit);
 
-	tsk = kthread_run(jffs2_garbage_collect_thread, c, "jffs2_gcd_mtd%d", c->mtd->index);
-	if (IS_ERR(tsk)) {
-		printk(KERN_WARNING "fork failed for JFFS2 garbage collect thread: %ld\n", -PTR_ERR(tsk));
+	pid = kernel_thread(jffs2_garbage_collect_thread, c, CLONE_FS|CLONE_FILES);
+	if (pid < 0) {
+		printk(KERN_WARNING "fork failed for JFFS2 garbage collect thread: %d\n", -pid);
 		complete(&c->gc_thread_exit);
-		ret = PTR_ERR(tsk);
+		ret = pid;
 	} else {
 		/* Wait for it... */
-		D1(printk(KERN_DEBUG "JFFS2: Garbage collect thread is pid %d\n", tsk->pid));
+		D1(printk(KERN_DEBUG "JFFS2: Garbage collect thread is pid %d\n", pid));
 		wait_for_completion(&c->gc_thread_start);
-		ret = tsk->pid;
 	}
 
 	return ret;
@@ -73,6 +71,7 @@ static int jffs2_garbage_collect_thread(void *_c)
 {
 	struct jffs2_sb_info *c = _c;
 
+	daemonize("jffs2_gcd_mtd%d", c->mtd->index);
 	allow_signal(SIGKILL);
 	allow_signal(SIGSTOP);
 	allow_signal(SIGCONT);
@@ -107,11 +106,6 @@ static int jffs2_garbage_collect_thread(void *_c)
 		 * inode in with read_inode() is much preferable to having
 		 * the GC thread get there first. */
 		schedule_timeout_interruptible(msecs_to_jiffies(50));
-
-		if (kthread_should_stop()) {
-			D1(printk(KERN_DEBUG "jffs2_garbage_collect_thread():  kthread_stop() called.\n"));
-			goto die;
-		}
 
 		/* Put_super will send a SIGKILL and then wait on the sem.
 		 */

@@ -58,7 +58,8 @@ struct cisco_state {
 	spinlock_t lock;
 	unsigned long last_poll;
 	int up;
-	u32 txseq; /* TX sequence number, 0 = none */
+	int request_sent;
+	u32 txseq; /* TX sequence number */
 	u32 rxseq; /* RX sequence number */
 };
 
@@ -162,7 +163,6 @@ static int cisco_rx(struct sk_buff *skb)
 	struct cisco_packet *cisco_data;
 	struct in_device *in_dev;
 	__be32 addr, mask;
-	u32 ack;
 
 	if (skb->len < sizeof(struct hdlc_header))
 		goto rx_error;
@@ -223,10 +223,8 @@ static int cisco_rx(struct sk_buff *skb)
 		case CISCO_KEEPALIVE_REQ:
 			spin_lock(&st->lock);
 			st->rxseq = ntohl(cisco_data->par1);
-			ack = ntohl(cisco_data->par2);
-			if (ack && (ack == st->txseq ||
-				    /* our current REQ may be in transit */
-				    ack == st->txseq - 1)) {
+			if (st->request_sent &&
+			    ntohl(cisco_data->par2) == st->txseq) {
 				st->last_poll = jiffies;
 				if (!st->up) {
 					u32 sec, min, hrs, days;
@@ -277,6 +275,7 @@ static void cisco_timer(unsigned long arg)
 
 	cisco_keepalive_send(dev, CISCO_KEEPALIVE_REQ, htonl(++st->txseq),
 			     htonl(st->rxseq));
+	st->request_sent = 1;
 	spin_unlock(&st->lock);
 
 	st->timer.expires = jiffies + st->settings.interval * HZ;
@@ -294,7 +293,9 @@ static void cisco_start(struct net_device *dev)
 	unsigned long flags;
 
 	spin_lock_irqsave(&st->lock, flags);
-	st->up = st->txseq = st->rxseq = 0;
+	st->up = 0;
+	st->request_sent = 0;
+	st->txseq = st->rxseq = 0;
 	spin_unlock_irqrestore(&st->lock, flags);
 
 	init_timer(&st->timer);
@@ -316,7 +317,8 @@ static void cisco_stop(struct net_device *dev)
 
 	spin_lock_irqsave(&st->lock, flags);
 	netif_dormant_on(dev);
-	st->up = st->txseq = 0;
+	st->up = 0;
+	st->request_sent = 0;
 	spin_unlock_irqrestore(&st->lock, flags);
 }
 

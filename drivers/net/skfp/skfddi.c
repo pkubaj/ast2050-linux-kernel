@@ -73,7 +73,6 @@ static const char * const boot_msg =
 
 /* Include files */
 
-#include <linux/capability.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -108,8 +107,7 @@ static void skfp_ctl_set_multicast_list(struct net_device *dev);
 static void skfp_ctl_set_multicast_list_wo_lock(struct net_device *dev);
 static int skfp_ctl_set_mac_address(struct net_device *dev, void *addr);
 static int skfp_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
-static netdev_tx_t skfp_send_pkt(struct sk_buff *skb,
-				       struct net_device *dev);
+static int skfp_send_pkt(struct sk_buff *skb, struct net_device *dev);
 static void send_queued_packets(struct s_smc *smc);
 static void CheckSourceAddress(unsigned char *frame, unsigned char *hw_addr);
 static void ResetAdapter(struct s_smc *smc);
@@ -1058,8 +1056,7 @@ static int skfp_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
  * Side Effects:
  *   None
  */
-static netdev_tx_t skfp_send_pkt(struct sk_buff *skb,
-				       struct net_device *dev)
+static int skfp_send_pkt(struct sk_buff *skb, struct net_device *dev)
 {
 	struct s_smc *smc = netdev_priv(dev);
 	skfddi_priv *bp = &smc->os;
@@ -1080,7 +1077,7 @@ static netdev_tx_t skfp_send_pkt(struct sk_buff *skb,
 		// dequeue packets from xmt queue and send them
 		netif_start_queue(dev);
 		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;	/* return "success" */
+		return (0);	/* return "success" */
 	}
 	if (bp->QueueSkb == 0) {	// return with tbusy set: queue full
 
@@ -1094,7 +1091,7 @@ static netdev_tx_t skfp_send_pkt(struct sk_buff *skb,
 		netif_stop_queue(dev);
 	}
 	dev->trans_start = jiffies;
-	return NETDEV_TX_OK;
+	return 0;
 
 }				// skfp_send_pkt
 

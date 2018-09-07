@@ -139,7 +139,7 @@ static struct attribute_group sys_dmi_attribute_group = {
 	.attrs = sys_dmi_attributes,
 };
 
-static const struct attribute_group* sys_dmi_attribute_groups[] = {
+static struct attribute_group* sys_dmi_attribute_groups[] = {
 	&sys_dmi_attribute_group,
 	NULL
 };

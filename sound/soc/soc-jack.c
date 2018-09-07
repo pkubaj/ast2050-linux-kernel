@@ -73,15 +73,14 @@ void snd_soc_jack_report(struct snd_soc_jack *jack, int status, int mask)
 	oldstatus = jack->status;
 
 	jack->status &= ~mask;
-	jack->status |= status & mask;
+	jack->status |= status;
 
-	/* The DAPM sync is expensive enough to be worth skipping.
-	 * However, empty mask means pin synchronization is desired. */
-	if (mask && (jack->status == oldstatus))
+	/* The DAPM sync is expensive enough to be worth skipping */
+	if (jack->status == oldstatus)
 		goto out;
 
 	list_for_each_entry(pin, &jack->pins, list) {
-		enable = pin->mask & jack->status;
+		enable = pin->mask & status;
 
 		if (pin->invert)
 			enable = !enable;
@@ -94,7 +93,7 @@ void snd_soc_jack_report(struct snd_soc_jack *jack, int status, int mask)
 
 	snd_soc_dapm_sync(codec);
 
-	snd_jack_report(jack->jack, jack->status);
+	snd_jack_report(jack->jack, status);
 
 out:
 	mutex_unlock(&codec->mutex);
@@ -221,9 +220,6 @@ int snd_soc_jack_add_gpios(struct snd_soc_jack *jack, int count,
 		if (ret)
 			goto err;
 
-		INIT_WORK(&gpios[i].work, gpio_work);
-		gpios[i].jack = jack;
-
 		ret = request_irq(gpio_to_irq(gpios[i].gpio),
 				gpio_handler,
 				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
@@ -232,13 +228,8 @@ int snd_soc_jack_add_gpios(struct snd_soc_jack *jack, int count,
 		if (ret)
 			goto err;
 
-#ifdef CONFIG_GPIO_SYSFS
-		/* Expose GPIO value over sysfs for diagnostic purposes */
-		gpio_export(gpios[i].gpio, false);
-#endif
-
-		/* Update initial jack status */
-		snd_soc_jack_gpio_detect(&gpios[i]);
+		INIT_WORK(&gpios[i].work, gpio_work);
+		gpios[i].jack = jack;
 	}
 
 	return 0;
@@ -267,9 +258,6 @@ void snd_soc_jack_free_gpios(struct snd_soc_jack *jack, int count,
 	int i;
 
 	for (i = 0; i < count; i++) {
-#ifdef CONFIG_GPIO_SYSFS
-		gpio_unexport(gpios[i].gpio);
-#endif
 		free_irq(gpio_to_irq(gpios[i].gpio), &gpios[i]);
 		gpio_free(gpios[i].gpio);
 		gpios[i].jack = NULL;

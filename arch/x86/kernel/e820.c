@@ -115,7 +115,7 @@ static void __init __e820_add_region(struct e820map *e820x, u64 start, u64 size,
 {
 	int x = e820x->nr_map;
 
-	if (x >= ARRAY_SIZE(e820x->map)) {
+	if (x == ARRAY_SIZE(e820x->map)) {
 		printk(KERN_ERR "Ooops! Too many entries in the memory map!\n");
 		return;
 	}
@@ -1236,21 +1236,15 @@ static int __init parse_memopt(char *p)
 	if (!p)
 		return -EINVAL;
 
-	if (!strcmp(p, "nopentium")) {
 #ifdef CONFIG_X86_32
+	if (!strcmp(p, "nopentium")) {
 		setup_clear_cpu_cap(X86_FEATURE_PSE);
 		return 0;
-#else
-		printk(KERN_WARNING "mem=nopentium ignored! (only supported on x86_32)\n");
-		return -EINVAL;
-#endif
 	}
+#endif
 
 	userdef = 1;
 	mem_size = memparse(p, &p);
-	/* don't remove all of memory when handling "mem={invalid}" param */
-	if (mem_size == 0)
-		return -EINVAL;
 	e820_remove_range(mem_size, ULLONG_MAX - mem_size, E820_RAM, 1);
 
 	return 0;
@@ -1337,7 +1331,7 @@ void __init e820_reserve_resources(void)
 	struct resource *res;
 	u64 end;
 
-	res = alloc_bootmem(sizeof(struct resource) * e820.nr_map);
+	res = alloc_bootmem_low(sizeof(struct resource) * e820.nr_map);
 	e820_res = res;
 	for (i = 0; i < e820.nr_map; i++) {
 		end = e820.map[i].addr + e820.map[i].size - 1;
@@ -1461,11 +1455,28 @@ char *__init default_machine_specific_memory_setup(void)
 	return who;
 }
 
+char *__init __attribute__((weak)) machine_specific_memory_setup(void)
+{
+	if (x86_quirks->arch_memory_setup) {
+		char *who = x86_quirks->arch_memory_setup();
+
+		if (who)
+			return who;
+	}
+	return default_machine_specific_memory_setup();
+}
+
+/* Overridden in paravirt.c if CONFIG_PARAVIRT */
+char * __init __attribute__((weak)) memory_setup(void)
+{
+	return machine_specific_memory_setup();
+}
+
 void __init setup_memory_map(void)
 {
 	char *who;
 
-	who = x86_init.resources.memory_setup();
+	who = memory_setup();
 	memcpy(&e820_saved, &e820, sizeof(struct e820map));
 	printk(KERN_INFO "BIOS-provided physical RAM map:\n");
 	e820_print_map(who);

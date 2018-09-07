@@ -114,7 +114,7 @@ out:
 	return rc;
 }
 
-int jfs_check_acl(struct inode *inode, int mask)
+static int jfs_check_acl(struct inode *inode, int mask)
 {
 	struct posix_acl *acl = jfs_get_acl(inode, ACL_TYPE_ACCESS);
 
@@ -127,6 +127,11 @@ int jfs_check_acl(struct inode *inode, int mask)
 	}
 
 	return -EAGAIN;
+}
+
+int jfs_permission(struct inode *inode, int mask)
+{
+	return generic_permission(inode, mask, jfs_check_acl);
 }
 
 int jfs_init_acl(tid_t tid, struct inode *inode, struct inode *dir)

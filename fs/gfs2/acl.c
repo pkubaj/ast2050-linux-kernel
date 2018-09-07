@@ -12,7 +12,6 @@
 #include <linux/spinlock.h>
 #include <linux/completion.h>
 #include <linux/buffer_head.h>
-#include <linux/xattr.h>
 #include <linux/posix_acl.h>
 #include <linux/posix_acl_xattr.h>
 #include <linux/gfs2_ondisk.h>
@@ -20,27 +19,94 @@
 #include "gfs2.h"
 #include "incore.h"
 #include "acl.h"
-#include "xattr.h"
+#include "eaops.h"
+#include "eattr.h"
 #include "glock.h"
 #include "inode.h"
 #include "meta_io.h"
 #include "trans.h"
 #include "util.h"
 
-static int acl_get(struct gfs2_inode *ip, const char *name,
-		   struct posix_acl **acl, struct gfs2_ea_location *el,
-		   char **datap, unsigned int *lenp)
+#define ACL_ACCESS 1
+#define ACL_DEFAULT 0
+
+int gfs2_acl_validate_set(struct gfs2_inode *ip, int access,
+		      struct gfs2_ea_request *er,
+		      int *remove, mode_t *mode)
 {
-	char *data;
-	unsigned int len;
+	struct posix_acl *acl;
 	int error;
 
-	el->el_bh = NULL;
+	error = gfs2_acl_validate_remove(ip, access);
+	if (error)
+		return error;
+
+	if (!er->er_data)
+		return -EINVAL;
+
+	acl = posix_acl_from_xattr(er->er_data, er->er_data_len);
+	if (IS_ERR(acl))
+		return PTR_ERR(acl);
+	if (!acl) {
+		*remove = 1;
+		return 0;
+	}
+
+	error = posix_acl_valid(acl);
+	if (error)
+		goto out;
+
+	if (access) {
+		error = posix_acl_equiv_mode(acl, mode);
+		if (!error)
+			*remove = 1;
+		else if (error > 0)
+			error = 0;
+	}
+
+out:
+	posix_acl_release(acl);
+	return error;
+}
+
+int gfs2_acl_validate_remove(struct gfs2_inode *ip, int access)
+{
+	if (!GFS2_SB(&ip->i_inode)->sd_args.ar_posix_acl)
+		return -EOPNOTSUPP;
+	if (!is_owner_or_cap(&ip->i_inode))
+		return -EPERM;
+	if (S_ISLNK(ip->i_inode.i_mode))
+		return -EOPNOTSUPP;
+	if (!access && !S_ISDIR(ip->i_inode.i_mode))
+		return -EACCES;
+
+	return 0;
+}
+
+static int acl_get(struct gfs2_inode *ip, int access, struct posix_acl **acl,
+		   struct gfs2_ea_location *el, char **data, unsigned int *len)
+{
+	struct gfs2_ea_request er;
+	struct gfs2_ea_location el_this;
+	int error;
 
 	if (!ip->i_eattr)
 		return 0;
 
-	error = gfs2_ea_find(ip, GFS2_EATYPE_SYS, name, el);
+	memset(&er, 0, sizeof(struct gfs2_ea_request));
+	if (access) {
+		er.er_name = GFS2_POSIX_ACL_ACCESS;
+		er.er_name_len = GFS2_POSIX_ACL_ACCESS_LEN;
+	} else {
+		er.er_name = GFS2_POSIX_ACL_DEFAULT;
+		er.er_name_len = GFS2_POSIX_ACL_DEFAULT_LEN;
+	}
+	er.er_type = GFS2_EATYPE_SYS;
+
+	if (!el)
+		el = &el_this;
+
+	error = gfs2_ea_find(ip, &er, el);
 	if (error)
 		return error;
 	if (!el->el_ea)
@@ -48,31 +114,32 @@ static int acl_get(struct gfs2_inode *ip, const char *name,
 	if (!GFS2_EA_DATA_LEN(el->el_ea))
 		goto out;
 
-	len = GFS2_EA_DATA_LEN(el->el_ea);
-	data = kmalloc(len, GFP_NOFS);
+	er.er_data_len = GFS2_EA_DATA_LEN(el->el_ea);
+	er.er_data = kmalloc(er.er_data_len, GFP_NOFS);
 	error = -ENOMEM;
-	if (!data)
+	if (!er.er_data)
 		goto out;
 
-	error = gfs2_ea_get_copy(ip, el, data, len);
-	if (error < 0)
+	error = gfs2_ea_get_copy(ip, el, er.er_data);
+	if (error)
 		goto out_kfree;
-	error = 0;
 
 	if (acl) {
-		*acl = posix_acl_from_xattr(data, len);
+		*acl = posix_acl_from_xattr(er.er_data, er.er_data_len);
 		if (IS_ERR(*acl))
 			error = PTR_ERR(*acl);
 	}
 
 out_kfree:
-	if (error || !datap) {
-		kfree(data);
-	} else {
-		*datap = data;
-		*lenp = len;
+	if (error || !data)
+		kfree(er.er_data);
+	else {
+		*data = er.er_data;
+		*len = er.er_data_len;
 	}
 out:
+	if (error || el == &el_this)
+		brelse(el->el_bh);
 	return error;
 }
 
@@ -86,12 +153,10 @@ out:
 
 int gfs2_check_acl(struct inode *inode, int mask)
 {
-	struct gfs2_ea_location el;
 	struct posix_acl *acl = NULL;
 	int error;
 
-	error = acl_get(GFS2_I(inode), GFS2_POSIX_ACL_ACCESS, &acl, &el, NULL, NULL);
-	brelse(el.el_bh);
+	error = acl_get(GFS2_I(inode), ACL_ACCESS, &acl, NULL, NULL, NULL);
 	if (error)
 		return error;
 
@@ -131,12 +196,10 @@ static int munge_mode(struct gfs2_inode *ip, mode_t mode)
 
 int gfs2_acl_create(struct gfs2_inode *dip, struct gfs2_inode *ip)
 {
-	struct gfs2_ea_location el;
 	struct gfs2_sbd *sdp = GFS2_SB(&dip->i_inode);
 	struct posix_acl *acl = NULL, *clone;
+	struct gfs2_ea_request er;
 	mode_t mode = ip->i_inode.i_mode;
-	char *data = NULL;
-	unsigned int len;
 	int error;
 
 	if (!sdp->sd_args.ar_posix_acl)
@@ -144,8 +207,11 @@ int gfs2_acl_create(struct gfs2_inode *dip, struct gfs2_inode *ip)
 	if (S_ISLNK(ip->i_inode.i_mode))
 		return 0;
 
-	error = acl_get(dip, GFS2_POSIX_ACL_DEFAULT, &acl, &el, &data, &len);
-	brelse(el.el_bh);
+	memset(&er, 0, sizeof(struct gfs2_ea_request));
+	er.er_type = GFS2_EATYPE_SYS;
+
+	error = acl_get(dip, ACL_DEFAULT, &acl, NULL,
+			&er.er_data, &er.er_data_len);
 	if (error)
 		return error;
 	if (!acl) {
@@ -163,8 +229,9 @@ int gfs2_acl_create(struct gfs2_inode *dip, struct gfs2_inode *ip)
 	acl = clone;
 
 	if (S_ISDIR(ip->i_inode.i_mode)) {
-		error = gfs2_xattr_set(&ip->i_inode, GFS2_EATYPE_SYS,
-				       GFS2_POSIX_ACL_DEFAULT, data, len, 0);
+		er.er_name = GFS2_POSIX_ACL_DEFAULT;
+		er.er_name_len = GFS2_POSIX_ACL_DEFAULT_LEN;
+		error = gfs2_system_eaops.eo_set(ip, &er);
 		if (error)
 			goto out;
 	}
@@ -172,19 +239,21 @@ int gfs2_acl_create(struct gfs2_inode *dip, struct gfs2_inode *ip)
 	error = posix_acl_create_masq(acl, &mode);
 	if (error < 0)
 		goto out;
-	if (error == 0)
-		goto munge;
+	if (error > 0) {
+		er.er_name = GFS2_POSIX_ACL_ACCESS;
+		er.er_name_len = GFS2_POSIX_ACL_ACCESS_LEN;
+		posix_acl_to_xattr(acl, er.er_data, er.er_data_len);
+		er.er_mode = mode;
+		er.er_flags = GFS2_ERF_MODE;
+		error = gfs2_system_eaops.eo_set(ip, &er);
+		if (error)
+			goto out;
+	} else
+		munge_mode(ip, mode);
 
-	posix_acl_to_xattr(acl, data, len);
-	error = gfs2_xattr_set(&ip->i_inode, GFS2_EATYPE_SYS,
-			       GFS2_POSIX_ACL_ACCESS, data, len, 0);
-	if (error)
-		goto out;
-munge:
-	error = munge_mode(ip, mode);
 out:
 	posix_acl_release(acl);
-	kfree(data);
+	kfree(er.er_data);
 	return error;
 }
 
@@ -196,9 +265,9 @@ int gfs2_acl_chmod(struct gfs2_inode *ip, struct iattr *attr)
 	unsigned int len;
 	int error;
 
-	error = acl_get(ip, GFS2_POSIX_ACL_ACCESS, &acl, &el, &data, &len);
+	error = acl_get(ip, ACL_ACCESS, &acl, &el, &data, &len);
 	if (error)
-		goto out_brelse;
+		return error;
 	if (!acl)
 		return gfs2_setattr_simple(ip, attr);
 
@@ -217,123 +286,8 @@ int gfs2_acl_chmod(struct gfs2_inode *ip, struct iattr *attr)
 
 out:
 	posix_acl_release(acl);
-	kfree(data);
-out_brelse:
 	brelse(el.el_bh);
+	kfree(data);
 	return error;
 }
-
-static int gfs2_acl_type(const char *name)
-{
-	if (strcmp(name, GFS2_POSIX_ACL_ACCESS) == 0)
-		return ACL_TYPE_ACCESS;
-	if (strcmp(name, GFS2_POSIX_ACL_DEFAULT) == 0)
-		return ACL_TYPE_DEFAULT;
-	return -EINVAL;
-}
-
-static int gfs2_xattr_system_get(struct inode *inode, const char *name,
-				 void *buffer, size_t size)
-{
-	int type;
-
-	type = gfs2_acl_type(name);
-	if (type < 0)
-		return type;
-
-	return gfs2_xattr_get(inode, GFS2_EATYPE_SYS, name, buffer, size);
-}
-
-static int gfs2_set_mode(struct inode *inode, mode_t mode)
-{
-	int error = 0;
-
-	if (mode != inode->i_mode) {
-		struct iattr iattr;
-
-		iattr.ia_valid = ATTR_MODE;
-		iattr.ia_mode = mode;
-
-		error = gfs2_setattr_simple(GFS2_I(inode), &iattr);
-	}
-
-	return error;
-}
-
-static int gfs2_xattr_system_set(struct inode *inode, const char *name,
-				 const void *value, size_t size, int flags)
-{
-	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	struct posix_acl *acl = NULL;
-	int error = 0, type;
-
-	if (!sdp->sd_args.ar_posix_acl)
-		return -EOPNOTSUPP;
-
-	type = gfs2_acl_type(name);
-	if (type < 0)
-		return type;
-	if (flags & XATTR_CREATE)
-		return -EINVAL;
-	if (type == ACL_TYPE_DEFAULT && !S_ISDIR(inode->i_mode))
-		return value ? -EACCES : 0;
-	if ((current_fsuid() != inode->i_uid) && !capable(CAP_FOWNER))
-		return -EPERM;
-	if (S_ISLNK(inode->i_mode))
-		return -EOPNOTSUPP;
-
-	if (!value)
-		goto set_acl;
-
-	acl = posix_acl_from_xattr(value, size);
-	if (!acl) {
-		/*
-		 * acl_set_file(3) may request that we set default ACLs with
-		 * zero length -- defend (gracefully) against that here.
-		 */
-		goto out;
-	}
-	if (IS_ERR(acl)) {
-		error = PTR_ERR(acl);
-		goto out;
-	}
-
-	error = posix_acl_valid(acl);
-	if (error)
-		goto out_release;
-
-	error = -EINVAL;
-	if (acl->a_count > GFS2_ACL_MAX_ENTRIES)
-		goto out_release;
-
-	if (type == ACL_TYPE_ACCESS) {
-		mode_t mode = inode->i_mode;
-		error = posix_acl_equiv_mode(acl, &mode);
-
-		if (error <= 0) {
-			posix_acl_release(acl);
-			acl = NULL;
-
-			if (error < 0)
-				return error;
-		}
-
-		error = gfs2_set_mode(inode, mode);
-		if (error)
-			goto out_release;
-	}
-
-set_acl:
-	error = gfs2_xattr_set(inode, GFS2_EATYPE_SYS, name, value, size, 0);
-out_release:
-	posix_acl_release(acl);
-out:
-	return error;
-}
-
-struct xattr_handler gfs2_xattr_system_handler = {
-	.prefix = XATTR_SYSTEM_PREFIX,
-	.get    = gfs2_xattr_system_get,
-	.set    = gfs2_xattr_system_set,
-};
 

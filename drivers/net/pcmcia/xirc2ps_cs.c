@@ -80,7 +80,6 @@
 #include <linux/if_arp.h>
 #include <linux/ioport.h>
 #include <linux/bitops.h>
-#include <linux/mii.h>
 
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
@@ -353,8 +352,7 @@ typedef struct local_info_t {
 /****************
  * Some more prototypes
  */
-static netdev_tx_t do_start_xmit(struct sk_buff *skb,
-				       struct net_device *dev);
+static int do_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static void xirc_tx_timeout(struct net_device *dev);
 static void xirc2ps_tx_timeout_task(struct work_struct *work);
 static void set_addresses(struct net_device *dev);
@@ -1363,7 +1361,7 @@ xirc_tx_timeout(struct net_device *dev)
     schedule_work(&lp->tx_timeout_task);
 }
 
-static netdev_tx_t
+static int
 do_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
     local_info_t *lp = netdev_priv(dev);
@@ -1386,7 +1384,7 @@ do_start_xmit(struct sk_buff *skb, struct net_device *dev)
     if (pktlen < ETH_ZLEN)
     {
         if (skb_padto(skb, ETH_ZLEN))
-        	return NETDEV_TX_OK;
+        	return 0;
 	pktlen = ETH_ZLEN;
     }
 
@@ -1416,7 +1414,7 @@ do_start_xmit(struct sk_buff *skb, struct net_device *dev)
     dev->trans_start = jiffies;
     dev->stats.tx_bytes += pktlen;
     netif_start_queue(dev);
-    return NETDEV_TX_OK;
+    return 0;
 }
 
 /****************
@@ -1559,26 +1557,26 @@ do_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
     local_info_t *local = netdev_priv(dev);
     unsigned int ioaddr = dev->base_addr;
-    struct mii_ioctl_data *data = if_mii(rq);
+    u16 *data = (u16 *)&rq->ifr_ifru;
 
     DEBUG(1, "%s: ioctl(%-.6s, %#04x) %04x %04x %04x %04x\n",
 	  dev->name, rq->ifr_ifrn.ifrn_name, cmd,
-	  data->phy_id, data->reg_num, data->val_in, data->val_out);
+	  data[0], data[1], data[2], data[3]);
 
     if (!local->mohawk)
 	return -EOPNOTSUPP;
 
     switch(cmd) {
       case SIOCGMIIPHY:		/* Get the address of the PHY in use. */
-	data->phy_id = 0;	/* we have only this address */
+	data[0] = 0;		/* we have only this address */
 	/* fall through */
       case SIOCGMIIREG:		/* Read the specified MII register. */
-	data->val_out = mii_rd(ioaddr, data->phy_id & 0x1f,
-			       data->reg_num & 0x1f);
+	data[3] = mii_rd(ioaddr, data[0] & 0x1f, data[1] & 0x1f);
 	break;
       case SIOCSMIIREG:		/* Write the specified MII register */
-	mii_wr(ioaddr, data->phy_id & 0x1f, data->reg_num & 0x1f, data->val_in,
-	       16);
+	if (!capable(CAP_NET_ADMIN))
+	    return -EPERM;
+	mii_wr(ioaddr, data[0] & 0x1f, data[1] & 0x1f, data[2], 16);
 	break;
       default:
 	return -EOPNOTSUPP;

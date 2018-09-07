@@ -84,7 +84,7 @@ config S390
 	select HAVE_FUNCTION_TRACER
 	select HAVE_FUNCTION_TRACE_MCOUNT_TEST
 	select HAVE_FTRACE_MCOUNT_RECORD
-	select HAVE_SYSCALL_TRACEPOINTS
+	select HAVE_FTRACE_SYSCALLS
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_FUNCTION_GRAPH_TRACER
 	select HAVE_DEFAULT_NO_SPIN_MUTEXES
@@ -94,7 +94,8 @@ config S390
 	select HAVE_KVM if 64BIT
 	select HAVE_ARCH_TRACEHOOK
 	select INIT_ALL_POSSIBLE
-	select HAVE_PERF_EVENTS
+	select HAVE_PERF_COUNTERS
+	select GENERIC_ATOMIC64 if !64BIT
 
 config SCHED_OMIT_FRAME_POINTER
 	bool
@@ -187,9 +188,6 @@ config SYSVIPC_COMPAT
 	bool
 	depends on COMPAT && SYSVIPC
 	default y
-
-config KEYS_COMPAT
-	def_bool y if COMPAT && KEYS
 
 config AUDIT_ARCH
 	bool
@@ -482,6 +480,13 @@ config CMM_IUCV
 	help
 	  Select this option to enable the special message interface to
 	  the cooperative memory management.
+
+config PAGE_STATES
+	bool "Unused page notification"
+	help
+	  This enables the notification of unused pages to the
+	  hypervisor. The ESSA instruction is used to do the states
+	  changes between a page that has content and the unused state.
 
 config APPLDATA_BASE
 	bool "Linux - VM Monitor Stream, base infrastructure"

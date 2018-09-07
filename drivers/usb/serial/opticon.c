@@ -99,8 +99,8 @@ static void opticon_bulk_callback(struct urb *urb)
 				available_room = tty_buffer_request_room(tty,
 								data_length);
 				if (available_room) {
-					tty_insert_flip_string(tty, data + 2,
-							       data_length);
+					tty_insert_flip_string(tty, data,
+							       available_room);
 					tty_flip_buffer_push(tty);
 				}
 				tty_kref_put(tty);
@@ -134,7 +134,7 @@ exit:
 						  priv->bulk_address),
 				  priv->bulk_in_buffer, priv->buffer_size,
 				  opticon_bulk_callback, priv);
-		result = usb_submit_urb(priv->bulk_read_urb, GFP_ATOMIC);
+		result = usb_submit_urb(port->read_urb, GFP_ATOMIC);
 		if (result)
 			dev_err(&port->dev,
 			    "%s - failed resubmitting read urb, error %d\n",
@@ -144,7 +144,8 @@ exit:
 	spin_unlock(&priv->lock);
 }
 
-static int opticon_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int opticon_open(struct tty_struct *tty, struct usb_serial_port *port,
+			struct file *filp)
 {
 	struct opticon_private *priv = usb_get_serial_data(port->serial);
 	unsigned long flags;
@@ -314,24 +315,21 @@ static void opticon_unthrottle(struct tty_struct *tty)
 	struct usb_serial_port *port = tty->driver_data;
 	struct opticon_private *priv = usb_get_serial_data(port->serial);
 	unsigned long flags;
-	int result, was_throttled;
+	int result;
 
 	dbg("%s - port %d", __func__, port->number);
 
 	spin_lock_irqsave(&priv->lock, flags);
 	priv->throttled = false;
-	was_throttled = priv->actually_throttled;
 	priv->actually_throttled = false;
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	priv->bulk_read_urb->dev = port->serial->dev;
-	if (was_throttled) {
-		result = usb_submit_urb(priv->bulk_read_urb, GFP_ATOMIC);
-		if (result)
-			dev_err(&port->dev,
-				"%s - failed submitting read urb, error %d\n",
+	result = usb_submit_urb(priv->bulk_read_urb, GFP_ATOMIC);
+	if (result)
+		dev_err(&port->dev,
+			"%s - failed submitting read urb, error %d\n",
 							__func__, result);
-	}
 }
 
 static int opticon_tiocmget(struct tty_struct *tty, struct file *file)

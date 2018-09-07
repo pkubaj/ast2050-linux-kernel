@@ -3,7 +3,6 @@
  */
 
 #include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -202,54 +201,72 @@ module_param_call(trace_state, param_set_trace_state, param_get_trace_state,
 #define ACPI_SYSTEM_FILE_DEBUG_LAYER	"debug_layer"
 #define ACPI_SYSTEM_FILE_DEBUG_LEVEL		"debug_level"
 
-static int acpi_system_debug_proc_show(struct seq_file *m, void *v)
+static int
+acpi_system_read_debug(char *page,
+		       char **start, off_t off, int count, int *eof, void *data)
 {
+	char *p = page;
+	int size = 0;
 	unsigned int i;
 
-	seq_printf(m, "%-25s\tHex        SET\n", "Description");
+	if (off != 0)
+		goto end;
 
-	switch ((unsigned long)m->private) {
+	p += sprintf(p, "%-25s\tHex        SET\n", "Description");
+
+	switch ((unsigned long)data) {
 	case 0:
 		for (i = 0; i < ARRAY_SIZE(acpi_debug_layers); i++) {
-			seq_printf(m, "%-25s\t0x%08lX [%c]\n",
+			p += sprintf(p, "%-25s\t0x%08lX [%c]\n",
 				     acpi_debug_layers[i].name,
 				     acpi_debug_layers[i].value,
 				     (acpi_dbg_layer & acpi_debug_layers[i].
 				      value) ? '*' : ' ');
 		}
-		seq_printf(m, "%-25s\t0x%08X [%c]\n", "ACPI_ALL_DRIVERS",
+		p += sprintf(p, "%-25s\t0x%08X [%c]\n", "ACPI_ALL_DRIVERS",
 			     ACPI_ALL_DRIVERS,
 			     (acpi_dbg_layer & ACPI_ALL_DRIVERS) ==
 			     ACPI_ALL_DRIVERS ? '*' : (acpi_dbg_layer &
 						       ACPI_ALL_DRIVERS) ==
 			     0 ? ' ' : '-');
-		seq_printf(m,
+		p += sprintf(p,
 			     "--\ndebug_layer = 0x%08X (* = enabled, - = partial)\n",
 			     acpi_dbg_layer);
 		break;
 	case 1:
 		for (i = 0; i < ARRAY_SIZE(acpi_debug_levels); i++) {
-			seq_printf(m, "%-25s\t0x%08lX [%c]\n",
+			p += sprintf(p, "%-25s\t0x%08lX [%c]\n",
 				     acpi_debug_levels[i].name,
 				     acpi_debug_levels[i].value,
 				     (acpi_dbg_level & acpi_debug_levels[i].
 				      value) ? '*' : ' ');
 		}
-		seq_printf(m, "--\ndebug_level = 0x%08X (* = enabled)\n",
+		p += sprintf(p, "--\ndebug_level = 0x%08X (* = enabled)\n",
 			     acpi_dbg_level);
 		break;
+	default:
+		p += sprintf(p, "Invalid debug option\n");
+		break;
 	}
-	return 0;
+
+      end:
+	size = (p - page);
+	if (size <= off + count)
+		*eof = 1;
+	*start = page + off;
+	size -= off;
+	if (size > count)
+		size = count;
+	if (size < 0)
+		size = 0;
+
+	return size;
 }
 
-static int acpi_system_debug_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, acpi_system_debug_proc_show, PDE(inode)->data);
-}
-
-static ssize_t acpi_system_debug_proc_write(struct file *file,
+static int
+acpi_system_write_debug(struct file *file,
 			const char __user * buffer,
-			size_t count, loff_t *pos)
+			unsigned long count, void *data)
 {
 	char debug_string[12] = { '\0' };
 
@@ -262,7 +279,7 @@ static ssize_t acpi_system_debug_proc_write(struct file *file,
 
 	debug_string[count] = '\0';
 
-	switch ((unsigned long)PDE(file->f_path.dentry->d_inode)->data) {
+	switch ((unsigned long)data) {
 	case 0:
 		acpi_dbg_layer = simple_strtoul(debug_string, NULL, 0);
 		break;
@@ -275,15 +292,6 @@ static ssize_t acpi_system_debug_proc_write(struct file *file,
 
 	return count;
 }
-
-static const struct file_operations acpi_system_debug_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= acpi_system_debug_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.write		= acpi_system_debug_proc_write,
-};
 #endif
 
 int __init acpi_debug_init(void)
@@ -295,18 +303,24 @@ int __init acpi_debug_init(void)
 
 	/* 'debug_layer' [R/W] */
 	name = ACPI_SYSTEM_FILE_DEBUG_LAYER;
-	entry = proc_create_data(name, S_IFREG | S_IRUGO | S_IWUSR,
-				 acpi_root_dir, &acpi_system_debug_proc_fops,
-				 (void *)0);
-	if (!entry)
+	entry =
+	    create_proc_read_entry(name, S_IFREG | S_IRUGO | S_IWUSR,
+				   acpi_root_dir, acpi_system_read_debug,
+				   (void *)0);
+	if (entry)
+		entry->write_proc = acpi_system_write_debug;
+	else
 		goto Error;
 
 	/* 'debug_level' [R/W] */
 	name = ACPI_SYSTEM_FILE_DEBUG_LEVEL;
-	entry = proc_create_data(name, S_IFREG | S_IRUGO | S_IWUSR,
-				 acpi_root_dir, &acpi_system_debug_proc_fops,
-				 (void *)1);
-	if (!entry)
+	entry =
+	    create_proc_read_entry(name, S_IFREG | S_IRUGO | S_IWUSR,
+				   acpi_root_dir, acpi_system_read_debug,
+				   (void *)1);
+	if (entry)
+		entry->write_proc = acpi_system_write_debug;
+	else
 		goto Error;
 
       Done:

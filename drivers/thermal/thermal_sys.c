@@ -180,15 +180,15 @@ trip_point_type_show(struct device *dev, struct device_attribute *attr,
 
 	switch (type) {
 	case THERMAL_TRIP_CRITICAL:
-		return sprintf(buf, "critical\n");
+		return sprintf(buf, "critical");
 	case THERMAL_TRIP_HOT:
-		return sprintf(buf, "hot\n");
+		return sprintf(buf, "hot");
 	case THERMAL_TRIP_PASSIVE:
-		return sprintf(buf, "passive\n");
+		return sprintf(buf, "passive");
 	case THERMAL_TRIP_ACTIVE:
-		return sprintf(buf, "active\n");
+		return sprintf(buf, "active");
 	default:
-		return sprintf(buf, "unknown\n");
+		return sprintf(buf, "unknown");
 	}
 }
 

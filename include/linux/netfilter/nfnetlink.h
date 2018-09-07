@@ -58,8 +58,7 @@ struct nfgenmsg {
 struct nfnl_callback
 {
 	int (*call)(struct sock *nl, struct sk_buff *skb, 
-		    const struct nlmsghdr *nlh,
-		    const struct nlattr * const cda[]);
+		struct nlmsghdr *nlh, struct nlattr *cda[]);
 	const struct nla_policy *policy;	/* netlink attribute policy */
 	const u_int16_t attr_count;		/* number of nlattr's */
 };

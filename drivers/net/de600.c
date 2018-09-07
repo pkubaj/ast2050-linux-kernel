@@ -226,7 +226,7 @@ static int de600_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 	spin_unlock_irqrestore(&de600_lock, flags);
 	dev_kfree_skb(skb);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*

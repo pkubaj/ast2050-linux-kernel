@@ -2,7 +2,6 @@
  * arch/blackfin/kernel/cplbinfo.c - display CPLB status
  *
  * Copyright 2004-2008 Analog Devices Inc.
- *
  * Licensed under the GPL-2 or later.
  */
 
@@ -112,21 +111,24 @@ static const struct seq_operations cplbinfo_sops = {
 	.show  = cplbinfo_show,
 };
 
-#define CPLBINFO_DCPLB_FLAG 0x80000000
-
 static int cplbinfo_open(struct inode *inode, struct file *file)
 {
-	struct proc_dir_entry *pde = PDE(file->f_path.dentry->d_inode);
-	char cplb_type;
+	char buf[256], *path, *p;
 	unsigned int cpu;
+	char *s_cpu, *s_cplb;
 	int ret;
 	struct seq_file *m;
 	struct cplbinfo_data *cdata;
 
-	cpu = (unsigned int)pde->data;
-	cplb_type = cpu & CPLBINFO_DCPLB_FLAG ? 'D' : 'I';
-	cpu &= ~CPLBINFO_DCPLB_FLAG;
+	path = d_path(&file->f_path, buf, sizeof(buf));
+	if (IS_ERR(path))
+		return PTR_ERR(path);
+	s_cpu = strstr(path, "/cpu");
+	s_cplb = strrchr(path, '/');
+	if (!s_cpu || !s_cplb)
+		return -EINVAL;
 
+	cpu = simple_strtoul(s_cpu + 4, &p, 10);
 	if (!cpu_online(cpu))
 		return -ENODEV;
 
@@ -137,7 +139,7 @@ static int cplbinfo_open(struct inode *inode, struct file *file)
 	cdata = m->private;
 
 	cdata->pos = 0;
-	cdata->cplb_type = cplb_type;
+	cdata->cplb_type = toupper(s_cplb[1]);
 	cplbinfo_seq_init(cdata, cpu);
 
 	return 0;
@@ -166,10 +168,8 @@ static int __init cplbinfo_init(void)
 		if (!cpu_dir)
 			return -ENOMEM;
 
-		proc_create_data("icplb", S_IRUGO, cpu_dir, &cplbinfo_fops,
-			(void *)cpu);
-		proc_create_data("dcplb", S_IRUGO, cpu_dir, &cplbinfo_fops,
-			(void *)(cpu | CPLBINFO_DCPLB_FLAG));
+		proc_create("icplb", S_IRUGO, cpu_dir, &cplbinfo_fops);
+		proc_create("dcplb", S_IRUGO, cpu_dir, &cplbinfo_fops);
 	}
 
 	return 0;

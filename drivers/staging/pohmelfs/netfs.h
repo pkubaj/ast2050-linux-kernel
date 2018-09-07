@@ -25,7 +25,6 @@
 #define POHMELFS_CTLINFO_ACK		1
 #define POHMELFS_NOINFO_ACK		2
 
-#define POHMELFS_NULL_IDX		65535
 
 /*
  * Network command structure.
@@ -88,8 +87,6 @@ enum {
 	POHMELFS_FLAGS_SHOW,    /* Network state control message for SHOW */
 	POHMELFS_FLAGS_CRYPTO,	/* Crypto data control message */
 	POHMELFS_FLAGS_MODIFY,	/* Network state modification message */
-	POHMELFS_FLAGS_DUMP,	/* Network state control message for SHOW ALL */
-	POHMELFS_FLAGS_FLUSH,	/* Network state control message for FLUSH */
 };
 
 /*
@@ -907,8 +904,6 @@ static inline void pohmelfs_mcache_put(struct pohmelfs_sb *psb,
 	if (atomic_dec_and_test(&m->refcnt))
 		pohmelfs_mcache_free(psb, m);
 }
-
-//#define POHMELFS_TRUNCATE_ON_INODE_FLUSH
 
 #endif /* __KERNEL__*/
 

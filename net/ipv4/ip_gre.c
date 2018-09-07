@@ -66,7 +66,10 @@
    solution, but it supposes maintaing new variable in ALL
    skb, even if no tunneling is used.
 
-   Current solution: HARD_TX_LOCK lock breaks dead loops.
+   Current solution: t->recursion lock breaks dead loops. It looks
+   like dev->tbusy flag, but I preferred new variable, because
+   the semantics is different. One day, when hard_start_xmit
+   will be multithreaded we will have to use skb->encapsulation.
 
 
 
@@ -659,7 +662,7 @@ drop_nolock:
 	return(0);
 }
 
-static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ip_tunnel *tunnel = netdev_priv(dev);
 	struct net_device_stats *stats = &tunnel->dev->stats;
@@ -674,6 +677,11 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 	int    gre_hlen;
 	__be32 dst;
 	int    mtu;
+
+	if (tunnel->recursion++) {
+		stats->collisions++;
+		goto tx_error;
+	}
 
 	if (dev->type == ARPHRD_ETHER)
 		IPCB(skb)->flags = 0;
@@ -812,7 +820,8 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 			ip_rt_put(rt);
 			stats->tx_dropped++;
 			dev_kfree_skb(skb);
-			return NETDEV_TX_OK;
+			tunnel->recursion--;
+			return 0;
 		}
 		if (skb->sk)
 			skb_set_owner_w(new_skb, skb->sk);
@@ -879,7 +888,8 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 	nf_reset(skb);
 
 	IPTUNNEL_XMIT();
-	return NETDEV_TX_OK;
+	tunnel->recursion--;
+	return 0;
 
 tx_error_icmp:
 	dst_link_failure(skb);
@@ -887,7 +897,8 @@ tx_error_icmp:
 tx_error:
 	stats->tx_errors++;
 	dev_kfree_skb(skb);
-	return NETDEV_TX_OK;
+	tunnel->recursion--;
+	return 0;
 }
 
 static int ipgre_tunnel_bind_dev(struct net_device *dev)
@@ -1277,7 +1288,7 @@ static void ipgre_fb_tunnel_init(struct net_device *dev)
 }
 
 
-static const struct net_protocol ipgre_protocol = {
+static struct net_protocol ipgre_protocol = {
 	.handler	=	ipgre_rcv,
 	.err_handler	=	ipgre_err,
 	.netns_ok	=	1,
@@ -1464,7 +1475,7 @@ static void ipgre_tap_setup(struct net_device *dev)
 
 	ether_setup(dev);
 
-	dev->netdev_ops		= &ipgre_tap_netdev_ops;
+	dev->netdev_ops		= &ipgre_netdev_ops;
 	dev->destructor 	= free_netdev;
 
 	dev->iflink		= 0;
@@ -1525,29 +1536,25 @@ static int ipgre_changelink(struct net_device *dev, struct nlattr *tb[],
 		if (t->dev != dev)
 			return -EEXIST;
 	} else {
+		unsigned nflags = 0;
+
 		t = nt;
 
-		if (dev->type != ARPHRD_ETHER) {
-			unsigned nflags = 0;
+		if (ipv4_is_multicast(p.iph.daddr))
+			nflags = IFF_BROADCAST;
+		else if (p.iph.daddr)
+			nflags = IFF_POINTOPOINT;
 
-			if (ipv4_is_multicast(p.iph.daddr))
-				nflags = IFF_BROADCAST;
-			else if (p.iph.daddr)
-				nflags = IFF_POINTOPOINT;
-
-			if ((dev->flags ^ nflags) &
-			    (IFF_POINTOPOINT | IFF_BROADCAST))
-				return -EINVAL;
-		}
+		if ((dev->flags ^ nflags) &
+		    (IFF_POINTOPOINT | IFF_BROADCAST))
+			return -EINVAL;
 
 		ipgre_tunnel_unlink(ign, t);
 		t->parms.iph.saddr = p.iph.saddr;
 		t->parms.iph.daddr = p.iph.daddr;
 		t->parms.i_key = p.i_key;
-		if (dev->type != ARPHRD_ETHER) {
-			memcpy(dev->dev_addr, &p.iph.saddr, 4);
-			memcpy(dev->broadcast, &p.iph.daddr, 4);
-		}
+		memcpy(dev->dev_addr, &p.iph.saddr, 4);
+		memcpy(dev->broadcast, &p.iph.daddr, 4);
 		ipgre_tunnel_link(ign, t);
 		netdev_state_change(dev);
 	}
@@ -1665,15 +1672,14 @@ static int __init ipgre_init(void)
 
 	printk(KERN_INFO "GRE over IPv4 tunneling driver\n");
 
+	if (inet_add_protocol(&ipgre_protocol, IPPROTO_GRE) < 0) {
+		printk(KERN_INFO "ipgre init: can't add protocol\n");
+		return -EAGAIN;
+	}
+
 	err = register_pernet_gen_device(&ipgre_net_id, &ipgre_net_ops);
 	if (err < 0)
-		return err;
-
-	err = inet_add_protocol(&ipgre_protocol, IPPROTO_GRE);
-	if (err < 0) {
-		printk(KERN_INFO "ipgre init: can't add protocol\n");
-		goto add_proto_failed;
-	}
+		goto gen_device_failed;
 
 	err = rtnl_link_register(&ipgre_link_ops);
 	if (err < 0)
@@ -1689,9 +1695,9 @@ out:
 tap_ops_failed:
 	rtnl_link_unregister(&ipgre_link_ops);
 rtnl_link_failed:
-	inet_del_protocol(&ipgre_protocol, IPPROTO_GRE);
-add_proto_failed:
 	unregister_pernet_gen_device(ipgre_net_id, &ipgre_net_ops);
+gen_device_failed:
+	inet_del_protocol(&ipgre_protocol, IPPROTO_GRE);
 	goto out;
 }
 
@@ -1699,9 +1705,9 @@ static void __exit ipgre_fini(void)
 {
 	rtnl_link_unregister(&ipgre_tap_ops);
 	rtnl_link_unregister(&ipgre_link_ops);
+	unregister_pernet_gen_device(ipgre_net_id, &ipgre_net_ops);
 	if (inet_del_protocol(&ipgre_protocol, IPPROTO_GRE) < 0)
 		printk(KERN_INFO "ipgre close: can't remove protocol\n");
-	unregister_pernet_gen_device(ipgre_net_id, &ipgre_net_ops);
 }
 
 module_init(ipgre_init);
@@ -1709,4 +1715,3 @@ module_exit(ipgre_fini);
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_RTNL_LINK("gre");
 MODULE_ALIAS_RTNL_LINK("gretap");
-MODULE_ALIAS_NETDEV("gre0");

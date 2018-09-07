@@ -18,7 +18,6 @@
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/fcntl.h>
-#include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/major.h>
 #include <linux/mm.h>
@@ -262,9 +261,6 @@ done:
 	return 0;
 }
 
-/* Traditional BSD devices */
-#ifdef CONFIG_LEGACY_PTYS
-
 static int pty_install(struct tty_driver *driver, struct tty_struct *tty)
 {
 	struct tty_struct *o_tty;
@@ -314,6 +310,24 @@ free_mem_out:
 	return -ENOMEM;
 }
 
+
+static const struct tty_operations pty_ops = {
+	.install = pty_install,
+	.open = pty_open,
+	.close = pty_close,
+	.write = pty_write,
+	.write_room = pty_write_room,
+	.flush_buffer = pty_flush_buffer,
+	.chars_in_buffer = pty_chars_in_buffer,
+	.unthrottle = pty_unthrottle,
+	.set_termios = pty_set_termios,
+	.resize = pty_resize
+};
+
+/* Traditional BSD devices */
+#ifdef CONFIG_LEGACY_PTYS
+static struct tty_driver *pty_driver, *pty_slave_driver;
+
 static int pty_bsd_ioctl(struct tty_struct *tty, struct file *file,
 			 unsigned int cmd, unsigned long arg)
 {
@@ -327,12 +341,7 @@ static int pty_bsd_ioctl(struct tty_struct *tty, struct file *file,
 static int legacy_count = CONFIG_LEGACY_PTY_COUNT;
 module_param(legacy_count, int, 0);
 
-/*
- * The master side of a pty can do TIOCSPTLCK and thus
- * has pty_bsd_ioctl.
- */
-static const struct tty_operations master_pty_ops_bsd = {
-	.install = pty_install,
+static const struct tty_operations pty_ops_bsd = {
 	.open = pty_open,
 	.close = pty_close,
 	.write = pty_write,
@@ -345,23 +354,8 @@ static const struct tty_operations master_pty_ops_bsd = {
 	.resize = pty_resize
 };
 
-static const struct tty_operations slave_pty_ops_bsd = {
-	.install = pty_install,
-	.open = pty_open,
-	.close = pty_close,
-	.write = pty_write,
-	.write_room = pty_write_room,
-	.flush_buffer = pty_flush_buffer,
-	.chars_in_buffer = pty_chars_in_buffer,
-	.unthrottle = pty_unthrottle,
-	.set_termios = pty_set_termios,
-	.resize = pty_resize
-};
-
 static void __init legacy_pty_init(void)
 {
-	struct tty_driver *pty_driver, *pty_slave_driver;
-
 	if (legacy_count <= 0)
 		return;
 
@@ -389,7 +383,7 @@ static void __init legacy_pty_init(void)
 	pty_driver->init_termios.c_ospeed = 38400;
 	pty_driver->flags = TTY_DRIVER_RESET_TERMIOS | TTY_DRIVER_REAL_RAW;
 	pty_driver->other = pty_slave_driver;
-	tty_set_operations(pty_driver, &master_pty_ops_bsd);
+	tty_set_operations(pty_driver, &pty_ops);
 
 	pty_slave_driver->owner = THIS_MODULE;
 	pty_slave_driver->driver_name = "pty_slave";
@@ -405,7 +399,7 @@ static void __init legacy_pty_init(void)
 	pty_slave_driver->flags = TTY_DRIVER_RESET_TERMIOS |
 					TTY_DRIVER_REAL_RAW;
 	pty_slave_driver->other = pty_driver;
-	tty_set_operations(pty_slave_driver, &slave_pty_ops_bsd);
+	tty_set_operations(pty_slave_driver, &pty_ops);
 
 	if (tty_register_driver(pty_driver))
 		panic("Couldn't register pty driver");

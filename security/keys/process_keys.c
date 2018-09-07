@@ -17,7 +17,6 @@
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
-#include <linux/security.h>
 #include <linux/user_namespace.h>
 #include <asm/uaccess.h>
 #include "internal.h"
@@ -56,7 +55,7 @@ int install_user_keyrings(void)
 
 	kenter("%p{%u}", user, user->uid);
 
-	if (user->uid_keyring && user->session_keyring) {
+	if (user->uid_keyring) {
 		kleave(" = 0 [exist]");
 		return 0;
 	}
@@ -488,7 +487,7 @@ static int lookup_user_key_possessed(const struct key *key, const void *target)
  * - don't create special keyrings unless so requested
  * - partially constructed keys aren't found unless requested
  */
-key_ref_t lookup_user_key(key_serial_t id, unsigned long lflags,
+key_ref_t lookup_user_key(key_serial_t id, int create, int partial,
 			  key_perm_t perm)
 {
 	struct request_key_auth *rka;
@@ -504,12 +503,12 @@ try_again:
 	switch (id) {
 	case KEY_SPEC_THREAD_KEYRING:
 		if (!cred->thread_keyring) {
-			if (!(lflags & KEY_LOOKUP_CREATE))
+			if (!create)
 				goto error;
 
 			ret = install_thread_keyring();
 			if (ret < 0) {
-				key_ref = ERR_PTR(ret);
+				key = ERR_PTR(ret);
 				goto error;
 			}
 			goto reget_creds;
@@ -522,12 +521,12 @@ try_again:
 
 	case KEY_SPEC_PROCESS_KEYRING:
 		if (!cred->tgcred->process_keyring) {
-			if (!(lflags & KEY_LOOKUP_CREATE))
+			if (!create)
 				goto error;
 
 			ret = install_process_keyring();
 			if (ret < 0) {
-				key_ref = ERR_PTR(ret);
+				key = ERR_PTR(ret);
 				goto error;
 			}
 			goto reget_creds;
@@ -586,7 +585,7 @@ try_again:
 
 	case KEY_SPEC_GROUP_KEYRING:
 		/* group keyrings are not yet supported */
-		key_ref = ERR_PTR(-EINVAL);
+		key = ERR_PTR(-EINVAL);
 		goto error;
 
 	case KEY_SPEC_REQKEY_AUTH_KEY:
@@ -643,14 +642,7 @@ try_again:
 		break;
 	}
 
-	/* unlink does not use the nominated key in any way, so can skip all
-	 * the permission checks as it is only concerned with the keyring */
-	if (lflags & KEY_LOOKUP_FOR_UNLINK) {
-		ret = 0;
-		goto error;
-	}
-
-	if (!(lflags & KEY_LOOKUP_PARTIAL)) {
+	if (!partial) {
 		ret = wait_for_key_construction(key, true);
 		switch (ret) {
 		case -ERESTARTSYS:
@@ -668,8 +660,7 @@ try_again:
 	}
 
 	ret = -EIO;
-	if (!(lflags & KEY_LOOKUP_PARTIAL) &&
-	    !test_bit(KEY_FLAG_INSTANTIATED, &key->flags))
+	if (!partial && !test_bit(KEY_FLAG_INSTANTIATED, &key->flags))
 		goto invalid_key;
 
 	/* check the permissions */
@@ -711,7 +702,7 @@ long join_session_keyring(const char *name)
 	/* only permit this if there's a single thread in the thread group -
 	 * this avoids us having to adjust the creds on all threads and risking
 	 * ENOMEM */
-	if (!current_is_single_threaded())
+	if (!is_single_threaded(current))
 		return -EMLINK;
 
 	new = prepare_creds();
@@ -768,52 +759,4 @@ error2:
 error:
 	abort_creds(new);
 	return ret;
-}
-
-/*
- * Replace a process's session keyring when that process resumes userspace on
- * behalf of one of its children
- */
-void key_replace_session_keyring(void)
-{
-	const struct cred *old;
-	struct cred *new;
-
-	if (!current->replacement_session_keyring)
-		return;
-
-	write_lock_irq(&tasklist_lock);
-	new = current->replacement_session_keyring;
-	current->replacement_session_keyring = NULL;
-	write_unlock_irq(&tasklist_lock);
-
-	if (!new)
-		return;
-
-	old = current_cred();
-	new->  uid	= old->  uid;
-	new-> euid	= old-> euid;
-	new-> suid	= old-> suid;
-	new->fsuid	= old->fsuid;
-	new->  gid	= old->  gid;
-	new-> egid	= old-> egid;
-	new-> sgid	= old-> sgid;
-	new->fsgid	= old->fsgid;
-	new->user	= get_uid(old->user);
-	new->group_info	= get_group_info(old->group_info);
-
-	new->securebits	= old->securebits;
-	new->cap_inheritable	= old->cap_inheritable;
-	new->cap_permitted	= old->cap_permitted;
-	new->cap_effective	= old->cap_effective;
-	new->cap_bset		= old->cap_bset;
-
-	new->jit_keyring	= old->jit_keyring;
-	new->thread_keyring	= key_get(old->thread_keyring);
-	new->tgcred->tgid	= old->tgcred->tgid;
-	new->tgcred->process_keyring = key_get(old->tgcred->process_keyring);
-
-	security_transfer_creds(new, old);
-
-	commit_creds(new);
 }

@@ -31,11 +31,21 @@
  * Revision History:
  *
  */
-
+#if !defined(__MAC_H__)
 #include "mac.h"
+#endif
+#if !defined(__SROM_H__)
 #include "srom.h"
+#endif
+#if !defined(__TBIT_H__)
+#include "tbit.h"
+#endif
+#if !defined(__RF_H__)
 #include "rf.h"
+#endif
+#if !defined(__BASEBAND_H__)
 #include "baseband.h"
+#endif
 
 /*---------------------  Static Definitions -------------------------*/
 
@@ -632,7 +642,7 @@ BOOL IFRFbWriteEmbeded (DWORD_PTR dwIoBase, DWORD dwData)
     // W_MAX_TIMEOUT is the timeout period
     for (ww = 0; ww < W_MAX_TIMEOUT; ww++) {
         VNSvInPortD(dwIoBase + MAC_REG_IFREGCTL, &dwValue);
-        if (dwValue & IFREGCTL_DONE)
+        if (BITbIsBitOn(dwValue, IFREGCTL_DONE))
             break;
     }
 
@@ -1205,7 +1215,7 @@ VOID
 RFvRSSITodBm (
     IN  PSDevice pDevice,
     IN  BYTE     byCurrRSSI,
-    long *    pldBm
+    OUT PLONG    pldBm
     )
 {
     BYTE byIdx = (((byCurrRSSI & 0xC0) >> 6) & 0x03);

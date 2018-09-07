@@ -2,8 +2,6 @@
 
 subdir-ccflags-$(CONFIG_PPC_WERROR) := -Werror
 
-GCOV_PROFILE := n
-
 ifdef CONFIG_PPC64
 EXTRA_CFLAGS += -mno-minimal-toc
 endif

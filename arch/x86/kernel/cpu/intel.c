@@ -7,17 +7,17 @@
 #include <linux/sched.h>
 #include <linux/thread_info.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
 
 #include <asm/processor.h>
 #include <asm/pgtable.h>
 #include <asm/msr.h>
+#include <asm/uaccess.h>
 #include <asm/ds.h>
 #include <asm/bugs.h>
 #include <asm/cpu.h>
 
 #ifdef CONFIG_X86_64
-#include <linux/topology.h>
+#include <asm/topology.h>
 #include <asm/numa_64.h>
 #endif
 
@@ -40,34 +40,12 @@ static void __cpuinit early_init_intel(struct cpuinfo_x86 *c)
 			misc_enable &= ~MSR_IA32_MISC_ENABLE_LIMIT_CPUID;
 			wrmsrl(MSR_IA32_MISC_ENABLE, misc_enable);
 			c->cpuid_level = cpuid_eax(0);
-			get_cpu_cap(c);
 		}
 	}
 
 	if ((c->x86 == 0xf && c->x86_model >= 0x03) ||
 		(c->x86 == 0x6 && c->x86_model >= 0x0e))
 		set_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);
-
-	/*
-	 * Atom erratum AAE44/AAF40/AAG38/AAH41:
-	 *
-	 * A race condition between speculative fetches and invalidating
-	 * a large page.  This is worked around in microcode, but we
-	 * need the microcode to have already been loaded... so if it is
-	 * not, recommend a BIOS update and disable large pages.
-	 */
-	if (c->x86 == 6 && c->x86_model == 0x1c && c->x86_mask <= 2) {
-		u32 ucode, junk;
-
-		wrmsr(MSR_IA32_UCODE_REV, 0, 0);
-		sync_core();
-		rdmsr(MSR_IA32_UCODE_REV, junk, ucode);
-
-		if (ucode < 0x20e) {
-			printk(KERN_WARNING "Atom PSE erratum detected, BIOS microcode update recommended\n");
-			clear_cpu_cap(c, X86_FEATURE_PSE);
-		}
-	}
 
 #ifdef CONFIG_X86_64
 	set_cpu_cap(c, X86_FEATURE_SYSENTER32);
@@ -92,8 +70,8 @@ static void __cpuinit early_init_intel(struct cpuinfo_x86 *c)
 	if (c->x86_power & (1 << 8)) {
 		set_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);
 		set_cpu_cap(c, X86_FEATURE_NONSTOP_TSC);
-		if (!check_tsc_unstable())
-			sched_clock_stable = 1;
+		set_cpu_cap(c, X86_FEATURE_TSC_RELIABLE);
+		sched_clock_stable = 1;
 	}
 
 	/*
@@ -196,8 +174,7 @@ static void __cpuinit intel_workarounds(struct cpuinfo_x86 *c)
 #ifdef CONFIG_X86_F00F_BUG
 	/*
 	 * All current models of Pentium and Pentium with MMX technology CPUs
-	 * have the F0 0F bug, which lets nonprivileged users lock up the
-	 * system.
+	 * have the F0 0F bug, which lets nonprivileged users lock up the system.
 	 * Note that the workaround only should be initialized once...
 	 */
 	c->f00f_bug = 0;
@@ -230,7 +207,7 @@ static void __cpuinit intel_workarounds(struct cpuinfo_x86 *c)
 			printk (KERN_INFO "CPU: C0 stepping P4 Xeon detected.\n");
 			printk (KERN_INFO "CPU: Disabling hardware prefetching (Errata 037)\n");
 			lo |= MSR_IA32_MISC_ENABLE_PREFETCH_DISABLE;
-			wrmsr(MSR_IA32_MISC_ENABLE, lo, hi);
+			wrmsr (MSR_IA32_MISC_ENABLE, lo, hi);
 		}
 	}
 
@@ -306,7 +283,7 @@ static int __cpuinit intel_num_cpu_cores(struct cpuinfo_x86 *c)
 	/* Intel has a non-standard dependency on %ecx for this CPUID level. */
 	cpuid_count(4, 0, &eax, &ebx, &ecx, &edx);
 	if (eax & 0x1f)
-		return (eax >> 26) + 1;
+		return ((eax >> 26) + 1);
 	else
 		return 1;
 }
@@ -370,12 +347,6 @@ static void __cpuinit init_intel(struct cpuinfo_x86 *c)
 		/* Check for version and the number of counters */
 		if ((eax & 0xff) && (((eax>>8) & 0xff) > 1))
 			set_cpu_cap(c, X86_FEATURE_ARCH_PERFMON);
-	}
-
-	if (c->cpuid_level > 6) {
-		unsigned ecx = cpuid_ecx(6);
-		if (ecx & 0x01)
-			set_cpu_cap(c, X86_FEATURE_APERFMPERF);
 	}
 
 	if (cpu_has_xmm2)

@@ -445,9 +445,8 @@ sysenter_past_esp:
 	jnz sysenter_audit
 sysenter_do_call:
 	cmpl $(nr_syscalls), %eax
-	jae sysenter_badsys
+	jae syscall_badsys
 	call *sys_call_table(,%eax,4)
-sysenter_after_call:
 	movl %eax,PT_EAX(%esp)
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_ANY)
@@ -528,7 +527,6 @@ ENTRY(system_call)
 	jae syscall_badsys
 syscall_call:
 	call *sys_call_table(,%eax,4)
-syscall_after_call:
 	movl %eax,PT_EAX(%esp)		# store the return value
 syscall_exit:
 	LOCKDEP_SYS_EXIT
@@ -543,7 +541,6 @@ syscall_exit:
 restore_all:
 	TRACE_IRQS_IRET
 restore_all_notrace:
-#ifdef CONFIG_X86_ESPFIX32
 	movl PT_EFLAGS(%esp), %eax	# mix EFLAGS, SS and CS
 	# Warning: PT_OLDSS(%esp) contains the wrong/random values if we
 	# are returning to the kernel.
@@ -554,7 +551,6 @@ restore_all_notrace:
 	cmpl $((SEGMENT_LDT << 8) | USER_RPL), %eax
 	CFI_REMEMBER_STATE
 	je ldt_ss			# returning to user-space with LDT SS
-#endif
 restore_nocheck:
 	RESTORE_REGS 4			# skip orig_eax/error_code
 	CFI_ADJUST_CFA_OFFSET -4
@@ -571,9 +567,13 @@ ENTRY(iret_exc)
 	.long irq_return,iret_exc
 .previous
 
-#ifdef CONFIG_X86_ESPFIX32
 	CFI_RESTORE_STATE
 ldt_ss:
+	larl PT_OLDSS(%esp), %eax
+	jnz restore_nocheck
+	testl $0x00400000, %eax		# returning to 32bit stack?
+	jnz restore_nocheck		# allright, normal return
+
 #ifdef CONFIG_PARAVIRT
 	/*
 	 * The kernel can't run on a non-flat stack if paravirt mode
@@ -617,7 +617,6 @@ ldt_ss:
 	lss (%esp), %esp		/* switch to espfix segment */
 	CFI_ADJUST_CFA_OFFSET -8
 	jmp restore_nocheck
-#endif
 	CFI_ENDPROC
 ENDPROC(system_call)
 
@@ -702,14 +701,9 @@ syscall_fault:
 END(syscall_fault)
 
 syscall_badsys:
-	movl $-ENOSYS,%eax
-	jmp syscall_after_call
+	movl $-ENOSYS,PT_EAX(%esp)
+	jmp resume_userspace
 END(syscall_badsys)
-
-sysenter_badsys:
-	movl $-ENOSYS,%eax
-	jmp sysenter_after_call
-END(sysenter_badsys)
 	CFI_ENDPROC
 
 /*
@@ -740,7 +734,6 @@ PTREGSCALL(vm86old)
  * the high word of the segment base from the GDT and swiches to the
  * normal stack and adjusts ESP with the matching offset.
  */
-#ifdef CONFIG_X86_ESPFIX32
 	/* fixup the stack */
 	PER_CPU(gdt_page, %ebx)
 	mov GDT_ENTRY_ESPFIX_SS * 8 + 4(%ebx), %al /* bits 16..23 */
@@ -753,10 +746,8 @@ PTREGSCALL(vm86old)
 	CFI_ADJUST_CFA_OFFSET 4
 	lss (%esp), %esp		/* switch to the normal stack segment */
 	CFI_ADJUST_CFA_OFFSET -8
-#endif
 .endm
 .macro UNWIND_ESPFIX_STACK
-#ifdef CONFIG_X86_ESPFIX32
 	movl %ss, %eax
 	/* see if on espfix stack */
 	cmpw $__ESPFIX_SS, %ax
@@ -767,7 +758,6 @@ PTREGSCALL(vm86old)
 	/* switch to normal stack */
 	FIXUP_ESPFIX_STACK
 27:
-#endif
 .endm
 
 /*
@@ -1331,7 +1321,6 @@ END(debug)
  */
 ENTRY(nmi)
 	RING0_INT_FRAME
-#ifdef CONFIG_X86_ESPFIX32
 	pushl %eax
 	CFI_ADJUST_CFA_OFFSET 4
 	movl %ss, %eax
@@ -1339,7 +1328,6 @@ ENTRY(nmi)
 	popl %eax
 	CFI_ADJUST_CFA_OFFSET -4
 	je nmi_espfix_stack
-#endif
 	cmpl $ia32_sysenter_target,(%esp)
 	je nmi_stack_fixup
 	pushl %eax
@@ -1382,7 +1370,6 @@ nmi_debug_stack_check:
 	FIX_STACK 24, nmi_stack_correct, 1
 	jmp nmi_stack_correct
 
-#ifdef CONFIG_X86_ESPFIX32
 nmi_espfix_stack:
 	/* We have a RING0_INT_FRAME here.
 	 *
@@ -1408,7 +1395,6 @@ nmi_espfix_stack:
 	lss 12+4(%esp), %esp		# back to espfix stack
 	CFI_ADJUST_CFA_OFFSET -24
 	jmp irq_return
-#endif
 	CFI_ENDPROC
 END(nmi)
 

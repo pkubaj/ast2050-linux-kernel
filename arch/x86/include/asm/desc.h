@@ -250,8 +250,7 @@ static inline void native_load_tls(struct thread_struct *t, unsigned int cpu)
 		gdt[GDT_ENTRY_TLS_MIN + i] = t->tls_array[i];
 }
 
-/* This intentionally ignores lm, since 32-bit apps don't have that field. */
-#define LDT_empty(info)					\
+#define _LDT_empty(info)				\
 	((info)->base_addr		== 0	&&	\
 	 (info)->limit			== 0	&&	\
 	 (info)->contents		== 0	&&	\
@@ -261,18 +260,11 @@ static inline void native_load_tls(struct thread_struct *t, unsigned int cpu)
 	 (info)->seg_not_present	== 1	&&	\
 	 (info)->useable		== 0)
 
-/* Lots of programs expect an all-zero user_desc to mean "no segment at all". */
-static inline bool LDT_zero(const struct user_desc *info)
-{
-	return (info->base_addr		== 0 &&
-		info->limit		== 0 &&
-		info->contents		== 0 &&
-		info->read_exec_only	== 0 &&
-		info->seg_32bit		== 0 &&
-		info->limit_in_pages	== 0 &&
-		info->seg_not_present	== 0 &&
-		info->useable		== 0);
-}
+#ifdef CONFIG_X86_64
+#define LDT_empty(info) (_LDT_empty(info) && ((info)->lm == 0))
+#else
+#define LDT_empty(info) (_LDT_empty(info))
+#endif
 
 static inline void clear_LDT(void)
 {
@@ -296,25 +288,12 @@ static inline void load_LDT(mm_context_t *pc)
 
 static inline unsigned long get_desc_base(const struct desc_struct *desc)
 {
-	return (unsigned)(desc->base0 | ((desc->base1) << 16) | ((desc->base2) << 24));
-}
-
-static inline void set_desc_base(struct desc_struct *desc, unsigned long base)
-{
-	desc->base0 = base & 0xffff;
-	desc->base1 = (base >> 16) & 0xff;
-	desc->base2 = (base >> 24) & 0xff;
+	return desc->base0 | ((desc->base1) << 16) | ((desc->base2) << 24);
 }
 
 static inline unsigned long get_desc_limit(const struct desc_struct *desc)
 {
 	return desc->limit0 | (desc->limit << 16);
-}
-
-static inline void set_desc_limit(struct desc_struct *desc, unsigned long limit)
-{
-	desc->limit0 = limit & 0xffff;
-	desc->limit = (limit >> 16) & 0xf;
 }
 
 static inline void _set_gate(int gate, unsigned type, void *addr,

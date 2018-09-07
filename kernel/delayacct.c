@@ -15,7 +15,6 @@
 
 #include <linux/sched.h>
 #include <linux/slab.h>
-#include <linux/taskstats.h>
 #include <linux/time.h>
 #include <linux/sysctl.h>
 #include <linux/delayacct.h>

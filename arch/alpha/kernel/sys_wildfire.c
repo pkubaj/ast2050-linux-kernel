@@ -158,7 +158,7 @@ wildfire_end_irq(unsigned int irq)
 }
 
 static struct irq_chip wildfire_irq_type = {
-	.name		= "WILDFIRE",
+	.typename	= "WILDFIRE",
 	.startup	= wildfire_startup_irq,
 	.shutdown	= wildfire_disable_irq,
 	.enable		= wildfire_enable_irq,

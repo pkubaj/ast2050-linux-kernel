@@ -183,11 +183,6 @@ dma_cookie_t dma_memcpy_to_iovec(struct dma_chan *chan, struct iovec *iov,
 					iov_byte_offset,
 					kdata,
 					copy);
-			/* poll for a descriptor slot */
-			if (unlikely(dma_cookie < 0)) {
-				dma_async_issue_pending(chan);
-				continue;
-			}
 
 			len -= copy;
 			iov[iovec_idx].iov_len -= copy;
@@ -253,11 +248,6 @@ dma_cookie_t dma_memcpy_pg_to_iovec(struct dma_chan *chan, struct iovec *iov,
 					page,
 					offset,
 					copy);
-			/* poll for a descriptor slot */
-			if (unlikely(dma_cookie < 0)) {
-				dma_async_issue_pending(chan);
-				continue;
-			}
 
 			len -= copy;
 			iov[iovec_idx].iov_len -= copy;

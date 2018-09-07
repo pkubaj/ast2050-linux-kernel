@@ -288,8 +288,7 @@ static int smc_open(struct net_device *dev);
 static int smc_close(struct net_device *dev);
 static int smc_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 static void smc_tx_timeout(struct net_device *dev);
-static netdev_tx_t smc_start_xmit(struct sk_buff *skb,
-					struct net_device *dev);
+static int smc_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t smc_interrupt(int irq, void *dev_id);
 static void smc_rx(struct net_device *dev);
 static void set_rx_mode(struct net_device *dev);
@@ -1371,8 +1370,7 @@ static void smc_tx_timeout(struct net_device *dev)
     netif_wake_queue(dev);
 }
 
-static netdev_tx_t smc_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static int smc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
     struct smc_private *smc = netdev_priv(dev);
     unsigned int ioaddr = dev->base_addr;
@@ -1401,7 +1399,7 @@ static netdev_tx_t smc_start_xmit(struct sk_buff *skb,
 	dev_kfree_skb (skb);
 	smc->saved_skb = NULL;
 	dev->stats.tx_dropped++;
-	return NETDEV_TX_OK;		/* Do not re-queue this packet. */
+	return 0;		/* Do not re-queue this packet. */
     }
     /* A packet is now waiting. */
     smc->packets_waiting++;
@@ -1424,7 +1422,7 @@ static netdev_tx_t smc_start_xmit(struct sk_buff *skb,
 	    outw((ir&0xff00) | IM_ALLOC_INT, ioaddr + INTERRUPT);
 	    smc_hardware_send_packet(dev);	/* Send the packet now.. */
 	    spin_unlock_irqrestore(&smc->lock, flags);
-	    return NETDEV_TX_OK;
+	    return 0;
 	}
     }
 
@@ -1433,7 +1431,7 @@ static netdev_tx_t smc_start_xmit(struct sk_buff *skb,
     outw((IM_ALLOC_INT << 8) | (ir & 0xff00), ioaddr + INTERRUPT);
     spin_unlock_irqrestore(&smc->lock, flags);
 
-    return NETDEV_TX_OK;
+    return 0;
 }
 
 /*======================================================================

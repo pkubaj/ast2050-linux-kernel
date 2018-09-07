@@ -2,7 +2,6 @@
 #define CCISS_H
 
 #include <linux/genhd.h>
-#include <linux/mutex.h>
 
 #include "cciss_cmd.h"
 
@@ -30,7 +29,7 @@ struct access_method {
 };
 typedef struct _drive_info_struct
 {
-	unsigned char LunID[8];
+ 	__u32   LunID;	
 	int 	usage_count;
 	struct request_queue *queue;
 	sector_t nr_blocks;
@@ -52,7 +51,6 @@ typedef struct _drive_info_struct
 	char vendor[VENDOR_LEN + 1]; /* SCSI vendor string */
 	char model[MODEL_LEN + 1];   /* SCSI model string */
 	char rev[REV_LEN + 1];       /* SCSI revision string */
-	char device_initialized;     /* indicates whether dev is initialized */
 } drive_info_struct;
 
 struct ctlr_info 
@@ -88,7 +86,7 @@ struct ctlr_info
 	BYTE	cciss_read_capacity;
 
 	// information about each logical volume
-	drive_info_struct *drv[CISS_MAX_LUN];
+	drive_info_struct drv[CISS_MAX_LUN];
 
 	struct access_method access;
 
@@ -110,8 +108,6 @@ struct ctlr_info
 	int			nr_frees; 
 	int			busy_configuring;
 	int			busy_initializing;
-	int			busy_scanning;
-	struct mutex		busy_shutting_down;
 
 	/* This element holds the zero based queue number of the last
 	 * queue to be started.  It is used for fairness.
@@ -126,8 +122,8 @@ struct ctlr_info
 	/* and saved for later processing */
 #endif
 	unsigned char alive;
-	struct list_head scan_list;
-	struct completion scan_wait;
+	struct completion *rescan_wait;
+	struct task_struct *cciss_scan_thread;
 	struct device dev;
 };
 
@@ -165,7 +161,6 @@ static void SA5_submit_command( ctlr_info_t *h, CommandList_struct *c)
 	 printk("Sending %x - down to controller\n", c->busaddr );
 #endif /* CCISS_DEBUG */ 
          writel(c->busaddr, h->vaddr + SA5_REQUEST_PORT_OFFSET);
-	readl(h->vaddr + SA5_SCRATCHPAD_OFFSET);
 	 h->commands_outstanding++;
 	 if ( h->commands_outstanding > h->max_outstanding)
 		h->max_outstanding = h->commands_outstanding;

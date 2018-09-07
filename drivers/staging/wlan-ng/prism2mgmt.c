@@ -73,6 +73,9 @@
 #include <linux/usb.h>
 #include <linux/bitops.h>
 
+/*================================================================*/
+/* Project Includes */
+
 #include "p80211types.h"
 #include "p80211hdr.h"
 #include "p80211mgmt.h"
@@ -114,7 +117,7 @@
 *	process thread  (usually)
 *	interrupt
 ----------------------------------------------------------------*/
-int prism2mgmt_scan(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_scan(wlandevice_t * wlandev, void *msgp)
 {
 	int result = 0;
 	hfa384x_t *hw = wlandev->priv;
@@ -359,7 +362,7 @@ exit:
 *	process thread  (usually)
 *	interrupt
 ----------------------------------------------------------------*/
-int prism2mgmt_scan_results(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_scan_results(wlandevice_t * wlandev, void *msgp)
 {
 	int result = 0;
 	p80211msg_dot11req_scan_results_t *req;
@@ -508,7 +511,7 @@ exit:
 *	process thread  (usually)
 *	interrupt
 ----------------------------------------------------------------*/
-int prism2mgmt_start(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_start(wlandevice_t * wlandev, void *msgp)
 {
 	int result = 0;
 	hfa384x_t *hw = wlandev->priv;
@@ -685,7 +688,7 @@ done:
 * Call context:
 *	process thread  (usually)
 ----------------------------------------------------------------*/
-int prism2mgmt_readpda(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_readpda(wlandevice_t * wlandev, void *msgp)
 {
 	hfa384x_t *hw = wlandev->priv;
 	p80211msg_p2req_readpda_t *msg = msgp;
@@ -751,7 +754,7 @@ int prism2mgmt_readpda(wlandevice_t *wlandev, void *msgp)
 * Call context:
 *	process thread  (usually)
 ----------------------------------------------------------------*/
-int prism2mgmt_ramdl_state(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_ramdl_state(wlandevice_t * wlandev, void *msgp)
 {
 	hfa384x_t *hw = wlandev->priv;
 	p80211msg_p2req_ramdl_state_t *msg = msgp;
@@ -807,7 +810,7 @@ int prism2mgmt_ramdl_state(wlandevice_t *wlandev, void *msgp)
 * Call context:
 *	process thread  (usually)
 ----------------------------------------------------------------*/
-int prism2mgmt_ramdl_write(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_ramdl_write(wlandevice_t * wlandev, void *msgp)
 {
 	hfa384x_t *hw = wlandev->priv;
 	p80211msg_p2req_ramdl_write_t *msg = msgp;
@@ -869,7 +872,7 @@ int prism2mgmt_ramdl_write(wlandevice_t *wlandev, void *msgp)
 * Call context:
 *	process thread  (usually)
 ----------------------------------------------------------------*/
-int prism2mgmt_flashdl_state(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_flashdl_state(wlandevice_t * wlandev, void *msgp)
 {
 	int result = 0;
 	hfa384x_t *hw = wlandev->priv;
@@ -940,7 +943,7 @@ int prism2mgmt_flashdl_state(wlandevice_t *wlandev, void *msgp)
 * Call context:
 *	process thread  (usually)
 ----------------------------------------------------------------*/
-int prism2mgmt_flashdl_write(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_flashdl_write(wlandevice_t * wlandev, void *msgp)
 {
 	hfa384x_t *hw = wlandev->priv;
 	p80211msg_p2req_flashdl_write_t *msg = msgp;
@@ -1001,7 +1004,7 @@ int prism2mgmt_flashdl_write(wlandevice_t *wlandev, void *msgp)
 *	process thread  (usually)
 *	interrupt
 ----------------------------------------------------------------*/
-int prism2mgmt_autojoin(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_autojoin(wlandevice_t * wlandev, void *msgp)
 {
 	hfa384x_t *hw = wlandev->priv;
 	int result = 0;
@@ -1072,7 +1075,7 @@ int prism2mgmt_autojoin(wlandevice_t *wlandev, void *msgp)
 *	process thread  (usually)
 *	interrupt
 ----------------------------------------------------------------*/
-int prism2mgmt_wlansniff(wlandevice_t *wlandev, void *msgp)
+int prism2mgmt_wlansniff(wlandevice_t * wlandev, void *msgp)
 {
 	int result = 0;
 	p80211msg_lnxreq_wlansniff_t *msg = msgp;

@@ -2063,8 +2063,8 @@ static int pvr2_hdw_load_subdev(struct pvr2_hdw *hdw,
 		return -EINVAL;
 	}
 
-	/* Note how the 2nd and 3rd arguments are the same for
-	 * v4l2_i2c_new_subdev().  Why?
+	/* Note how the 2nd and 3rd arguments are the same for both
+	 * v4l2_i2c_new_subdev() and v4l2_i2c_new_probed_subdev().  Why?
 	 * Well the 2nd argument is the module name to load, while the 3rd
 	 * argument is documented in the framework as being the "chipid" -
 	 * and every other place where I can find examples of this, the
@@ -2077,15 +2077,15 @@ static int pvr2_hdw_load_subdev(struct pvr2_hdw *hdw,
 			   mid, i2caddr[0]);
 		sd = v4l2_i2c_new_subdev(&hdw->v4l2_dev, &hdw->i2c_adap,
 					 fname, fname,
-					 i2caddr[0], NULL);
+					 i2caddr[0]);
 	} else {
 		pvr2_trace(PVR2_TRACE_INIT,
 			   "Module ID %u:"
 			   " Setting up with address probe list",
 			   mid);
-		sd = v4l2_i2c_new_subdev(&hdw->v4l2_dev, &hdw->i2c_adap,
+		sd = v4l2_i2c_new_probed_subdev(&hdw->v4l2_dev, &hdw->i2c_adap,
 						fname, fname,
-						0, i2caddr);
+						i2caddr);
 	}
 
 	if (!sd) {
@@ -2979,8 +2979,6 @@ static void pvr2_subdev_update(struct pvr2_hdw *hdw)
 	if (hdw->input_dirty || hdw->audiomode_dirty || hdw->force_dirty) {
 		struct v4l2_tuner vt;
 		memset(&vt, 0, sizeof(vt));
-		vt.type = (hdw->input_val == PVR2_CVAL_INPUT_RADIO) ?
-			V4L2_TUNER_RADIO : V4L2_TUNER_ANALOG_TV;
 		vt.audmode = hdw->audiomode_val;
 		v4l2_device_call_all(&hdw->v4l2_dev, 0, tuner, s_tuner, &vt);
 	}
@@ -5066,8 +5064,6 @@ void pvr2_hdw_status_poll(struct pvr2_hdw *hdw)
 {
 	struct v4l2_tuner *vtp = &hdw->tuner_signal_info;
 	memset(vtp, 0, sizeof(*vtp));
-	vtp->type = (hdw->input_val == PVR2_CVAL_INPUT_RADIO) ?
-		V4L2_TUNER_RADIO : V4L2_TUNER_ANALOG_TV;
 	hdw->tuner_signal_stale = 0;
 	/* Note: There apparently is no replacement for VIDIOC_CROPCAP
 	   using v4l2-subdev - therefore we can't support that AT ALL right

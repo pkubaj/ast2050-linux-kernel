@@ -168,7 +168,8 @@ replay:
 
 	/* Find qdisc */
 	if (!parent) {
-		q = dev->qdisc;
+		struct netdev_queue *dev_queue = netdev_get_tx_queue(dev, 0);
+		q = dev_queue->qdisc_sleeping;
 		parent = q->handle;
 	} else {
 		q = qdisc_lookup(dev, TC_H_MAJ(t->tcm_parent));
@@ -179,9 +180,6 @@ replay:
 	/* Is it classful? */
 	if ((cops = q->ops->cl_ops) == NULL)
 		return -EINVAL;
-
-	if (cops->tcf_chain == NULL)
-		return -EOPNOTSUPP;
 
 	/* Do we search for filter, attached to class? */
 	if (TC_H_MIN(parent)) {
@@ -407,6 +405,7 @@ static int tcf_node_dump(struct tcf_proto *tp, unsigned long n,
 static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 {
 	struct net *net = sock_net(skb->sk);
+	struct netdev_queue *dev_queue;
 	int t;
 	int s_t;
 	struct net_device *dev;
@@ -425,15 +424,14 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 	if ((dev = dev_get_by_index(&init_net, tcm->tcm_ifindex)) == NULL)
 		return skb->len;
 
+	dev_queue = netdev_get_tx_queue(dev, 0);
 	if (!tcm->tcm_parent)
-		q = dev->qdisc;
+		q = dev_queue->qdisc_sleeping;
 	else
 		q = qdisc_lookup(dev, TC_H_MAJ(tcm->tcm_parent));
 	if (!q)
 		goto out;
 	if ((cops = q->ops->cl_ops) == NULL)
-		goto errout;
-	if (cops->tcf_chain == NULL)
 		goto errout;
 	if (TC_H_MIN(tcm->tcm_parent)) {
 		cl = cops->get(q, tcm->tcm_parent);

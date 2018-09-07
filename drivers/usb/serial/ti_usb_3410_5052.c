@@ -98,7 +98,8 @@ struct ti_device {
 
 static int ti_startup(struct usb_serial *serial);
 static void ti_release(struct usb_serial *serial);
-static int ti_open(struct tty_struct *tty, struct usb_serial_port *port);
+static int ti_open(struct tty_struct *tty, struct usb_serial_port *port,
+		struct file *file);
 static void ti_close(struct usb_serial_port *port);
 static int ti_write(struct tty_struct *tty, struct usb_serial_port *port,
 		const unsigned char *data, int count);
@@ -366,9 +367,9 @@ failed_1port:
 
 static void __exit ti_exit(void)
 {
-	usb_deregister(&ti_usb_driver);
 	usb_serial_deregister(&ti_1port_device);
 	usb_serial_deregister(&ti_2port_device);
+	usb_deregister(&ti_usb_driver);
 }
 
 
@@ -491,7 +492,8 @@ static void ti_release(struct usb_serial *serial)
 }
 
 
-static int ti_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int ti_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *file)
 {
 	struct ti_port *tport = usb_get_serial_port_data(port);
 	struct ti_device *tdev;

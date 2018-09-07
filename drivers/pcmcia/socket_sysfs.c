@@ -300,7 +300,7 @@ static ssize_t pccard_show_cis(struct kobject *kobj,
 
 		if (!(s->state & SOCKET_PRESENT))
 			return -ENODEV;
-		if (pccard_validate_cis(s, &chains))
+		if (pccard_validate_cis(s, BIND_FN_ALL, &chains))
 			return -EIO;
 		if (!chains)
 			return -ENODATA;

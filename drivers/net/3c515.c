@@ -369,8 +369,8 @@ static int corkscrew_setup(struct net_device *dev, int ioaddr,
 			    struct pnp_dev *idev, int card_number);
 static int corkscrew_open(struct net_device *dev);
 static void corkscrew_timer(unsigned long arg);
-static netdev_tx_t corkscrew_start_xmit(struct sk_buff *skb,
-					struct net_device *dev);
+static int corkscrew_start_xmit(struct sk_buff *skb,
+				struct net_device *dev);
 static int corkscrew_rx(struct net_device *dev);
 static void corkscrew_timeout(struct net_device *dev);
 static int boomerang_rx(struct net_device *dev);
@@ -998,8 +998,8 @@ static void corkscrew_timeout(struct net_device *dev)
 	netif_wake_queue(dev);
 }
 
-static netdev_tx_t corkscrew_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static int corkscrew_start_xmit(struct sk_buff *skb,
+				struct net_device *dev)
 {
 	struct corkscrew_private *vp = netdev_priv(dev);
 	int ioaddr = dev->base_addr;
@@ -1056,7 +1056,7 @@ static netdev_tx_t corkscrew_start_xmit(struct sk_buff *skb,
 			netif_wake_queue(dev);
 		}
 		dev->trans_start = jiffies;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 	/* Put out the doubleword header... */
 	outl(skb->len, ioaddr + TX_FIFO);
@@ -1119,7 +1119,7 @@ static netdev_tx_t corkscrew_start_xmit(struct sk_buff *skb,
 			outb(0x00, ioaddr + TxStatus);	/* Pop the status stack. */
 		}
 	}
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* The interrupt handler does all of the Rx thread work and cleans up

@@ -68,11 +68,12 @@ static struct the_nilfs *alloc_nilfs(struct block_device *bdev)
 
 	nilfs->ns_bdev = bdev;
 	atomic_set(&nilfs->ns_count, 1);
+	atomic_set(&nilfs->ns_writer_refcount, -1);
 	atomic_set(&nilfs->ns_ndirtyblks, 0);
 	init_rwsem(&nilfs->ns_sem);
 	init_rwsem(&nilfs->ns_super_sem);
 	mutex_init(&nilfs->ns_mount_mutex);
-	init_rwsem(&nilfs->ns_writer_sem);
+	mutex_init(&nilfs->ns_writer_mutex);
 	INIT_LIST_HEAD(&nilfs->ns_list);
 	INIT_LIST_HEAD(&nilfs->ns_supers);
 	spin_lock_init(&nilfs->ns_last_segment_lock);
@@ -187,19 +188,23 @@ static int nilfs_load_super_root(struct the_nilfs *nilfs,
 	inode_size = nilfs->ns_inode_size;
 
 	err = -ENOMEM;
-	nilfs->ns_dat = nilfs_mdt_new(nilfs, NULL, NILFS_DAT_INO);
+	nilfs->ns_dat = nilfs_mdt_new(
+		nilfs, NULL, NILFS_DAT_INO, NILFS_DAT_GFP);
 	if (unlikely(!nilfs->ns_dat))
 		goto failed;
 
-	nilfs->ns_gc_dat = nilfs_mdt_new(nilfs, NULL, NILFS_DAT_INO);
+	nilfs->ns_gc_dat = nilfs_mdt_new(
+		nilfs, NULL, NILFS_DAT_INO, NILFS_DAT_GFP);
 	if (unlikely(!nilfs->ns_gc_dat))
 		goto failed_dat;
 
-	nilfs->ns_cpfile = nilfs_mdt_new(nilfs, NULL, NILFS_CPFILE_INO);
+	nilfs->ns_cpfile = nilfs_mdt_new(
+		nilfs, NULL, NILFS_CPFILE_INO, NILFS_CPFILE_GFP);
 	if (unlikely(!nilfs->ns_cpfile))
 		goto failed_gc_dat;
 
-	nilfs->ns_sufile = nilfs_mdt_new(nilfs, NULL, NILFS_SUFILE_INO);
+	nilfs->ns_sufile = nilfs_mdt_new(
+		nilfs, NULL, NILFS_SUFILE_INO, NILFS_SUFILE_GFP);
 	if (unlikely(!nilfs->ns_sufile))
 		goto failed_cpfile;
 
@@ -478,7 +483,6 @@ static int nilfs_load_super_block(struct the_nilfs *nilfs,
 		brelse(sbh[1]);
 		sbh[1] = NULL;
 		sbp[1] = NULL;
-		valid[1] = 0;
 		swp = 0;
 	}
 	if (!valid[swp]) {
@@ -592,7 +596,9 @@ int init_nilfs(struct the_nilfs *nilfs, struct nilfs_sb_info *sbi, char *data)
 
 	nilfs->ns_mount_state = le16_to_cpu(sbp->s_state);
 
-	bdi = nilfs->ns_bdev->bd_inode->i_mapping->backing_dev_info;
+	bdi = nilfs->ns_bdev->bd_inode_backing_dev_info;
+	if (!bdi)
+		bdi = nilfs->ns_bdev->bd_inode->i_mapping->backing_dev_info;
 	nilfs->ns_bdi = bdi ? : &default_backing_dev_info;
 
 	/* Finding last segment */

@@ -31,9 +31,19 @@
 #define	TA(a)	(MCF_MBAR + MCFTIMER_BASE1 + (a))
 
 /*
+ *	Default the timer and vector to use for ColdFire. Some ColdFire
+ *	CPU's and some boards may want different. Their sub-architecture
+ *	startup code (in config.c) can change these if they want.
+ */
+unsigned int	mcf_timervector = 29;
+unsigned int	mcf_profilevector = 31;
+unsigned int	mcf_timerlevel = 5;
+
+/*
  *	These provide the underlying interrupt vector support.
  *	Unfortunately it is a little different on each ColdFire.
  */
+extern void mcf_settimericr(int timer, int level);
 void coldfire_profile_init(void);
 
 #if defined(CONFIG_M532x)
@@ -97,6 +107,8 @@ static struct clocksource mcftmr_clk = {
 
 void hw_timer_init(void)
 {
+	setup_irq(mcf_timervector, &mcftmr_timer_irq);
+
 	__raw_writew(MCFTIMER_TMR_DISABLE, TA(MCFTIMER_TMR));
 	mcftmr_cycles_per_jiffy = FREQ / HZ;
 	/*
@@ -112,7 +124,7 @@ void hw_timer_init(void)
 	mcftmr_clk.mult = clocksource_hz2mult(FREQ, mcftmr_clk.shift);
 	clocksource_register(&mcftmr_clk);
 
-	setup_irq(MCF_IRQ_TIMER, &mcftmr_timer_irq);
+	mcf_settimericr(1, mcf_timerlevel);
 
 #ifdef CONFIG_HIGHPROFILE
 	coldfire_profile_init();
@@ -159,6 +171,8 @@ void coldfire_profile_init(void)
 	printk(KERN_INFO "PROFILE: lodging TIMER2 @ %dHz as profile timer\n",
 	       PROFILEHZ);
 
+	setup_irq(mcf_profilevector, &coldfire_profile_irq);
+
 	/* Set up TIMER 2 as high speed profile clock */
 	__raw_writew(MCFTIMER_TMR_DISABLE, PA(MCFTIMER_TMR));
 
@@ -166,7 +180,7 @@ void coldfire_profile_init(void)
 	__raw_writew(MCFTIMER_TMR_ENORI | MCFTIMER_TMR_CLK16 |
 		MCFTIMER_TMR_RESTART | MCFTIMER_TMR_ENABLE, PA(MCFTIMER_TMR));
 
-	setup_irq(MCF_IRQ_PROFILER, &coldfire_profile_irq);
+	mcf_settimericr(2, 7);
 }
 
 /***************************************************************************/

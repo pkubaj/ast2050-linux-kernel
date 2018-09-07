@@ -50,6 +50,8 @@
 #define VIAFB_GET_GAMMA_LUT		0x56494124
 #define VIAFB_SET_GAMMA_LUT		0x56494125
 #define VIAFB_GET_GAMMA_SUPPORT_STATE	0x56494126
+#define VIAFB_SET_VIDEO_DEVICE		0x56494127
+#define VIAFB_GET_VIDEO_DEVICE		0x56494128
 #define VIAFB_SET_SECOND_MODE		0x56494129
 #define VIAFB_SYNC_SURFACE		0x56494130
 #define VIAFB_GET_DRIVER_CAPS		0x56494131
@@ -177,7 +179,9 @@ struct viafb_ioctl_setting {
 	unsigned short second_dev_bpp;
 	/* Indicate which device are primary display device. */
 	unsigned int primary_device;
-	unsigned int struct_reserved[35];
+	/* Indicate which device will show video. only valid in duoview mode */
+	unsigned int video_device_status;
+	unsigned int struct_reserved[34];
 	struct viafb_ioctl_lcd_attribute lcd_attributes;
 };
 

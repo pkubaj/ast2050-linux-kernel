@@ -11,8 +11,6 @@
 #ifndef _ASM_DELAY_H
 #define _ASM_DELAY_H
 
-#include <linux/param.h>
-
 extern void __delay(unsigned int loops);
 extern void __ndelay(unsigned int ns);
 extern void __udelay(unsigned int us);

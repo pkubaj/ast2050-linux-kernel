@@ -746,8 +746,16 @@ static void ncp_put_super(struct super_block *sb)
 
 #ifdef CONFIG_NCPFS_NLS
 	/* unload the NLS charsets */
-	unload_nls(server->nls_vol);
-	unload_nls(server->nls_io);
+	if (server->nls_vol)
+	{
+		unload_nls(server->nls_vol);
+		server->nls_vol = NULL;
+	}
+	if (server->nls_io)
+	{
+		unload_nls(server->nls_io);
+		server->nls_io = NULL;
+	}
 #endif /* CONFIG_NCPFS_NLS */
 
 	if (server->info_filp)

@@ -59,6 +59,13 @@ asmlinkage void aesni_cbc_enc(struct crypto_aes_ctx *ctx, u8 *out,
 asmlinkage void aesni_cbc_dec(struct crypto_aes_ctx *ctx, u8 *out,
 			      const u8 *in, unsigned int len, u8 *iv);
 
+static inline int kernel_fpu_using(void)
+{
+	if (in_interrupt() && !(read_cr0() & X86_CR0_TS))
+		return 1;
+	return 0;
+}
+
 static inline struct crypto_aes_ctx *aes_ctx(void *raw_ctx)
 {
 	unsigned long addr = (unsigned long)raw_ctx;
@@ -82,7 +89,7 @@ static int aes_set_key_common(struct crypto_tfm *tfm, void *raw_ctx,
 		return -EINVAL;
 	}
 
-	if (!irq_fpu_usable())
+	if (kernel_fpu_using())
 		err = crypto_aes_expand_key(ctx, in_key, key_len);
 	else {
 		kernel_fpu_begin();
@@ -103,7 +110,7 @@ static void aes_encrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
 {
 	struct crypto_aes_ctx *ctx = aes_ctx(crypto_tfm_ctx(tfm));
 
-	if (!irq_fpu_usable())
+	if (kernel_fpu_using())
 		crypto_aes_encrypt_x86(ctx, dst, src);
 	else {
 		kernel_fpu_begin();
@@ -116,7 +123,7 @@ static void aes_decrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
 {
 	struct crypto_aes_ctx *ctx = aes_ctx(crypto_tfm_ctx(tfm));
 
-	if (!irq_fpu_usable())
+	if (kernel_fpu_using())
 		crypto_aes_decrypt_x86(ctx, dst, src);
 	else {
 		kernel_fpu_begin();
@@ -342,7 +349,7 @@ static int ablk_encrypt(struct ablkcipher_request *req)
 	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
 	struct async_aes_ctx *ctx = crypto_ablkcipher_ctx(tfm);
 
-	if (!irq_fpu_usable()) {
+	if (kernel_fpu_using()) {
 		struct ablkcipher_request *cryptd_req =
 			ablkcipher_request_ctx(req);
 		memcpy(cryptd_req, req, sizeof(*req));
@@ -363,7 +370,7 @@ static int ablk_decrypt(struct ablkcipher_request *req)
 	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
 	struct async_aes_ctx *ctx = crypto_ablkcipher_ctx(tfm);
 
-	if (!irq_fpu_usable()) {
+	if (kernel_fpu_using()) {
 		struct ablkcipher_request *cryptd_req =
 			ablkcipher_request_ctx(req);
 		memcpy(cryptd_req, req, sizeof(*req));
@@ -629,7 +636,7 @@ static int __init aesni_init(void)
 	int err;
 
 	if (!cpu_has_aes) {
-		printk(KERN_INFO "Intel AES-NI instructions are not detected.\n");
+		printk(KERN_ERR "Intel AES-NI instructions are not detected.\n");
 		return -ENODEV;
 	}
 	if ((err = crypto_register_alg(&aesni_alg)))

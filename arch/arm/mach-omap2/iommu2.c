@@ -79,7 +79,7 @@ static int omap2_iommu_enable(struct iommu *obj)
 		l = iommu_read_reg(obj, MMU_SYSSTATUS);
 		if (l & MMU_SYS_RESETDONE)
 			break;
-	} while (!time_after(jiffies, timeout));
+	} while (time_after(jiffies, timeout));
 
 	if (!(l & MMU_SYS_RESETDONE)) {
 		dev_err(obj->dev, "can't take mmu out of reset\n");
@@ -217,19 +217,10 @@ static ssize_t omap2_dump_cr(struct iommu *obj, struct cr_regs *cr, char *buf)
 }
 
 #define pr_reg(name)							\
-	do {								\
-		ssize_t bytes;						\
-		const char *str = "%20s: %08x\n";			\
-		const int maxcol = 32;					\
-		bytes = snprintf(p, maxcol, str, __stringify(name),	\
-				 iommu_read_reg(obj, MMU_##name));	\
-		p += bytes;						\
-		len -= bytes;						\
-		if (len < maxcol)					\
-			goto out;					\
-	} while (0)
+	p += sprintf(p, "%20s: %08x\n",					\
+		     __stringify(name), iommu_read_reg(obj, MMU_##name));
 
-static ssize_t omap2_iommu_dump_ctx(struct iommu *obj, char *buf, ssize_t len)
+static ssize_t omap2_iommu_dump_ctx(struct iommu *obj, char *buf)
 {
 	char *p = buf;
 
@@ -251,7 +242,7 @@ static ssize_t omap2_iommu_dump_ctx(struct iommu *obj, char *buf, ssize_t len)
 	pr_reg(READ_CAM);
 	pr_reg(READ_RAM);
 	pr_reg(EMU_FAULT_AD);
-out:
+
 	return p - buf;
 }
 

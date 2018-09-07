@@ -22,7 +22,11 @@ SECTIONS
   _text = .;
   _stext = .;
   __init_begin = .;
-  INIT_TEXT_SECTION(0)
+  .init.text : {
+	_sinittext = .;
+	INIT_TEXT
+	_einittext = .;
+  }
   . = ALIGN(PAGE_SIZE);
 
   .text      :
@@ -43,29 +47,13 @@ SECTIONS
 	__syscall_stub_end = .;
   }
 
-  /*
-   * These are needed even in a static link, even if they wind up being empty.
-   * Newer glibc needs these __rel{,a}_iplt_{start,end} symbols.
-   */
-  .rel.plt : {
-	*(.rel.plt)
-	PROVIDE_HIDDEN(__rel_iplt_start = .);
-	*(.rel.iplt)
-	PROVIDE_HIDDEN(__rel_iplt_end = .);
-  }
-  .rela.plt : {
-	*(.rela.plt)
-	PROVIDE_HIDDEN(__rela_iplt_start = .);
-	*(.rela.iplt)
-	PROVIDE_HIDDEN(__rela_iplt_end = .);
-  }
-
   #include "asm/common.lds.S"
 
   init.data : { INIT_DATA }
   .data    :
   {
-    INIT_TASK_DATA(KERNEL_STACK_SIZE)
+    . = ALIGN(KERNEL_STACK_SIZE);		/* init_task */
+    *(.data.init_task)
     . = ALIGN(KERNEL_STACK_SIZE);
     *(.data.init_irqstack)
     DATA_DATA
@@ -93,16 +81,23 @@ SECTIONS
   _edata  =  .;
   PROVIDE (edata = .);
   . = ALIGN(PAGE_SIZE);
-  __bss_start = .;
-  PROVIDE(_bss_start = .);
-  SBSS(0)
-  BSS(0)
+  .sbss      :
+  {
+   __bss_start = .;
+   PROVIDE(_bss_start = .);
+   *(.sbss)
+   *(.scommon)
+  }
+  .bss       :
+  {
+   *(.dynbss)
+   *(.bss)
+   *(COMMON)
+  }
   _end = .;
   PROVIDE (end = .);
 
   STABS_DEBUG
 
   DWARF_DEBUG
-
-  DISCARDS
 }

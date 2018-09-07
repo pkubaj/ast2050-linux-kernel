@@ -46,7 +46,10 @@ static void isofs_put_super(struct super_block *sb)
 #ifdef CONFIG_JOLIET
 	lock_kernel();
 
-	unload_nls(sbi->s_nls_iocharset);
+	if (sbi->s_nls_iocharset) {
+		unload_nls(sbi->s_nls_iocharset);
+		sbi->s_nls_iocharset = NULL;
+	}
 
 	unlock_kernel();
 #endif
@@ -56,7 +59,7 @@ static void isofs_put_super(struct super_block *sb)
 	return;
 }
 
-static int isofs_read_inode(struct inode *, int relocated);
+static int isofs_read_inode(struct inode *);
 static int isofs_statfs (struct dentry *, struct kstatfs *);
 
 static struct kmem_cache *isofs_inode_cachep;
@@ -909,7 +912,8 @@ out_no_root:
 		printk(KERN_WARNING "%s: get root inode failed\n", __func__);
 out_no_inode:
 #ifdef CONFIG_JOLIET
-	unload_nls(sbi->s_nls_iocharset);
+	if (sbi->s_nls_iocharset)
+		unload_nls(sbi->s_nls_iocharset);
 #endif
 	goto out_freesbi;
 out_no_read:
@@ -1210,7 +1214,7 @@ out_toomany:
 	goto out;
 }
 
-static int isofs_read_inode(struct inode *inode, int relocated)
+static int isofs_read_inode(struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
 	struct isofs_sb_info *sbi = ISOFS_SB(sb);
@@ -1355,7 +1359,7 @@ static int isofs_read_inode(struct inode *inode, int relocated)
 	 */
 
 	if (!high_sierra) {
-		parse_rock_ridge_inode(de, inode, relocated);
+		parse_rock_ridge_inode(de, inode);
 		/* if we want uid/gid set, override the rock ridge setting */
 		if (sbi->s_uid_set)
 			inode->i_uid = sbi->s_uid;
@@ -1434,10 +1438,9 @@ static int isofs_iget5_set(struct inode *ino, void *data)
  * offset that point to the underlying meta-data for the inode.  The
  * code below is otherwise similar to the iget() code in
  * include/linux/fs.h */
-struct inode *__isofs_iget(struct super_block *sb,
-			   unsigned long block,
-			   unsigned long offset,
-			   int relocated)
+struct inode *isofs_iget(struct super_block *sb,
+			 unsigned long block,
+			 unsigned long offset)
 {
 	unsigned long hashval;
 	struct inode *inode;
@@ -1459,7 +1462,7 @@ struct inode *__isofs_iget(struct super_block *sb,
 		return ERR_PTR(-ENOMEM);
 
 	if (inode->i_state & I_NEW) {
-		ret = isofs_read_inode(inode, relocated);
+		ret = isofs_read_inode(inode);
 		if (ret < 0) {
 			iget_failed(inode);
 			inode = ERR_PTR(ret);

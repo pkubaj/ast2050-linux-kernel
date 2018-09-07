@@ -243,9 +243,9 @@ enum { KE_END, KE_KEY, KE_SW, KE_WIFI, KE_BLUETOOTH };
 #define FE_UNTESTED 0x80
 
 static struct key_entry *keymap; /* = NULL; Current key map */
-static bool have_wifi;
-static bool have_bluetooth;
-static int leds_present;	/* bitmask of leds present */
+static int have_wifi;
+static int have_bluetooth;
+static int have_leds;
 
 static int __init dmi_matched(const struct dmi_system_id *dmi)
 {
@@ -254,11 +254,11 @@ static int __init dmi_matched(const struct dmi_system_id *dmi)
 	keymap = dmi->driver_data;
 	for (key = keymap; key->type != KE_END; key++) {
 		if (key->type == KE_WIFI)
-			have_wifi = true;
+			have_wifi = 1;
 		else if (key->type == KE_BLUETOOTH)
-			have_bluetooth = true;
+			have_bluetooth = 1;
 	}
-	leds_present = key->code & (FE_MAIL_LED | FE_WIFI_LED);
+	have_leds = key->code & (FE_MAIL_LED | FE_WIFI_LED);
 
 	return 1;
 }
@@ -611,24 +611,10 @@ static struct key_entry keymap_wistron_generic[] __initdata = {
 	{ KE_END, 0 }
 };
 
-static struct key_entry keymap_aopen_1557[] __initdata = {
-	{ KE_KEY,  0x01, {KEY_HELP} },
-	{ KE_KEY,  0x11, {KEY_PROG1} },
-	{ KE_KEY,  0x12, {KEY_PROG2} },
-	{ KE_WIFI, 0x30 },
-	{ KE_KEY,  0x22, {KEY_REWIND} },
-	{ KE_KEY,  0x23, {KEY_FORWARD} },
-	{ KE_KEY,  0x24, {KEY_PLAYPAUSE} },
-	{ KE_KEY,  0x25, {KEY_STOPCD} },
-	{ KE_KEY,  0x31, {KEY_MAIL} },
-	{ KE_KEY,  0x36, {KEY_WWW} },
-	{ KE_END,  0 }
-};
-
 static struct key_entry keymap_prestigio[] __initdata = {
 	{ KE_KEY,  0x11, {KEY_PROG1} },
 	{ KE_KEY,  0x12, {KEY_PROG2} },
-	{ KE_WIFI, 0x30 },
+	{ KE_WIFI,  0x30 },
 	{ KE_KEY,  0x22, {KEY_REWIND} },
 	{ KE_KEY,  0x23, {KEY_FORWARD} },
 	{ KE_KEY,  0x24, {KEY_PLAYPAUSE} },
@@ -936,15 +922,6 @@ static struct dmi_system_id dmi_ids[] __initdata = {
 	},
 	{
 		.callback = dmi_matched,
-		.ident = "Medion MD 42200",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Medion"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "WIM 2030"),
-		},
-		.driver_data = keymap_fs_amilo_pro_v2000
-	},
-	{
-		.callback = dmi_matched,
 		.ident = "Medion MD 96500",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "MEDIONPC"),
@@ -1008,8 +985,6 @@ static int __init select_keymap(void)
 	if (keymap_name != NULL) {
 		if (strcmp (keymap_name, "1557/MS2141") == 0)
 			keymap = keymap_wistron_ms2141;
-		else if (strcmp (keymap_name, "aopen1557") == 0)
-			keymap = keymap_aopen_1557;
 		else if (strcmp (keymap_name, "prestigio") == 0)
 			keymap = keymap_prestigio;
 		else if (strcmp (keymap_name, "generic") == 0)
@@ -1034,8 +1009,8 @@ static int __init select_keymap(void)
 
 static struct input_polled_dev *wistron_idev;
 static unsigned long jiffies_last_press;
-static bool wifi_enabled;
-static bool bluetooth_enabled;
+static int wifi_enabled;
+static int bluetooth_enabled;
 
 static void report_key(struct input_dev *dev, unsigned int keycode)
 {
@@ -1078,24 +1053,24 @@ static struct led_classdev wistron_wifi_led = {
 
 static void __devinit wistron_led_init(struct device *parent)
 {
-	if (leds_present & FE_WIFI_LED) {
+	if (have_leds & FE_WIFI_LED) {
 		u16 wifi = bios_get_default_setting(WIFI);
 		if (wifi & 1) {
 			wistron_wifi_led.brightness = (wifi & 2) ? LED_FULL : LED_OFF;
 			if (led_classdev_register(parent, &wistron_wifi_led))
-				leds_present &= ~FE_WIFI_LED;
+				have_leds &= ~FE_WIFI_LED;
 			else
 				bios_set_state(WIFI, wistron_wifi_led.brightness);
 
 		} else
-			leds_present &= ~FE_WIFI_LED;
+			have_leds &= ~FE_WIFI_LED;
 	}
 
-	if (leds_present & FE_MAIL_LED) {
+	if (have_leds & FE_MAIL_LED) {
 		/* bios_get_default_setting(MAIL) always retuns 0, so just turn the led off */
 		wistron_mail_led.brightness = LED_OFF;
 		if (led_classdev_register(parent, &wistron_mail_led))
-			leds_present &= ~FE_MAIL_LED;
+			have_leds &= ~FE_MAIL_LED;
 		else
 			bios_set_state(MAIL_LED, wistron_mail_led.brightness);
 	}
@@ -1103,28 +1078,28 @@ static void __devinit wistron_led_init(struct device *parent)
 
 static void __devexit wistron_led_remove(void)
 {
-	if (leds_present & FE_MAIL_LED)
+	if (have_leds & FE_MAIL_LED)
 		led_classdev_unregister(&wistron_mail_led);
 
-	if (leds_present & FE_WIFI_LED)
+	if (have_leds & FE_WIFI_LED)
 		led_classdev_unregister(&wistron_wifi_led);
 }
 
 static inline void wistron_led_suspend(void)
 {
-	if (leds_present & FE_MAIL_LED)
+	if (have_leds & FE_MAIL_LED)
 		led_classdev_suspend(&wistron_mail_led);
 
-	if (leds_present & FE_WIFI_LED)
+	if (have_leds & FE_WIFI_LED)
 		led_classdev_suspend(&wistron_wifi_led);
 }
 
 static inline void wistron_led_resume(void)
 {
-	if (leds_present & FE_MAIL_LED)
+	if (have_leds & FE_MAIL_LED)
 		led_classdev_resume(&wistron_mail_led);
 
-	if (leds_present & FE_WIFI_LED)
+	if (have_leds & FE_WIFI_LED)
 		led_classdev_resume(&wistron_wifi_led);
 }
 
@@ -1337,7 +1312,7 @@ static int __devinit wistron_probe(struct platform_device *dev)
 	if (have_wifi) {
 		u16 wifi = bios_get_default_setting(WIFI);
 		if (wifi & 1)
-			wifi_enabled = wifi & 2;
+			wifi_enabled = (wifi & 2) ? 1 : 0;
 		else
 			have_wifi = 0;
 
@@ -1348,16 +1323,15 @@ static int __devinit wistron_probe(struct platform_device *dev)
 	if (have_bluetooth) {
 		u16 bt = bios_get_default_setting(BLUETOOTH);
 		if (bt & 1)
-			bluetooth_enabled = bt & 2;
+			bluetooth_enabled = (bt & 2) ? 1 : 0;
 		else
-			have_bluetooth = false;
+			have_bluetooth = 0;
 
 		if (have_bluetooth)
 			bios_set_state(BLUETOOTH, bluetooth_enabled);
 	}
 
 	wistron_led_init(&dev->dev);
-
 	err = setup_input_dev();
 	if (err) {
 		bios_detach();
@@ -1378,7 +1352,7 @@ static int __devexit wistron_remove(struct platform_device *dev)
 }
 
 #ifdef CONFIG_PM
-static int wistron_suspend(struct device *dev)
+static int wistron_suspend(struct platform_device *dev, pm_message_t state)
 {
 	if (have_wifi)
 		bios_set_state(WIFI, 0);
@@ -1387,11 +1361,10 @@ static int wistron_suspend(struct device *dev)
 		bios_set_state(BLUETOOTH, 0);
 
 	wistron_led_suspend();
-
 	return 0;
 }
 
-static int wistron_resume(struct device *dev)
+static int wistron_resume(struct platform_device *dev)
 {
 	if (have_wifi)
 		bios_set_state(WIFI, wifi_enabled);
@@ -1400,30 +1373,24 @@ static int wistron_resume(struct device *dev)
 		bios_set_state(BLUETOOTH, bluetooth_enabled);
 
 	wistron_led_resume();
-
 	poll_bios(true);
 
 	return 0;
 }
-
-static const struct dev_pm_ops wistron_pm_ops = {
-	.suspend	= wistron_suspend,
-	.resume		= wistron_resume,
-	.poweroff	= wistron_suspend,
-	.restore	= wistron_resume,
-};
+#else
+#define wistron_suspend		NULL
+#define wistron_resume		NULL
 #endif
 
 static struct platform_driver wistron_driver = {
 	.driver		= {
 		.name	= "wistron-bios",
 		.owner	= THIS_MODULE,
-#if CONFIG_PM
-		.pm	= &wistron_pm_ops,
-#endif
 	},
 	.probe		= wistron_probe,
 	.remove		= __devexit_p(wistron_remove),
+	.suspend	= wistron_suspend,
+	.resume		= wistron_resume,
 };
 
 static int __init wb_module_init(void)

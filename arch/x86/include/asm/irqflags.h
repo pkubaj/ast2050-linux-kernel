@@ -13,13 +13,14 @@ static inline unsigned long native_save_fl(void)
 	unsigned long flags;
 
 	/*
-	 * "=rm" is safe here, because "pop" adjusts the stack before
-	 * it evaluates its effective address -- this is part of the
-	 * documented behavior of the "pop" instruction.
+	 * Note: this needs to be "=r" not "=rm", because we have the
+	 * stack offset from what gcc expects at the time the "pop" is
+	 * executed, and so a memory reference with respect to the stack
+	 * would end up using the wrong address.
 	 */
 	asm volatile("# __raw_save_flags\n\t"
 		     "pushf ; pop %0"
-		     : "=rm" (flags)
+		     : "=r" (flags)
 		     : /* no input */
 		     : "memory");
 
@@ -130,7 +131,7 @@ static inline unsigned long __raw_local_irq_save(void)
 
 #define PARAVIRT_ADJUST_EXCEPTION_FRAME	/*  */
 
-#define INTERRUPT_RETURN	jmp native_iret
+#define INTERRUPT_RETURN	iretq
 #define USERGS_SYSRET64				\
 	swapgs;					\
 	sysretq;

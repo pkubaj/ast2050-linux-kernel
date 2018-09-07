@@ -117,7 +117,7 @@ EXPORT_SYMBOL(kfifo_free);
  * writer, you don't need extra locking to use these functions.
  */
 unsigned int __kfifo_put(struct kfifo *fifo,
-			const unsigned char *buffer, unsigned int len)
+			 unsigned char *buffer, unsigned int len)
 {
 	unsigned int l;
 

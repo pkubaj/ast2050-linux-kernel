@@ -26,7 +26,6 @@ extern void fpu_init(void);
 extern void mxcsr_feature_mask_init(void);
 extern int init_fpu(struct task_struct *child);
 extern asmlinkage void math_state_restore(void);
-extern void __math_state_restore(void);
 extern void init_thread_xstate(void);
 extern int dump_fpu(struct pt_regs *, struct user_i387_struct *);
 
@@ -242,13 +241,12 @@ clear_state:
 	/* AMD K7/K8 CPUs don't save/restore FDP/FIP/FOP unless an exception
 	   is pending.  Clear the x87 state here by setting it to fixed
 	   values. safe_address is a random variable that should be in L1 */
-	if (unlikely(boot_cpu_has(X86_FEATURE_FXSAVE_LEAK))) {
-		asm volatile(
-			"fnclex\n\t"
-			"emms\n\t"
-			"fildl %[addr]"        /* set F?P to defined value */
-			: : [addr] "m" (safe_address));
-	}
+	alternative_input(
+		GENERIC_NOP8 GENERIC_NOP2,
+		"emms\n\t"	  	/* clear stack tags */
+		"fildl %[addr]", 	/* set F?P to defined value */
+		X86_FEATURE_FXSAVE_LEAK,
+		[addr] "m" (safe_address));
 end:
 	task_thread_info(tsk)->status &= ~TS_USEDFPU;
 }
@@ -301,14 +299,6 @@ static inline void kernel_fpu_end(void)
 {
 	stts();
 	preempt_enable();
-}
-
-static inline bool irq_fpu_usable(void)
-{
-	struct pt_regs *regs;
-
-	return !in_interrupt() || !(regs = get_irq_regs()) || \
-		user_mode(regs) || (read_cr0() & X86_CR0_TS);
 }
 
 /*

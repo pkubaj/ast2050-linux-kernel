@@ -31,13 +31,26 @@
 #ifndef __WPA2_H__
 #define __WPA2_H__
 
+
+#if !defined(__TTYPE_H__)
 #include "ttype.h"
+#endif
+#if !defined(__80211MGR_H__)
 #include "80211mgr.h"
+#endif
+#if !defined(__80211HDR_H__)
 #include "80211hdr.h"
+#endif
+#if !defined(__BSSDB_H__)
 #include "bssdb.h"
+#endif
+#if !defined(__VNTWIFI_H__)
+#include "vntwifi.h"
+#endif
+
+
 
 /*---------------------  Export Definitions -------------------------*/
-#define MAX_PMKID_CACHE         16
 
 typedef struct tagsPMKIDInfo {
     BYTE    abyBSSID[6];
@@ -57,6 +70,9 @@ typedef struct tagSPMKIDCache {
 /*---------------------  Export Types  ------------------------------*/
 
 /*---------------------  Export Functions  --------------------------*/
+#ifdef __cplusplus
+extern "C" {                            /* Assume C declarations for C++ */
+#endif /* __cplusplus */
 
 VOID
 WPA2_ClearRSN (
@@ -74,5 +90,11 @@ WPA2uSetIEs(
     IN PVOID pMgmtHandle,
     OUT PWLAN_IE_RSN pRSNIEs
     );
+
+
+#ifdef __cplusplus
+}                                       /* End of extern "C" { */
+#endif /* __cplusplus */
+
 
 #endif // __WPA2_H__

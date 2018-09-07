@@ -324,7 +324,7 @@ static int bdx_fw_load(struct bdx_priv *priv)
 	ENTER;
 	master = READ_REG(priv, regINIT_SEMAPHORE);
 	if (!READ_REG(priv, regINIT_STATUS) && master) {
-		rc = request_firmware(&fw, "tehuti/bdx.bin", &priv->pdev->dev);
+		rc = request_firmware(&fw, "tehuti/firmware.bin", &priv->pdev->dev);
 		if (rc)
 			goto out;
 		bdx_tx_push_desc_safe(priv, (char *)fw->data, fw->size);
@@ -1622,8 +1622,7 @@ static inline int bdx_tx_space(struct bdx_priv *priv)
  *   the driver. Note: the driver must NOT put the skb in its DMA ring.
  * o NETDEV_TX_LOCKED Locking failed, please retry quickly.
  */
-static netdev_tx_t bdx_tx_transmit(struct sk_buff *skb,
-				   struct net_device *ndev)
+static int bdx_tx_transmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct bdx_priv *priv = netdev_priv(ndev);
 	struct txd_fifo *f = &priv->txd_fifo0;
@@ -2428,7 +2427,7 @@ static void bdx_get_ethtool_stats(struct net_device *netdev,
  */
 static void bdx_ethtool_ops(struct net_device *netdev)
 {
-	static const struct ethtool_ops bdx_ethtool_ops = {
+	static struct ethtool_ops bdx_ethtool_ops = {
 		.get_settings = bdx_get_settings,
 		.get_drvinfo = bdx_get_drvinfo,
 		.get_link = ethtool_op_get_link,
@@ -2524,4 +2523,4 @@ module_exit(bdx_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(BDX_DRV_DESC);
-MODULE_FIRMWARE("tehuti/bdx.bin");
+MODULE_FIRMWARE("tehuti/firmware.bin");

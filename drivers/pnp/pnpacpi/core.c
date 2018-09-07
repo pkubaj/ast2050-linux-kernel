@@ -153,7 +153,6 @@ static int __init pnpacpi_add_device(struct acpi_device *device)
 	acpi_handle temp = NULL;
 	acpi_status status;
 	struct pnp_dev *dev;
-	struct acpi_hardware_id *id;
 
 	/*
 	 * If a PnPacpi device is not present , the device
@@ -194,12 +193,15 @@ static int __init pnpacpi_add_device(struct acpi_device *device)
 	if (dev->capabilities & PNP_CONFIGURABLE)
 		pnpacpi_parse_resource_option_data(dev);
 
-	list_for_each_entry(id, &device->pnp.ids, list) {
-		if (!strcmp(id->id, acpi_device_hid(device)))
-			continue;
-		if (!ispnpidacpi(id->id))
-			continue;
-		pnp_add_id(dev, id->id);
+	if (device->flags.compatible_ids) {
+		struct acpi_compatible_id_list *cid_list = device->pnp.cid_list;
+		int i;
+
+		for (i = 0; i < cid_list->count; i++) {
+			if (!ispnpidacpi(cid_list->id[i].value))
+				continue;
+			pnp_add_id(dev, cid_list->id[i].value);
+		}
 	}
 
 	/* clear out the damaged flags */
@@ -230,8 +232,9 @@ static int __init acpi_pnp_match(struct device *dev, void *_pnp)
 	struct pnp_dev *pnp = _pnp;
 
 	/* true means it matched */
-	return !acpi_get_physical_device(acpi->handle)
-	    && compare_pnp_id(pnp->id, acpi_device_hid(acpi));
+	return acpi->flags.hardware_id
+	    && !acpi_get_physical_device(acpi->handle)
+	    && compare_pnp_id(pnp->id, acpi->pnp.hardware_id);
 }
 
 static int __init acpi_pnp_find_device(struct device *dev, acpi_handle * handle)

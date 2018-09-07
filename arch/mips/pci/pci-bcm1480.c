@@ -57,7 +57,7 @@ static void *cfg_space;
 #define PCI_BUS_ENABLED	1
 #define PCI_DEVICE_MODE	2
 
-static int bcm1480_bus_status;
+static int bcm1480_bus_status = 0;
 
 #define PCI_BRIDGE_DEVICE  0
 

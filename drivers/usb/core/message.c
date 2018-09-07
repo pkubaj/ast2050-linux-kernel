@@ -459,23 +459,35 @@ int usb_sg_init(struct usb_sg_request *io, struct usb_device *dev,
 			io->urbs[i]->context = io;
 
 			/*
-			 * Some systems need to revert to PIO when DMA is temporarily
-			 * unavailable.  For their sakes, both transfer_buffer and
-			 * transfer_dma are set when possible.
+			 * Some systems need to revert to PIO when DMA is
+			 * temporarily unavailable.  For their sakes, both
+			 * transfer_buffer and transfer_dma are set when
+			 * possible.  However this can only work on systems
+			 * without:
 			 *
-			 * Note that if IOMMU coalescing occurred, we cannot
-			 * trust sg_page anymore, so check if S/G list shrunk.
+			 *  - HIGHMEM, since DMA buffers located in high memory
+			 *    are not directly addressable by the CPU for PIO;
+			 *
+			 *  - IOMMU, since dma_map_sg() is allowed to use an
+			 *    IOMMU to make virtually discontiguous buffers be
+			 *    "dma-contiguous" so that PIO and DMA need diferent
+			 *    numbers of URBs.
+			 *
+			 * So when HIGHMEM or IOMMU are in use, transfer_buffer
+			 * is NULL to prevent stale pointers and to help spot
+			 * bugs.
 			 */
-			if (io->nents == io->entries && !PageHighMem(sg_page(sg)))
-				io->urbs[i]->transfer_buffer = sg_virt(sg);
-			else
-				io->urbs[i]->transfer_buffer = NULL;
-
 			if (dma) {
 				io->urbs[i]->transfer_dma = sg_dma_address(sg);
 				len = sg_dma_len(sg);
+#if defined(CONFIG_HIGHMEM) || defined(CONFIG_GART_IOMMU)
+				io->urbs[i]->transfer_buffer = NULL;
+#else
+				io->urbs[i]->transfer_buffer = sg_virt(sg);
+#endif
 			} else {
 				/* hc may use _only_ transfer_buffer */
+				io->urbs[i]->transfer_buffer = sg_virt(sg);
 				len = sg->length;
 			}
 
@@ -1185,6 +1197,13 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 {
 	int i;
 
+	dev_dbg(&dev->dev, "%s nuking %s URBs\n", __func__,
+		skip_ep0 ? "non-ep0" : "all");
+	for (i = skip_ep0; i < 16; ++i) {
+		usb_disable_endpoint(dev, i, true);
+		usb_disable_endpoint(dev, i + USB_DIR_IN, true);
+	}
+
 	/* getting rid of interfaces will disconnect
 	 * any drivers bound to them (a key side effect)
 	 */
@@ -1213,13 +1232,6 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 		dev->actconfig = NULL;
 		if (dev->state == USB_STATE_CONFIGURED)
 			usb_set_device_state(dev, USB_STATE_ADDRESS);
-	}
-
-	dev_dbg(&dev->dev, "%s nuking %s URBs\n", __func__,
-		skip_ep0 ? "non-ep0" : "all");
-	for (i = skip_ep0; i < 16; ++i) {
-		usb_disable_endpoint(dev, i, true);
-		usb_disable_endpoint(dev, i + USB_DIR_IN, true);
 	}
 }
 
@@ -1792,7 +1804,6 @@ free_interfaces:
 		intf->dev.groups = usb_interface_groups;
 		intf->dev.dma_mask = dev->dev.dma_mask;
 		INIT_WORK(&intf->reset_ws, __usb_queue_reset_device);
-		intf->minor = -1;
 		device_initialize(&intf->dev);
 		mark_quiesced(intf);
 		dev_set_name(&intf->dev, "%d-%s:%d.%d",

@@ -27,7 +27,7 @@ MODULE_DESCRIPTION("iptables security table, for MAC rules");
 				(1 << NF_INET_FORWARD) | \
 				(1 << NF_INET_LOCAL_OUT)
 
-static const struct
+static struct
 {
 	struct ipt_replace repl;
 	struct ipt_standard entries[3];
@@ -57,11 +57,11 @@ static const struct
 	.term = IPT_ERROR_INIT,			/* ERROR */
 };
 
-static const struct xt_table security_table = {
+static struct xt_table security_table = {
 	.name		= "security",
 	.valid_hooks	= SECURITY_VALID_HOOKS,
 	.me		= THIS_MODULE,
-	.af		= NFPROTO_IPV4,
+	.af		= AF_INET,
 };
 
 static unsigned int
@@ -105,21 +105,21 @@ static struct nf_hook_ops ipt_ops[] __read_mostly = {
 	{
 		.hook		= ipt_local_in_hook,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_LOCAL_IN,
 		.priority	= NF_IP_PRI_SECURITY,
 	},
 	{
 		.hook		= ipt_forward_hook,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_FORWARD,
 		.priority	= NF_IP_PRI_SECURITY,
 	},
 	{
 		.hook		= ipt_local_out_hook,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_LOCAL_OUT,
 		.priority	= NF_IP_PRI_SECURITY,
 	},

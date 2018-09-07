@@ -1,7 +1,5 @@
 #include <linux/hardirq.h>
 
-#include <asm/x86_init.h>
-
 #include <xen/interface/xen.h>
 #include <xen/interface/sched.h>
 #include <xen/interface/vcpu.h>
@@ -114,6 +112,8 @@ static void xen_halt(void)
 }
 
 static const struct pv_irq_ops xen_irq_ops __initdata = {
+	.init_IRQ = xen_init_IRQ,
+
 	.save_fl = PV_CALLEE_SAVE(xen_save_fl),
 	.restore_fl = PV_CALLEE_SAVE(xen_restore_fl),
 	.irq_disable = PV_CALLEE_SAVE(xen_irq_disable),
@@ -129,5 +129,4 @@ static const struct pv_irq_ops xen_irq_ops __initdata = {
 void __init xen_init_irq_ops()
 {
 	pv_irq_ops = xen_irq_ops;
-	x86_init.irqs.intr_init = xen_init_IRQ;
 }

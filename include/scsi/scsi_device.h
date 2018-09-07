@@ -145,7 +145,6 @@ struct scsi_device {
 	unsigned retry_hwerror:1;	/* Retry HARDWARE_ERROR */
 	unsigned last_sector_bug:1;	/* do not use multisector accesses on
 					   SD_LAST_BUGGY_SECTORS */
-	unsigned is_visible:1;	/* is the device visible in sysfs */
 
 	DECLARE_BITMAP(supported_events, SDEV_EVT_MAXBITS); /* supported events */
 	struct list_head event_list;	/* asserted events */
@@ -188,13 +187,10 @@ struct scsi_device_handler {
 	void (*detach)(struct scsi_device *);
 	int (*activate)(struct scsi_device *);
 	int (*prep_fn)(struct scsi_device *, struct request *);
-	int (*set_params)(struct scsi_device *, const char *);
 };
 
 struct scsi_dh_data {
 	struct scsi_device_handler *scsi_dh;
-	struct scsi_device *sdev;
-	struct kref kref;
 	char buf[0];
 };
 
@@ -446,7 +442,7 @@ static inline int scsi_device_qas(struct scsi_device *sdev)
 }
 static inline int scsi_device_enclosure(struct scsi_device *sdev)
 {
-	return sdev->inquiry ? (sdev->inquiry[6] & (1<<6)) : 1;
+	return sdev->inquiry[6] & (1<<6);
 }
 
 static inline int scsi_device_protection(struct scsi_device *sdev)

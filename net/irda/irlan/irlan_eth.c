@@ -30,7 +30,6 @@
 #include <linux/inetdevice.h>
 #include <linux/if_arp.h>
 #include <linux/module.h>
-#include <linux/sched.h>
 #include <net/arp.h>
 
 #include <net/irda/irda.h>
@@ -42,8 +41,7 @@
 
 static int  irlan_eth_open(struct net_device *dev);
 static int  irlan_eth_close(struct net_device *dev);
-static netdev_tx_t  irlan_eth_xmit(struct sk_buff *skb,
-					 struct net_device *dev);
+static int  irlan_eth_xmit(struct sk_buff *skb, struct net_device *dev);
 static void irlan_eth_set_multicast_list( struct net_device *dev);
 static struct net_device_stats *irlan_eth_get_stats(struct net_device *dev);
 
@@ -164,8 +162,7 @@ static int irlan_eth_close(struct net_device *dev)
  *    Transmits ethernet frames over IrDA link.
  *
  */
-static netdev_tx_t irlan_eth_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static int irlan_eth_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct irlan_cb *self = netdev_priv(dev);
 	int ret;
@@ -180,7 +177,7 @@ static netdev_tx_t irlan_eth_xmit(struct sk_buff *skb,
 
 		/* Did the realloc succeed? */
 		if (new_skb == NULL)
-			return NETDEV_TX_OK;
+			return 0;
 
 		/* Use the new skb instead */
 		skb = new_skb;
@@ -212,7 +209,7 @@ static netdev_tx_t irlan_eth_xmit(struct sk_buff *skb,
 		self->stats.tx_bytes += skb->len;
 	}
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*

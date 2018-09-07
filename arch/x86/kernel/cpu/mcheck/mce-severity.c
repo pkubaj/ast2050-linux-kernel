@@ -139,7 +139,6 @@ int mce_severity(struct mce *a, int tolerant, char **msg)
 	}
 }
 
-#ifdef CONFIG_DEBUG_FS
 static void *s_start(struct seq_file *f, loff_t *pos)
 {
 	if (*pos >= ARRAY_SIZE(severities))
@@ -198,7 +197,7 @@ static int __init severities_debugfs_init(void)
 {
 	struct dentry *dmce = NULL, *fseverities_coverage = NULL;
 
-	dmce = mce_get_debugfs_dir();
+	dmce = debugfs_create_dir("mce", NULL);
 	if (dmce == NULL)
 		goto err_out;
 	fseverities_coverage = debugfs_create_file("severities-coverage",
@@ -210,7 +209,10 @@ static int __init severities_debugfs_init(void)
 	return 0;
 
 err_out:
+	if (fseverities_coverage)
+		debugfs_remove(fseverities_coverage);
+	if (dmce)
+		debugfs_remove(dmce);
 	return -ENOMEM;
 }
 late_initcall(severities_debugfs_init);
-#endif

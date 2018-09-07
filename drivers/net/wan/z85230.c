@@ -1727,14 +1727,15 @@ static inline int spans_boundary(struct sk_buff *skb)
  *	point.
  */
 
-netdev_tx_t z8530_queue_xmit(struct z8530_channel *c, struct sk_buff *skb)
+int z8530_queue_xmit(struct z8530_channel *c, struct sk_buff *skb)
 {
 	unsigned long flags;
 	
 	netif_stop_queue(c->netdevice);
 	if(c->tx_next_skb)
-		return NETDEV_TX_BUSY;
-
+	{
+		return 1;
+	}
 	
 	/* PC SPECIFIC - DMA limits */
 	
@@ -1766,7 +1767,7 @@ netdev_tx_t z8530_queue_xmit(struct z8530_channel *c, struct sk_buff *skb)
 	z8530_tx_begin(c);
 	spin_unlock_irqrestore(c->lock, flags);
 	
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 EXPORT_SYMBOL(z8530_queue_xmit);

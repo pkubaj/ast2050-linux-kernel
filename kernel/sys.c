@@ -14,7 +14,7 @@
 #include <linux/prctl.h>
 #include <linux/highuid.h>
 #include <linux/fs.h>
-#include <linux/perf_event.h>
+#include <linux/perf_counter.h>
 #include <linux/resource.h>
 #include <linux/kernel.h>
 #include <linux/kexec.h>
@@ -303,7 +303,6 @@ void kernel_restart_prepare(char *cmd)
 void kernel_restart(char *cmd)
 {
 	kernel_restart_prepare(cmd);
-	disable_nonboot_cpus();
 	if (!cmd)
 		printk(KERN_EMERG "Restarting system.\n");
 	else
@@ -567,6 +566,11 @@ static int set_user(struct cred *new)
 	new_user = alloc_uid(current_user_ns(), new->uid);
 	if (!new_user)
 		return -EAGAIN;
+
+	if (!task_can_switch_user(new_user, current)) {
+		free_uid(new_user);
+		return -EINVAL;
+	}
 
 	if (atomic_read(&new_user->processes) >=
 				current->signal->rlim[RLIMIT_NPROC].rlim_cur &&
@@ -907,15 +911,16 @@ change_okay:
 
 void do_sys_times(struct tms *tms)
 {
-	cputime_t tgutime, tgstime, cutime, cstime;
+	struct task_cputime cputime;
+	cputime_t cutime, cstime;
 
+	thread_group_cputime(current, &cputime);
 	spin_lock_irq(&current->sighand->siglock);
-	thread_group_times(current, &tgutime, &tgstime);
 	cutime = current->signal->cutime;
 	cstime = current->signal->cstime;
 	spin_unlock_irq(&current->sighand->siglock);
-	tms->tms_utime = cputime_to_clock_t(tgutime);
-	tms->tms_stime = cputime_to_clock_t(tgstime);
+	tms->tms_utime = cputime_to_clock_t(cputime.utime);
+	tms->tms_stime = cputime_to_clock_t(cputime.stime);
 	tms->tms_cutime = cputime_to_clock_t(cutime);
 	tms->tms_cstime = cputime_to_clock_t(cstime);
 }
@@ -958,7 +963,6 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
 		pgid = pid;
 	if (pgid < 0)
 		return -EINVAL;
-	rcu_read_lock();
 
 	/* From this point forward we keep holding onto the tasklist lock
 	 * so that our parent does not change from under us. -DaveM
@@ -1012,7 +1016,6 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
 out:
 	/* All paths lead to here, thus we are safe. -DaveM */
 	write_unlock_irq(&tasklist_lock);
-	rcu_read_unlock();
 	return err;
 }
 
@@ -1107,8 +1110,6 @@ SYSCALL_DEFINE0(setsid)
 	err = session;
 out:
 	write_unlock_irq(&tasklist_lock);
-	if (err > 0)
-		proc_sid_connector(group_leader);
 	return err;
 }
 
@@ -1335,8 +1336,8 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 {
 	struct task_struct *t;
 	unsigned long flags;
-	cputime_t tgutime, tgstime, utime, stime;
-	unsigned long maxrss = 0;
+	cputime_t utime, stime;
+	struct task_cputime cputime;
 
 	memset((char *) r, 0, sizeof *r);
 	utime = stime = cputime_zero;
@@ -1345,7 +1346,6 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 		utime = task_utime(current);
 		stime = task_stime(current);
 		accumulate_thread_rusage(p, r);
-		maxrss = p->signal->maxrss;
 		goto out;
 	}
 
@@ -1363,23 +1363,20 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 			r->ru_majflt = p->signal->cmaj_flt;
 			r->ru_inblock = p->signal->cinblock;
 			r->ru_oublock = p->signal->coublock;
-			maxrss = p->signal->cmaxrss;
 
 			if (who == RUSAGE_CHILDREN)
 				break;
 
 		case RUSAGE_SELF:
-			thread_group_times(p, &tgutime, &tgstime);
-			utime = cputime_add(utime, tgutime);
-			stime = cputime_add(stime, tgstime);
+			thread_group_cputime(p, &cputime);
+			utime = cputime_add(utime, cputime.utime);
+			stime = cputime_add(stime, cputime.stime);
 			r->ru_nvcsw += p->signal->nvcsw;
 			r->ru_nivcsw += p->signal->nivcsw;
 			r->ru_minflt += p->signal->min_flt;
 			r->ru_majflt += p->signal->maj_flt;
 			r->ru_inblock += p->signal->inblock;
 			r->ru_oublock += p->signal->oublock;
-			if (maxrss < p->signal->maxrss)
-				maxrss = p->signal->maxrss;
 			t = p;
 			do {
 				accumulate_thread_rusage(t, r);
@@ -1395,15 +1392,6 @@ static void k_getrusage(struct task_struct *p, int who, struct rusage *r)
 out:
 	cputime_to_timeval(utime, &r->ru_utime);
 	cputime_to_timeval(stime, &r->ru_stime);
-
-	if (who != RUSAGE_CHILDREN) {
-		struct mm_struct *mm = get_task_mm(p);
-		if (mm) {
-			setmax_mm_hiwater_rss(&maxrss, mm);
-			mmput(mm);
-		}
-	}
-	r->ru_maxrss = maxrss * (PAGE_SIZE / 1024); /* convert pages to KBs */
 }
 
 int getrusage(struct task_struct *p, int who, struct rusage __user *ru)
@@ -1523,11 +1511,11 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		case PR_SET_TSC:
 			error = SET_TSC_CTL(arg2);
 			break;
-		case PR_TASK_PERF_EVENTS_DISABLE:
-			error = perf_event_task_disable();
+		case PR_TASK_PERF_COUNTERS_DISABLE:
+			error = perf_counter_task_disable();
 			break;
-		case PR_TASK_PERF_EVENTS_ENABLE:
-			error = perf_event_task_enable();
+		case PR_TASK_PERF_COUNTERS_ENABLE:
+			error = perf_counter_task_enable();
 			break;
 		case PR_GET_TIMERSLACK:
 			error = current->timer_slack_ns;
@@ -1539,41 +1527,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			else
 				current->timer_slack_ns = arg2;
 			error = 0;
-			break;
-		case PR_MCE_KILL:
-			if (arg4 | arg5)
-				return -EINVAL;
-			switch (arg2) {
-			case PR_MCE_KILL_CLEAR:
-				if (arg3 != 0)
-					return -EINVAL;
-				current->flags &= ~PF_MCE_PROCESS;
-				break;
-			case PR_MCE_KILL_SET:
-				current->flags |= PF_MCE_PROCESS;
-				if (arg3 == PR_MCE_KILL_EARLY)
-					current->flags |= PF_MCE_EARLY;
-				else if (arg3 == PR_MCE_KILL_LATE)
-					current->flags &= ~PF_MCE_EARLY;
-				else if (arg3 == PR_MCE_KILL_DEFAULT)
-					current->flags &=
-						~(PF_MCE_EARLY|PF_MCE_PROCESS);
-				else
-					return -EINVAL;
-				break;
-			default:
-				return -EINVAL;
-			}
-			error = 0;
-			break;
-		case PR_MCE_KILL_GET:
-			if (arg2 | arg3 | arg4 | arg5)
-				return -EINVAL;
-			if (current->flags & PF_MCE_PROCESS)
-				error = (current->flags & PF_MCE_EARLY) ?
-					PR_MCE_KILL_EARLY : PR_MCE_KILL_LATE;
-			else
-				error = PR_MCE_KILL_DEFAULT;
 			break;
 		default:
 			error = -EINVAL;

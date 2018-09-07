@@ -169,36 +169,6 @@ void putname(const char *name)
 EXPORT_SYMBOL(putname);
 #endif
 
-/*
- * This does basic POSIX ACL permission checking
- */
-static int acl_permission_check(struct inode *inode, int mask,
-		int (*check_acl)(struct inode *inode, int mask))
-{
-	umode_t			mode = inode->i_mode;
-
-	mask &= MAY_READ | MAY_WRITE | MAY_EXEC;
-
-	if (current_fsuid() == inode->i_uid)
-		mode >>= 6;
-	else {
-		if (IS_POSIXACL(inode) && (mode & S_IRWXG) && check_acl) {
-			int error = check_acl(inode, mask);
-			if (error != -EAGAIN)
-				return error;
-		}
-
-		if (in_group_p(inode->i_gid))
-			mode >>= 3;
-	}
-
-	/*
-	 * If the DACs are ok we don't need any capability check.
-	 */
-	if ((mask & ~mode) == 0)
-		return 0;
-	return -EACCES;
-}
 
 /**
  * generic_permission  -  check for access rights on a Posix-like filesystem
@@ -214,15 +184,32 @@ static int acl_permission_check(struct inode *inode, int mask,
 int generic_permission(struct inode *inode, int mask,
 		int (*check_acl)(struct inode *inode, int mask))
 {
-	int ret;
+	umode_t			mode = inode->i_mode;
+
+	mask &= MAY_READ | MAY_WRITE | MAY_EXEC;
+
+	if (current_fsuid() == inode->i_uid)
+		mode >>= 6;
+	else {
+		if (IS_POSIXACL(inode) && (mode & S_IRWXG) && check_acl) {
+			int error = check_acl(inode, mask);
+			if (error == -EACCES)
+				goto check_capabilities;
+			else if (error != -EAGAIN)
+				return error;
+		}
+
+		if (in_group_p(inode->i_gid))
+			mode >>= 3;
+	}
 
 	/*
-	 * Do the basic POSIX ACL permission checks.
+	 * If the DACs are ok we don't need any capability check.
 	 */
-	ret = acl_permission_check(inode, mask, check_acl);
-	if (ret != -EACCES)
-		return ret;
+	if ((mask & ~mode) == 0)
+		return 0;
 
+ check_capabilities:
 	/*
 	 * Read/write DACs are always overridable.
 	 * Executable DACs are overridable if at least one exec bit is set.
@@ -276,7 +263,7 @@ int inode_permission(struct inode *inode, int mask)
 	if (inode->i_op->permission)
 		retval = inode->i_op->permission(inode, mask);
 	else
-		retval = generic_permission(inode, mask, inode->i_op->check_acl);
+		retval = generic_permission(inode, mask, NULL);
 
 	if (retval)
 		return retval;
@@ -435,24 +422,6 @@ static struct dentry * cached_lookup(struct dentry * parent, struct qstr * name,
 	return dentry;
 }
 
-/**
- * path_connected - Verify that a path->dentry is below path->mnt.mnt_root
- * @path: nameidate to verify
- *
- * Rename can sometimes move a file or directory outside of a bind
- * mount, path_connected allows those cases to be detected.
- */
-static bool path_connected(const struct path *path)
-{
-	struct vfsmount *mnt = path->mnt;
-
-	/* Only bind mounts can have disconnected paths */
-	if (mnt->mnt_root == mnt->mnt_sb->s_root)
-		return true;
-
-	return is_subdir(path->dentry, mnt->mnt_root);
-}
-
 /*
  * Short-cut version of permission(), for calling by
  * path_walk(), when dcache lock is held.  Combines parts
@@ -465,22 +434,29 @@ static bool path_connected(const struct path *path)
  */
 static int exec_permission_lite(struct inode *inode)
 {
-	int ret;
+	umode_t	mode = inode->i_mode;
 
-	if (inode->i_op->permission) {
-		ret = inode->i_op->permission(inode, MAY_EXEC);
-		if (!ret)
-			goto ok;
-		return ret;
-	}
-	ret = acl_permission_check(inode, MAY_EXEC, inode->i_op->check_acl);
-	if (!ret)
+	if (inode->i_op->permission)
+		return -EAGAIN;
+
+	if (current_fsuid() == inode->i_uid)
+		mode >>= 6;
+	else if (in_group_p(inode->i_gid))
+		mode >>= 3;
+
+	if (mode & MAY_EXEC)
 		goto ok;
 
-	if (capable(CAP_DAC_OVERRIDE) || capable(CAP_DAC_READ_SEARCH))
+	if ((inode->i_mode & S_IXUGO) && capable(CAP_DAC_OVERRIDE))
 		goto ok;
 
-	return ret;
+	if (S_ISDIR(inode->i_mode) && capable(CAP_DAC_OVERRIDE))
+		goto ok;
+
+	if (S_ISDIR(inode->i_mode) && capable(CAP_DAC_READ_SEARCH))
+		goto ok;
+
+	return -EACCES;
 ok:
 	return security_inode_permission(inode, MAY_EXEC);
 }
@@ -654,7 +630,6 @@ static __always_inline int __do_follow_link(struct path *path, struct nameidata 
 		dget(dentry);
 	}
 	mntget(path->mnt);
-	nd->last_type = LAST_BIND;
 	cookie = dentry->d_inode->i_op->follow_link(dentry, nd);
 	error = PTR_ERR(cookie);
 	if (!IS_ERR(cookie)) {
@@ -773,7 +748,7 @@ int follow_down(struct path *path)
 	return 0;
 }
 
-static __always_inline int follow_dotdot(struct nameidata *nd)
+static __always_inline void follow_dotdot(struct nameidata *nd)
 {
 	set_root(nd);
 
@@ -790,8 +765,6 @@ static __always_inline int follow_dotdot(struct nameidata *nd)
 			nd->path.dentry = dget(nd->path.dentry->d_parent);
 			spin_unlock(&dcache_lock);
 			dput(old);
-			if (unlikely(!path_connected(&nd->path)))
-				return -ENOENT;
 			break;
 		}
 		spin_unlock(&dcache_lock);
@@ -809,7 +782,6 @@ static __always_inline int follow_dotdot(struct nameidata *nd)
 		nd->path.mnt = parent;
 	}
 	follow_mount(&nd->path);
-	return 0;
 }
 
 /*
@@ -894,6 +866,12 @@ static int __link_path_walk(const char *name, struct nameidata *nd)
 
 		nd->flags |= LOOKUP_CONTINUE;
 		err = exec_permission_lite(inode);
+		if (err == -EAGAIN)
+			err = inode_permission(nd->path.dentry->d_inode,
+					       MAY_EXEC);
+		if (!err)
+			err = ima_path_check(&nd->path, MAY_EXEC,
+				             IMA_COUNT_UPDATE);
  		if (err)
 			break;
 
@@ -927,9 +905,7 @@ static int __link_path_walk(const char *name, struct nameidata *nd)
 			case 2:	
 				if (this.name[1] != '.')
 					break;
-				err = follow_dotdot(nd);
-				if (err < 0)
-					goto out_nd_path_put;
+				follow_dotdot(nd);
 				inode = nd->path.dentry->d_inode;
 				/* fallthrough */
 			case 1:
@@ -984,9 +960,7 @@ last_component:
 			case 2:	
 				if (this.name[1] != '.')
 					break;
-				err = follow_dotdot(nd);
-				if (err < 0)
-					goto out_nd_path_put;
+				follow_dotdot(nd);
 				inode = nd->path.dentry->d_inode;
 				/* fallthrough */
 			case 1:
@@ -1048,7 +1022,6 @@ out_dput:
 		path_put_conditional(&next, nd);
 		break;
 	}
-out_nd_path_put:
 	path_put(&nd->path);
 return_err:
 	return err;

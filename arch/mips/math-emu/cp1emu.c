@@ -75,9 +75,6 @@ struct mips_fpu_emulator_stats fpuemustats;
 #define FPCREG_RID	0	/* $0  = revision id */
 #define FPCREG_CSR	31	/* $31 = csr */
 
-/* Determine rounding mode from the RM bits of the FCSR */
-#define modeindex(v) ((v) & FPU_CSR_RM)
-
 /* Convert Mips rounding mode (0..3) to IEEE library modes. */
 static const unsigned char ieee_rm[4] = {
 	[FPU_CSR_RN] = IEEE754_RN,
@@ -166,34 +163,33 @@ static int isBranchInstr(mips_instruction * i)
 
 /*
  * In the Linux kernel, we support selection of FPR format on the
- * basis of the Status.FR bit.  If an FPU is not present, the FR bit
- * is hardwired to zero, which would imply a 32-bit FPU even for
- * 64-bit CPUs.  For 64-bit kernels with no FPU we use TIF_32BIT_REGS
- * as a proxy for the FR bit so that a 64-bit FPU is emulated.  In any
- * case, for a 32-bit kernel which uses the O32 MIPS ABI, only the
- * even FPRs are used (Status.FR = 0).
+ * basis of the Status.FR bit.  This does imply that, if a full 32
+ * FPRs are desired, there needs to be a flip-flop that can be written
+ * to one at that bit position.  In any case, O32 MIPS ABI uses
+ * only the even FPRs (Status.FR = 0).
  */
-static inline int cop1_64bit(struct pt_regs *xcp)
-{
-	if (cpu_has_fpu)
-		return xcp->cp0_status & ST0_FR;
-#ifdef CONFIG_64BIT
-	return !test_thread_flag(TIF_32BIT_REGS);
+
+#define CP0_STATUS_FR_SUPPORT
+
+#ifdef CP0_STATUS_FR_SUPPORT
+#define FR_BIT ST0_FR
 #else
-	return 0;
+#define FR_BIT 0
 #endif
-}
 
-#define SIFROMREG(si, x) ((si) = cop1_64bit(xcp) || !(x & 1) ? \
-			(int)ctx->fpr[x] : (int)(ctx->fpr[x & ~1] >> 32))
-
-#define SITOREG(si, x)	(ctx->fpr[x & ~(cop1_64bit(xcp) == 0)] = \
-			cop1_64bit(xcp) || !(x & 1) ? \
+#define SIFROMREG(si, x) ((si) = \
+			(xcp->cp0_status & FR_BIT) || !(x & 1) ? \
+			(int)ctx->fpr[x] : \
+			(int)(ctx->fpr[x & ~1] >> 32 ))
+#define SITOREG(si, x)	(ctx->fpr[x & ~((xcp->cp0_status & FR_BIT) == 0)] = \
+			(xcp->cp0_status & FR_BIT) || !(x & 1) ? \
 			ctx->fpr[x & ~1] >> 32 << 32 | (u32)(si) : \
 			ctx->fpr[x & ~1] << 32 >> 32 | (u64)(si) << 32)
 
-#define DIFROMREG(di, x) ((di) = ctx->fpr[x & ~(cop1_64bit(xcp) == 0)])
-#define DITOREG(di, x)	(ctx->fpr[x & ~(cop1_64bit(xcp) == 0)] = (di))
+#define DIFROMREG(di, x) ((di) = \
+			ctx->fpr[x & ~((xcp->cp0_status & FR_BIT) == 0)])
+#define DITOREG(di, x)	(ctx->fpr[x & ~((xcp->cp0_status & FR_BIT) == 0)] \
+			= (di))
 
 #define SPFROMREG(sp, x) SIFROMREG((sp).bits, x)
 #define SPTOREG(sp, x)	SITOREG((sp).bits, x)
@@ -384,14 +380,10 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx)
 					(void *) (xcp->cp0_epc),
 					MIPSInst_RT(ir), value);
 #endif
-
-				/*
-				 * Don't write reserved bits,
-				 * and convert to ieee library modes
-				 */
-				ctx->fcr31 = (value &
-						~(FPU_CSR_RSVD | FPU_CSR_RM)) |
-						ieee_rm[modeindex(value)];
+				value &= (FPU_CSR_FLUSH | FPU_CSR_ALL_E | FPU_CSR_ALL_S | 0x03);
+				ctx->fcr31 &= ~(FPU_CSR_FLUSH | FPU_CSR_ALL_E | FPU_CSR_ALL_S | 0x03);
+				/* convert to ieee library modes */
+				ctx->fcr31 |= (value & ~0x3) | ieee_rm[value & 0x3];
 			}
 			if ((ctx->fcr31 >> 5) & ctx->fcr31 & FPU_CSR_ALL_E) {
 				return SIGFPE;

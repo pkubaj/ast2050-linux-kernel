@@ -39,7 +39,7 @@
 #define PNX8335_DEBUG7 0x441c
 
 int prom_argc;
-char **prom_argv, **prom_envp;
+char **prom_argv = 0, **prom_envp = 0;
 
 extern void prom_init_cmdline(void);
 extern char *prom_getenv(char *envname);

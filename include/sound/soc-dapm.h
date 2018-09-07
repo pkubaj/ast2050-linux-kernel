@@ -46,25 +46,25 @@
 /* platform domain */
 #define SND_SOC_DAPM_INPUT(wname) \
 {	.id = snd_soc_dapm_input, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM }
+	.num_kcontrols = 0}
 #define SND_SOC_DAPM_OUTPUT(wname) \
 {	.id = snd_soc_dapm_output, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM }
+	.num_kcontrols = 0}
 #define SND_SOC_DAPM_MIC(wname, wevent) \
 {	.id = snd_soc_dapm_mic, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM, .event = wevent, \
+	.num_kcontrols = 0, .event = wevent, \
 	.event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD}
 #define SND_SOC_DAPM_HP(wname, wevent) \
 {	.id = snd_soc_dapm_hp, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM, .event = wevent, \
+	.num_kcontrols = 0, .event = wevent, \
 	.event_flags = SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD}
 #define SND_SOC_DAPM_SPK(wname, wevent) \
 {	.id = snd_soc_dapm_spk, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM, .event = wevent, \
+	.num_kcontrols = 0, .event = wevent, \
 	.event_flags = SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD}
 #define SND_SOC_DAPM_LINE(wname, wevent) \
 {	.id = snd_soc_dapm_line, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM, .event = wevent, \
+	.num_kcontrols = 0, .event = wevent, \
 	.event_flags = SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD}
 
 /* path domain */
@@ -129,20 +129,14 @@
 /* events that are pre and post DAPM */
 #define SND_SOC_DAPM_PRE(wname, wevent) \
 {	.id = snd_soc_dapm_pre, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM, .event = wevent, \
+	.num_kcontrols = 0, .event = wevent, \
 	.event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_PRE_PMD}
 #define SND_SOC_DAPM_POST(wname, wevent) \
 {	.id = snd_soc_dapm_post, .name = wname, .kcontrols = NULL, \
-	.num_kcontrols = 0, .reg = SND_SOC_NOPM, .event = wevent, \
+	.num_kcontrols = 0, .event = wevent, \
 	.event_flags = SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD}
 
 /* stream domain */
-#define SND_SOC_DAPM_AIF_IN(wname, stname, wslot, wreg, wshift, winvert) \
-{	.id = snd_soc_dapm_aif_in, .name = wname, .sname = stname, \
-	.reg = wreg, .shift = wshift, .invert = winvert }
-#define SND_SOC_DAPM_AIF_OUT(wname, stname, wslot, wreg, wshift, winvert) \
-{	.id = snd_soc_dapm_aif_out, .name = wname, .sname = stname, \
-	.reg = wreg, .shift = wshift, .invert = winvert }
 #define SND_SOC_DAPM_DAC(wname, stname, wreg, wshift, winvert) \
 {	.id = snd_soc_dapm_dac, .name = wname, .sname = stname, .reg = wreg, \
 	.shift = wshift, .invert = winvert}
@@ -285,11 +279,9 @@ int snd_soc_dapm_add_routes(struct snd_soc_codec *codec,
 /* dapm events */
 int snd_soc_dapm_stream_event(struct snd_soc_codec *codec, char *stream,
 	int event);
-void snd_soc_dapm_shutdown(struct snd_soc_device *socdev);
 
 /* dapm sys fs - used by the core */
 int snd_soc_dapm_sys_add(struct device *dev);
-void snd_soc_dapm_debugfs_init(struct snd_soc_codec *codec);
 
 /* dapm audio pin control and status */
 int snd_soc_dapm_enable_pin(struct snd_soc_codec *codec, const char *pin);
@@ -319,8 +311,6 @@ enum snd_soc_dapm_type {
 	snd_soc_dapm_pre,			/* machine specific pre widget - exec first */
 	snd_soc_dapm_post,			/* machine specific post widget - exec last */
 	snd_soc_dapm_supply,		/* power/clock supply */
-	snd_soc_dapm_aif_in,		/* audio interface input */
-	snd_soc_dapm_aif_out,		/* audio interface output */
 };
 
 /*

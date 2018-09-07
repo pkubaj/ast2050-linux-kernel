@@ -7,7 +7,6 @@
  * of the GNU General Public License version 2.
  */
 
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/completion.h>
@@ -594,7 +593,6 @@ fail:
 }
 
 struct slow_work_ops gfs2_recover_ops = {
-	.owner	 = THIS_MODULE,
 	.get_ref = gfs2_recover_get_ref,
 	.put_ref = gfs2_recover_put_ref,
 	.execute = gfs2_recover_work,

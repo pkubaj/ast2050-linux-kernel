@@ -119,6 +119,19 @@
 #define REALVIEW_SYS_TEST_OSC3               (REALVIEW_SYS_BASE + REALVIEW_SYS_TEST_OSC3_OFFSET)
 #define REALVIEW_SYS_TEST_OSC4               (REALVIEW_SYS_BASE + REALVIEW_SYS_TEST_OSC4_OFFSET)
 
+/* 
+ * Values for REALVIEW_SYS_RESET_CTRL
+ */
+#define REALVIEW_SYS_CTRL_RESET_CONFIGCLR    0x01
+#define REALVIEW_SYS_CTRL_RESET_CONFIGINIT   0x02
+#define REALVIEW_SYS_CTRL_RESET_DLLRESET     0x03
+#define REALVIEW_SYS_CTRL_RESET_PLLRESET     0x04
+#define REALVIEW_SYS_CTRL_RESET_POR          0x05
+#define REALVIEW_SYS_CTRL_RESET_DoC          0x06
+
+#define REALVIEW_SYS_CTRL_LED         (1 << 0)
+
+
 /* ------------------------------------------------------------------------
  *  RealView control registers
  * ------------------------------------------------------------------------
@@ -140,7 +153,7 @@
  *     SYS_CLD, SYS_BOOTCS
  */
 #define REALVIEW_SYS_LOCK_LOCKED    (1 << 16)
-#define REALVIEW_SYS_LOCKVAL_MASK	0xA05F	       /* Enable write access */
+#define REALVIEW_SYS_LOCKVAL_MASK	0xFFFF		/* write 0xA05F to enable write access */
 
 /*
  * REALVIEW_SYS_FLASH

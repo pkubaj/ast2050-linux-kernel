@@ -29,7 +29,7 @@
 
 #include <linux/module.h>
 #include <linux/dvb/frontend.h>
-#include <linux/types.h>
+#include <asm/types.h>
 
 #include "zl10036.h"
 

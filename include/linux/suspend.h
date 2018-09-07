@@ -301,8 +301,6 @@ static inline int unregister_pm_notifier(struct notifier_block *nb)
 #define pm_notifier(fn, pri)	do { (void)(fn); } while (0)
 #endif /* !CONFIG_PM_SLEEP */
 
-extern struct mutex pm_mutex;
-
 #ifndef CONFIG_HIBERNATION
 static inline void register_nosave_region(unsigned long b, unsigned long e)
 {
@@ -310,23 +308,8 @@ static inline void register_nosave_region(unsigned long b, unsigned long e)
 static inline void register_nosave_region_late(unsigned long b, unsigned long e)
 {
 }
-
-static inline void lock_system_sleep(void) {}
-static inline void unlock_system_sleep(void) {}
-
-#else
-
-/* Let some subsystems like memory hotadd exclude hibernation */
-
-static inline void lock_system_sleep(void)
-{
-	mutex_lock(&pm_mutex);
-}
-
-static inline void unlock_system_sleep(void)
-{
-	mutex_unlock(&pm_mutex);
-}
 #endif
+
+extern struct mutex pm_mutex;
 
 #endif /* _LINUX_SUSPEND_H */

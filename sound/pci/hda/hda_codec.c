@@ -44,7 +44,6 @@ struct hda_vendor_id {
 /* codec vendor labels */
 static struct hda_vendor_id hda_vendor_ids[] = {
 	{ 0x1002, "ATI" },
-	{ 0x1013, "Cirrus Logic" },
 	{ 0x1057, "Motorola" },
 	{ 0x1095, "Silicon Image" },
 	{ 0x10de, "Nvidia" },
@@ -151,14 +150,7 @@ make_codec_cmd(struct hda_codec *codec, hda_nid_t nid, int direct,
 {
 	u32 val;
 
-	if ((codec->addr & ~0xf) || (direct & ~1) || (nid & ~0x7f) ||
-	    (verb & ~0xfff) || (parm & ~0xffff)) {
-		printk(KERN_ERR "hda-codec: out of range cmd %x:%x:%x:%x:%x\n",
-		       codec->addr, direct, nid, verb, parm);
-		return ~0;
-	}
-
-	val = (u32)codec->addr << 28;
+	val = (u32)(codec->addr & 0x0f) << 28;
 	val |= (u32)direct << 27;
 	val |= (u32)nid << 20;
 	val |= verb << 8;
@@ -174,9 +166,6 @@ static int codec_exec_verb(struct hda_codec *codec, unsigned int cmd,
 {
 	struct hda_bus *bus = codec->bus;
 	int err;
-
-	if (cmd == ~0)
-		return -1;
 
 	if (res)
 		*res = -1;
@@ -302,19 +291,10 @@ int snd_hda_get_connections(struct hda_codec *codec, hda_nid_t nid,
 	unsigned int parm;
 	int i, conn_len, conns;
 	unsigned int shift, num_elems, mask;
-	unsigned int wcaps;
 	hda_nid_t prev_nid;
 
 	if (snd_BUG_ON(!conn_list || max_conns <= 0))
 		return -EINVAL;
-
-	wcaps = get_wcaps(codec, nid);
-	if (!(wcaps & AC_WCAP_CONN_LIST) &&
-	    get_wcaps_type(wcaps) != AC_WID_VOL_KNB) {
-		snd_printk(KERN_WARNING "hda_codec: "
-			   "connection list not available for 0x%x\n", nid);
-		return -EINVAL;
-	}
 
 	parm = snd_hda_param_read(codec, nid, AC_PAR_CONNLIST_LEN);
 	if (parm & AC_CLIST_LONG) {
@@ -336,8 +316,6 @@ int snd_hda_get_connections(struct hda_codec *codec, hda_nid_t nid,
 		/* single connection */
 		parm = snd_hda_codec_read(codec, nid, 0,
 					  AC_VERB_GET_CONNECT_LIST, 0);
-		if (parm == -1 && codec->bus->rirb_error)
-			return -EIO;
 		conn_list[0] = parm & mask;
 		return 1;
 	}
@@ -349,12 +327,9 @@ int snd_hda_get_connections(struct hda_codec *codec, hda_nid_t nid,
 		int range_val;
 		hda_nid_t val, n;
 
-		if (i % num_elems == 0) {
+		if (i % num_elems == 0)
 			parm = snd_hda_codec_read(codec, nid, 0,
 						  AC_VERB_GET_CONNECT_LIST, i);
-			if (parm == -1 && codec->bus->rirb_error)
-				return -EIO;
-		}
 		range_val = !!(parm & (1 << (shift-1))); /* ranges */
 		val = parm & mask;
 		if (val == 0) {
@@ -752,7 +727,8 @@ static int read_pin_defaults(struct hda_codec *codec)
 	for (i = 0; i < codec->num_nodes; i++, nid++) {
 		struct hda_pincfg *pin;
 		unsigned int wcaps = get_wcaps(codec, nid);
-		unsigned int wid_type = get_wcaps_type(wcaps);
+		unsigned int wid_type = (wcaps & AC_WCAP_TYPE) >>
+				AC_WCAP_TYPE_SHIFT;
 		if (wid_type != AC_WID_PIN)
 			continue;
 		pin = snd_array_new(&codec->init_pins);
@@ -915,7 +891,7 @@ static void hda_set_power_state(struct hda_codec *codec, hda_nid_t fg,
  * Returns 0 if successful, or a negative error code.
  */
 int /*__devinit*/ snd_hda_codec_new(struct hda_bus *bus, unsigned int codec_addr,
-				    struct hda_codec **codecp)
+				    int do_init, struct hda_codec **codecp)
 {
 	struct hda_codec *codec;
 	char component[31];
@@ -1008,6 +984,11 @@ int /*__devinit*/ snd_hda_codec_new(struct hda_bus *bus, unsigned int codec_addr
 			    codec->afg ? codec->afg : codec->mfg,
 			    AC_PWRST_D0);
 
+	if (do_init) {
+		err = snd_hda_codec_configure(codec);
+		if (err < 0)
+			goto error;
+	}
 	snd_hda_codec_proc_new(codec);
 
 	snd_hda_create_hwdep(codec);
@@ -1061,7 +1042,6 @@ int snd_hda_codec_configure(struct hda_codec *codec)
 		err = init_unsol_queue(codec->bus);
 	return err;
 }
-EXPORT_SYMBOL_HDA(snd_hda_codec_configure);
 
 /**
  * snd_hda_codec_setup_stream - set up the codec for streaming
@@ -2376,20 +2356,16 @@ static void hda_set_power_state(struct hda_codec *codec, hda_nid_t fg,
 	hda_nid_t nid;
 	int i;
 
-	/* this delay seems necessary to avoid click noise at power-down */
-	if (power_state == AC_PWRST_D3)
-		msleep(100);
-	snd_hda_codec_read(codec, fg, 0, AC_VERB_SET_POWER_STATE,
+	snd_hda_codec_write(codec, fg, 0, AC_VERB_SET_POWER_STATE,
 			    power_state);
-	/* partial workaround for "azx_get_response timeout" */
-	if (power_state == AC_PWRST_D0)
-		msleep(10);
+	msleep(10); /* partial workaround for "azx_get_response timeout" */
 
 	nid = codec->start_nid;
 	for (i = 0; i < codec->num_nodes; i++, nid++) {
 		unsigned int wcaps = get_wcaps(codec, nid);
 		if (wcaps & AC_WCAP_POWER) {
-			unsigned int wid_type = get_wcaps_type(wcaps);
+			unsigned int wid_type = (wcaps & AC_WCAP_TYPE) >>
+				AC_WCAP_TYPE_SHIFT;
 			if (power_state == AC_PWRST_D3 &&
 			    wid_type == AC_WID_PIN) {
 				unsigned int pincap;
@@ -2597,7 +2573,7 @@ unsigned int snd_hda_calc_stream_format(unsigned int rate,
 	case 20:
 	case 24:
 	case 32:
-		if (maxbps >= 32 || format == SNDRV_PCM_FORMAT_FLOAT_LE)
+		if (maxbps >= 32)
 			val |= 0x40;
 		else if (maxbps >= 24)
 			val |= 0x30;
@@ -2724,12 +2700,11 @@ static int snd_hda_query_supported_pcm(struct hda_codec *codec, hda_nid_t nid,
 					bps = 20;
 			}
 		}
-		if (streams & AC_SUPFMT_FLOAT32) {
+		else if (streams == AC_SUPFMT_FLOAT32) {
+			/* should be exclusive */
 			formats |= SNDRV_PCM_FMTBIT_FLOAT_LE;
-			if (!bps)
-				bps = 32;
-		}
-		if (streams == AC_SUPFMT_AC3) {
+			bps = 32;
+		} else if (streams == AC_SUPFMT_AC3) {
 			/* should be exclusive */
 			/* temporary hack: we have still no proper support
 			 * for the direct AC3 stream...
@@ -3127,7 +3102,7 @@ int snd_hda_check_board_codec_sid_config(struct hda_codec *codec,
 	tbl = q;
 
 	if (tbl->value >= 0 && tbl->value < num_configs) {
-#ifdef CONFIG_SND_DEBUG_VERBOSE
+#ifdef CONFIG_SND_DEBUG_DETECT
 		char tmp[10];
 		const char *model = NULL;
 		if (models)
@@ -3680,7 +3655,8 @@ int snd_hda_parse_pin_def_config(struct hda_codec *codec,
 	end_nid = codec->start_nid + codec->num_nodes;
 	for (nid = codec->start_nid; nid < end_nid; nid++) {
 		unsigned int wid_caps = get_wcaps(codec, nid);
-		unsigned int wid_type = get_wcaps_type(wid_caps);
+		unsigned int wid_type =
+			(wid_caps & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT;
 		unsigned int def_conf;
 		short assoc, loc;
 

@@ -44,7 +44,7 @@
 #define HIDDEV_MINOR_BASE	96
 #define HIDDEV_MINORS		16
 #endif
-#define HIDDEV_BUFFER_SIZE	2048
+#define HIDDEV_BUFFER_SIZE	64
 
 struct hiddev {
 	int exist;
@@ -852,14 +852,14 @@ static const struct file_operations hiddev_fops = {
 #endif
 };
 
-static char *hiddev_devnode(struct device *dev, mode_t *mode)
+static char *hiddev_nodename(struct device *dev)
 {
 	return kasprintf(GFP_KERNEL, "usb/%s", dev_name(dev));
 }
 
 static struct usb_class_driver hiddev_class = {
 	.name =		"hiddev%d",
-	.devnode =	hiddev_devnode,
+	.nodename =	hiddev_nodename,
 	.fops =		&hiddev_fops,
 	.minor_base =	HIDDEV_MINOR_BASE,
 };

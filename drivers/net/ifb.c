@@ -33,7 +33,6 @@
 #include <linux/etherdevice.h>
 #include <linux/init.h>
 #include <linux/moduleparam.h>
-#include <linux/sched.h>
 #include <net/pkt_sched.h>
 #include <net/net_namespace.h>
 
@@ -60,7 +59,7 @@ struct ifb_private {
 static int numifbs = 2;
 
 static void ri_tasklet(unsigned long dev);
-static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev);
+static int ifb_xmit(struct sk_buff *skb, struct net_device *dev);
 static int ifb_open(struct net_device *dev);
 static int ifb_close(struct net_device *dev);
 
@@ -99,13 +98,12 @@ static void ri_tasklet(unsigned long dev)
 		stats->tx_packets++;
 		stats->tx_bytes +=skb->len;
 
-		skb->dev = dev_get_by_index(&init_net, skb->iif);
+		skb->dev = __dev_get_by_index(&init_net, skb->iif);
 		if (!skb->dev) {
 			dev_kfree_skb(skb);
 			stats->tx_dropped++;
 			break;
 		}
-		dev_put(skb->dev);
 		skb->iif = _dev->ifindex;
 
 		if (from & AT_EGRESS) {
@@ -162,10 +160,11 @@ static void ifb_setup(struct net_device *dev)
 	random_ether_addr(dev->dev_addr);
 }
 
-static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ifb_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ifb_private *dp = netdev_priv(dev);
 	struct net_device_stats *stats = &dev->stats;
+	int ret = 0;
 	u32 from = G_TC_FROM(skb->tc_verd);
 
 	stats->rx_packets++;
@@ -174,7 +173,7 @@ static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (!(from & (AT_INGRESS|AT_EGRESS)) || !skb->iif) {
 		dev_kfree_skb(skb);
 		stats->rx_dropped++;
-		return NETDEV_TX_OK;
+		return ret;
 	}
 
 	if (skb_queue_len(&dp->rq) >= dev->tx_queue_len) {
@@ -188,7 +187,7 @@ static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev)
 		tasklet_schedule(&dp->ifb_tasklet);
 	}
 
-	return NETDEV_TX_OK;
+	return ret;
 }
 
 static int ifb_close(struct net_device *dev)
@@ -269,17 +268,11 @@ static int __init ifb_init_module(void)
 
 	rtnl_lock();
 	err = __rtnl_link_register(&ifb_link_ops);
-	if (err < 0)
-		goto out;
 
-	for (i = 0; i < numifbs && !err; i++) {
+	for (i = 0; i < numifbs && !err; i++)
 		err = ifb_init_one(i);
-		cond_resched();
-	}
 	if (err)
 		__rtnl_link_unregister(&ifb_link_ops);
-
-out:
 	rtnl_unlock();
 
 	return err;

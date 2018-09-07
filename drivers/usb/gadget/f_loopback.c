@@ -22,6 +22,7 @@
 /* #define VERBOSE_DEBUG */
 
 #include <linux/kernel.h>
+#include <linux/utsname.h>
 #include <linux/device.h>
 
 #include "g_zero.h"
@@ -373,7 +374,7 @@ int __init loopback_add(struct usb_composite_dev *cdev, bool autoresume)
 
 	/* support autoresume for remote wakeup testing */
 	if (autoresume)
-		loopback_driver.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+		sourcesink_driver.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
 
 	/* support OTG systems */
 	if (gadget_is_otg(cdev->gadget)) {

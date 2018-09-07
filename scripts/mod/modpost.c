@@ -691,7 +691,7 @@ static int number_prefix(const char *sym)
  *   The $ syntax is for sections where ld append a dot number
  *   to make section name unique.
  */
-static int match(const char *sym, const char * const pat[])
+int match(const char *sym, const char * const pat[])
 {
 	const char *p;
 	while (*pat) {
@@ -1311,7 +1311,7 @@ static unsigned int *reloc_location(struct elf_info *elf,
 	int section = sechdr->sh_info;
 
 	return (void *)elf->hdr + sechdrs[section].sh_offset +
-		r->r_offset - sechdrs[section].sh_addr;
+		(r->r_offset - sechdrs[section].sh_addr);
 }
 
 static int addend_386_rel(struct elf_info *elf, Elf_Shdr *sechdr, Elf_Rela *r)
@@ -1746,7 +1746,7 @@ static void add_header(struct buffer *b, struct module *mod)
 	buf_printf(b, "};\n");
 }
 
-static void add_staging_flag(struct buffer *b, const char *name)
+void add_staging_flag(struct buffer *b, const char *name)
 {
 	static const char *staging_dir = "drivers/staging";
 

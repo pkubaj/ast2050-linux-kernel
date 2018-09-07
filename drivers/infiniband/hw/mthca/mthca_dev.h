@@ -357,7 +357,6 @@ struct mthca_dev {
 	struct ib_ah         *sm_ah[MTHCA_MAX_PORTS];
 	spinlock_t            sm_lock;
 	u8                    rate[MTHCA_MAX_PORTS];
-	bool		      active;
 };
 
 #ifdef CONFIG_INFINIBAND_MTHCA_DEBUG

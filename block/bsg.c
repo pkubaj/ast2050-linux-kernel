@@ -424,7 +424,7 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
 	/*
 	 * fill in all the output members
 	 */
-	hdr->device_status = rq->errors & 0xff;
+	hdr->device_status = status_byte(rq->errors);
 	hdr->transport_status = host_byte(rq->errors);
 	hdr->driver_status = driver_byte(rq->errors);
 	hdr->info = 0;
@@ -977,8 +977,7 @@ void bsg_unregister_queue(struct request_queue *q)
 
 	mutex_lock(&bsg_mutex);
 	idr_remove(&bsg_minor_idr, bcd->minor);
-	if (q->kobj.sd)
-		sysfs_remove_link(&q->kobj, "bsg");
+	sysfs_remove_link(&q->kobj, "bsg");
 	device_unregister(bcd->class_dev);
 	bcd->class_dev = NULL;
 	kref_put(&bcd->ref, bsg_kref_release_function);
@@ -1063,7 +1062,7 @@ EXPORT_SYMBOL_GPL(bsg_register_queue);
 
 static struct cdev bsg_cdev;
 
-static char *bsg_devnode(struct device *dev, mode_t *mode)
+static char *bsg_nodename(struct device *dev)
 {
 	return kasprintf(GFP_KERNEL, "bsg/%s", dev_name(dev));
 }
@@ -1088,7 +1087,7 @@ static int __init bsg_init(void)
 		ret = PTR_ERR(bsg_class);
 		goto destroy_kmemcache;
 	}
-	bsg_class->devnode = bsg_devnode;
+	bsg_class->nodename = bsg_nodename;
 
 	ret = alloc_chrdev_region(&devid, 0, BSG_MAX_DEVS, "bsg");
 	if (ret)

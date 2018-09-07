@@ -244,32 +244,6 @@ static inline int rfcomm_check_security(struct rfcomm_dlc *d)
 								auth_type);
 }
 
-static void rfcomm_session_timeout(unsigned long arg)
-{
-	struct rfcomm_session *s = (void *) arg;
-
-	BT_DBG("session %p state %ld", s, s->state);
-
-	set_bit(RFCOMM_TIMED_OUT, &s->flags);
-	rfcomm_schedule(RFCOMM_SCHED_TIMEO);
-}
-
-static void rfcomm_session_set_timer(struct rfcomm_session *s, long timeout)
-{
-	BT_DBG("session %p state %ld timeout %ld", s, s->state, timeout);
-
-	if (!mod_timer(&s->timer, jiffies + timeout))
-		rfcomm_session_hold(s);
-}
-
-static void rfcomm_session_clear_timer(struct rfcomm_session *s)
-{
-	BT_DBG("session %p state %ld", s, s->state);
-
-	if (timer_pending(&s->timer) && del_timer(&s->timer))
-		rfcomm_session_put(s);
-}
-
 /* ---- RFCOMM DLCs ---- */
 static void rfcomm_dlc_timeout(unsigned long arg)
 {
@@ -346,7 +320,6 @@ static void rfcomm_dlc_link(struct rfcomm_session *s, struct rfcomm_dlc *d)
 
 	rfcomm_session_hold(s);
 
-	rfcomm_session_clear_timer(s);
 	rfcomm_dlc_hold(d);
 	list_add(&d->list, &s->dlcs);
 	d->session = s;
@@ -361,9 +334,6 @@ static void rfcomm_dlc_unlink(struct rfcomm_dlc *d)
 	list_del(&d->list);
 	d->session = NULL;
 	rfcomm_dlc_put(d);
-
-	if (list_empty(&s->dlcs))
-		rfcomm_session_set_timer(s, RFCOMM_IDLE_TIMEOUT);
 
 	rfcomm_session_put(s);
 }
@@ -597,8 +567,6 @@ static struct rfcomm_session *rfcomm_session_add(struct socket *sock, int state)
 
 	BT_DBG("session %p sock %p", s, sock);
 
-	setup_timer(&s->timer, rfcomm_session_timeout, (unsigned long) s);
-
 	INIT_LIST_HEAD(&s->dlcs);
 	s->state = state;
 	s->sock  = sock;
@@ -630,7 +598,6 @@ static void rfcomm_session_del(struct rfcomm_session *s)
 	if (state == BT_CONNECTED)
 		rfcomm_send_disc(s, 0);
 
-	rfcomm_session_clear_timer(s);
 	sock_release(s->sock);
 	kfree(s);
 
@@ -672,7 +639,6 @@ static void rfcomm_session_close(struct rfcomm_session *s, int err)
 		__rfcomm_dlc_close(d, err);
 	}
 
-	rfcomm_session_clear_timer(s);
 	rfcomm_session_put(s);
 }
 
@@ -1913,13 +1879,6 @@ static inline void rfcomm_process_sessions(void)
 		struct rfcomm_session *s;
 		s = list_entry(p, struct rfcomm_session, list);
 
-		if (test_and_clear_bit(RFCOMM_TIMED_OUT, &s->flags)) {
-			s->state = BT_DISCONN;
-			rfcomm_send_disc(s, 0);
-			rfcomm_session_put(s);
-			continue;
-		}
-
 		if (s->state == BT_LISTEN) {
 			rfcomm_accept_connection(s);
 			continue;
@@ -2096,7 +2055,6 @@ static ssize_t rfcomm_dlc_sysfs_show(struct class *dev, char *buf)
 	struct rfcomm_session *s;
 	struct list_head *pp, *p;
 	char *str = buf;
-	int size = PAGE_SIZE;
 
 	rfcomm_lock();
 
@@ -2105,21 +2063,11 @@ static ssize_t rfcomm_dlc_sysfs_show(struct class *dev, char *buf)
 		list_for_each(pp, &s->dlcs) {
 			struct sock *sk = s->sock->sk;
 			struct rfcomm_dlc *d = list_entry(pp, struct rfcomm_dlc, list);
-			int len;
 
-			len = snprintf(str, size, "%s %s %ld %d %d %d %d\n",
+			str += sprintf(str, "%s %s %ld %d %d %d %d\n",
 					batostr(&bt_sk(sk)->src), batostr(&bt_sk(sk)->dst),
 					d->state, d->dlci, d->mtu, d->rx_credits, d->tx_credits);
-
-			size -= len;
-			if (size <= 0)
-				break;
-
-			str += len;
 		}
-
-		if (size <= 0)
-			break;
 	}
 
 	rfcomm_unlock();
@@ -2132,7 +2080,7 @@ static CLASS_ATTR(rfcomm_dlc, S_IRUGO, rfcomm_dlc_sysfs_show, NULL);
 /* ---- Initialization ---- */
 static int __init rfcomm_init(void)
 {
-	int err;
+	int ret;
 
 	l2cap_load();
 
@@ -2140,35 +2088,33 @@ static int __init rfcomm_init(void)
 
 	rfcomm_thread = kthread_run(rfcomm_run, NULL, "krfcommd");
 	if (IS_ERR(rfcomm_thread)) {
-		err = PTR_ERR(rfcomm_thread);
-		goto unregister;
+		ret = PTR_ERR(rfcomm_thread);
+		goto out_thread;
 	}
 
 	if (class_create_file(bt_class, &class_attr_rfcomm_dlc) < 0)
 		BT_ERR("Failed to create RFCOMM info file");
 
-	err = rfcomm_init_ttys();
-	if (err < 0)
-		goto stop;
+	ret = rfcomm_init_ttys();
+	if (ret)
+		goto out_tty;
 
-	err = rfcomm_init_sockets();
-	if (err < 0)
-		goto cleanup;
+	ret = rfcomm_init_sockets();
+	if (ret)
+		goto out_sock;
 
 	BT_INFO("RFCOMM ver %s", VERSION);
 
 	return 0;
 
-cleanup:
+out_sock:
 	rfcomm_cleanup_ttys();
-
-stop:
+out_tty:
 	kthread_stop(rfcomm_thread);
-
-unregister:
+out_thread:
 	hci_unregister_cb(&rfcomm_cb);
 
-	return err;
+	return ret;
 }
 
 static void __exit rfcomm_exit(void)

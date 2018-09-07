@@ -460,8 +460,7 @@ no_irqs:
 	return ret;
 }
 
-/* Cannot use __devexit as gpio_twl4030_probe() calls us */
-static int gpio_twl4030_remove(struct platform_device *pdev)
+static int __devexit gpio_twl4030_remove(struct platform_device *pdev)
 {
 	struct twl4030_gpio_platform_data *pdata = pdev->dev.platform_data;
 	int status;
@@ -494,7 +493,7 @@ static struct platform_driver gpio_twl4030_driver = {
 	.driver.name	= "twl4030_gpio",
 	.driver.owner	= THIS_MODULE,
 	.probe		= gpio_twl4030_probe,
-	.remove		= gpio_twl4030_remove,
+	.remove		= __devexit_p(gpio_twl4030_remove),
 };
 
 static int __init gpio_twl4030_init(void)

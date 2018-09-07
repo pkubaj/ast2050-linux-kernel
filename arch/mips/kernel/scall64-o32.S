@@ -81,7 +81,7 @@ NESTED(handle_sys, PT_SIZE, sp)
 	PTR	4b, bad_stack
 	.previous
 
-	li	t1, _TIF_WORK_SYSCALL_ENTRY
+	li	t1, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
 	LONG_L	t0, TI_FLAGS($28)	# syscall tracing enabled?
 	and	t0, t1, t0
 	bnez	t0, trace_a_syscall
@@ -180,7 +180,6 @@ LEAF(sys32_syscall)
 	dsll	t1, t0, 3
 	beqz	v0, einval
 	ld	t2, sys_call_table(t1)		# syscall routine
-	sd	a0, PT_R2(sp)		# call routine directly on restart
 
 	move	a0, a1			# shift argument registers
 	move	a1, a2
@@ -379,8 +378,8 @@ sys_call_table:
 	PTR	sys_getsockname
 	PTR	sys_getsockopt
 	PTR	sys_listen
-	PTR	compat_sys_recv			/* 4175 */
-	PTR	compat_sys_recvfrom
+	PTR	sys_recv			/* 4175 */
+	PTR	sys_recvfrom
 	PTR	compat_sys_recvmsg
 	PTR	sys_send
 	PTR	compat_sys_sendmsg
@@ -451,7 +450,7 @@ sys_call_table:
 	PTR	sys_io_submit
 	PTR	sys_io_cancel			/* 4245 */
 	PTR	sys_exit_group
-	PTR	sys32_lookup_dcookie
+	PTR	sys_lookup_dcookie
 	PTR	sys_epoll_create
 	PTR	sys_epoll_ctl
 	PTR	sys_epoll_wait			/* 4250 */
@@ -506,7 +505,7 @@ sys_call_table:
 	PTR	sys_fchmodat
 	PTR	sys_faccessat			/* 4300 */
 	PTR	compat_sys_pselect6
-	PTR	compat_sys_ppoll
+	PTR	sys_ppoll
 	PTR	sys_unshare
 	PTR	sys_splice
 	PTR	sys32_sync_file_range		/* 4305 */
@@ -537,6 +536,6 @@ sys_call_table:
 	PTR	compat_sys_preadv		/* 4330 */
 	PTR	compat_sys_pwritev
 	PTR	compat_sys_rt_tgsigqueueinfo
-	PTR	sys_perf_event_open
+	PTR	sys_perf_counter_open
 	PTR	sys_accept4
 	.size	sys_call_table,.-sys_call_table

@@ -335,16 +335,6 @@ int cpus_are_in_xmon(void)
 }
 #endif
 
-static inline int unrecoverable_excp(struct pt_regs *regs)
-{
-#ifdef CONFIG_4xx
-	/* We have no MSR_RI bit on 4xx, so we simply return false */
-	return 0;
-#else
-	return ((regs->msr & MSR_RI) == 0);
-#endif
-}
-
 static int xmon_core(struct pt_regs *regs, int fromipi)
 {
 	int cmd = 0;
@@ -398,7 +388,7 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 	bp = NULL;
 	if ((regs->msr & (MSR_IR|MSR_PR|MSR_SF)) == (MSR_IR|MSR_SF))
 		bp = at_breakpoint(regs->nip);
-	if (bp || unrecoverable_excp(regs))
+	if (bp || (regs->msr & MSR_RI) == 0)
 		fromipi = 0;
 
 	if (!fromipi) {
@@ -409,7 +399,7 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 			       cpu, BP_NUM(bp));
 			xmon_print_symbol(regs->nip, " ", ")\n");
 		}
-		if (unrecoverable_excp(regs))
+		if ((regs->msr & MSR_RI) == 0)
 			printf("WARNING: exception is not recoverable, "
 			       "can't continue\n");
 		release_output_lock();
@@ -500,7 +490,7 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 			printf("Stopped at breakpoint %x (", BP_NUM(bp));
 			xmon_print_symbol(regs->nip, " ", ")\n");
 		}
-		if (unrecoverable_excp(regs))
+		if ((regs->msr & MSR_RI) == 0)
 			printf("WARNING: exception is not recoverable, "
 			       "can't continue\n");
 		remove_bpts();
@@ -517,15 +507,6 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 	in_xmon = 0;
 #endif
 
-#ifdef CONFIG_BOOKE
-	if (regs->msr & MSR_DE) {
-		bp = at_breakpoint(regs->nip);
-		if (bp != NULL) {
-			regs->nip = (unsigned long) &bp->instr[0];
-			atomic_inc(&bp->ref_count);
-		}
-	}
-#else
 	if ((regs->msr & (MSR_IR|MSR_PR|MSR_SF)) == (MSR_IR|MSR_SF)) {
 		bp = at_breakpoint(regs->nip);
 		if (bp != NULL) {
@@ -539,7 +520,7 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 			}
 		}
 	}
-#endif
+
 	insert_cpu_bpts();
 
 	local_irq_restore(flags);
@@ -903,14 +884,6 @@ cmds(struct pt_regs *excp)
 	}
 }
 
-#ifdef CONFIG_BOOKE
-static int do_step(struct pt_regs *regs)
-{
-	regs->msr |= MSR_DE;
-	mtspr(SPRN_DBCR0, mfspr(SPRN_DBCR0) | DBCR0_IC | DBCR0_IDM);
-	return 1;
-}
-#else
 /*
  * Step a single instruction.
  * Some instructions we emulate, others we execute with MSR_SE set.
@@ -941,7 +914,6 @@ static int do_step(struct pt_regs *regs)
 	regs->msr |= MSR_SE;
 	return 1;
 }
-#endif
 
 static void bootcmds(void)
 {
@@ -2598,7 +2570,7 @@ static void xmon_print_symbol(unsigned long address, const char *mid,
 	printf("%s", after);
 }
 
-#ifdef CONFIG_PPC_BOOK3S_64
+#ifdef CONFIG_PPC64
 static void dump_slb(void)
 {
 	int i;

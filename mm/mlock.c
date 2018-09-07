@@ -78,7 +78,6 @@ void __clear_page_mlock(struct page *page)
  */
 void mlock_vma_page(struct page *page)
 {
-	/* Serialize with page migration */
 	BUG_ON(!PageLocked(page));
 
 	if (!TestSetPageMlocked(page)) {
@@ -100,16 +99,15 @@ void mlock_vma_page(struct page *page)
  * not get another chance to clear PageMlocked.  If we successfully
  * isolate the page and try_to_munlock() detects other VM_LOCKED vmas
  * mapping the page, it will restore the PageMlocked state, unless the page
- * is mapped in a non-linear vma.  So, we go ahead and ClearPageMlocked(),
+ * is mapped in a non-linear vma.  So, we go ahead and SetPageMlocked(),
  * perhaps redundantly.
  * If we lose the isolation race, and the page is mapped by other VM_LOCKED
  * vmas, we'll detect this in vmscan--via try_to_munlock() or try_to_unmap()
  * either of which will restore the PageMlocked state by calling
  * mlock_vma_page() above, if it can grab the vma's mmap sem.
  */
-void munlock_vma_page(struct page *page)
+static void munlock_vma_page(struct page *page)
 {
-	/* For try_to_munlock() and to serialize with page migration */
 	BUG_ON(!PageLocked(page));
 
 	if (TestClearPageMlocked(page)) {
@@ -140,13 +138,6 @@ void munlock_vma_page(struct page *page)
 	}
 }
 
-static inline int stack_guard_page(struct vm_area_struct *vma, unsigned long addr)
-{
-	return (vma->vm_flags & VM_GROWSDOWN) &&
-		(vma->vm_start == addr) &&
-		!vma_stack_continue(vma->vm_prev, addr);
-}
-
 /**
  * __mlock_vma_pages_range() -  mlock a range of pages in the vma.
  * @vma:   target vma
@@ -175,15 +166,9 @@ static long __mlock_vma_pages_range(struct vm_area_struct *vma,
 	VM_BUG_ON(end   > vma->vm_end);
 	VM_BUG_ON(!rwsem_is_locked(&mm->mmap_sem));
 
-	gup_flags = FOLL_TOUCH | FOLL_GET;
+	gup_flags = 0;
 	if (vma->vm_flags & VM_WRITE)
-		gup_flags |= FOLL_WRITE;
-
-	/* We don't try to access the guard page of a stack vma */
-	if (stack_guard_page(vma, start)) {
-		addr += PAGE_SIZE;
-		nr_pages--;
-	}
+		gup_flags = GUP_FLAGS_WRITE;
 
 	while (nr_pages > 0) {
 		int i;
@@ -213,26 +198,17 @@ static long __mlock_vma_pages_range(struct vm_area_struct *vma,
 		for (i = 0; i < ret; i++) {
 			struct page *page = pages[i];
 
-			if (page->mapping) {
-				/*
-				 * That preliminary check is mainly to avoid
-				 * the pointless overhead of lock_page on the
-				 * ZERO_PAGE: which might bounce very badly if
-				 * there is contention.  However, we're still
-				 * dirtying its cacheline with get/put_page:
-				 * we'll add another __get_user_pages flag to
-				 * avoid it if that case turns out to matter.
-				 */
-				lock_page(page);
-				/*
-				 * Because we lock page here and migration is
-				 * blocked by the elevated reference, we need
-				 * only check for file-cache page truncation.
-				 */
-				if (page->mapping)
-					mlock_vma_page(page);
-				unlock_page(page);
-			}
+			lock_page(page);
+			/*
+			 * Because we lock page here and migration is blocked
+			 * by the elevated reference, we need only check for
+			 * file-cache page truncation.  This page->mapping
+			 * check also neatly skips over the ZERO_PAGE(),
+			 * though if that's common we'd prefer not to lock it.
+			 */
+			if (page->mapping)
+				mlock_vma_page(page);
+			unlock_page(page);
 			put_page(page);	/* ref from get_user_pages() */
 		}
 
@@ -333,23 +309,9 @@ void munlock_vma_pages_range(struct vm_area_struct *vma,
 	vma->vm_flags &= ~VM_LOCKED;
 
 	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		struct page *page;
-		/*
-		 * Although FOLL_DUMP is intended for get_dump_page(),
-		 * it just so happens that its special treatment of the
-		 * ZERO_PAGE (returning an error instead of doing get_page)
-		 * suits munlock very well (and if somehow an abnormal page
-		 * has sneaked into the range, we won't oops here: great).
-		 */
-		page = follow_page(vma, addr, FOLL_GET | FOLL_DUMP);
-		if (page && !IS_ERR(page)) {
+		struct page *page = follow_page(vma, addr, FOLL_GET);
+		if (page) {
 			lock_page(page);
-			/*
-			 * Like in __mlock_vma_pages_range(),
-			 * because we lock page here and migration is
-			 * blocked by the elevated reference, we need
-			 * only check for file-cache page truncation.
-			 */
 			if (page->mapping)
 				munlock_vma_page(page);
 			unlock_page(page);

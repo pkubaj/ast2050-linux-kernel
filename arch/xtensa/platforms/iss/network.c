@@ -545,7 +545,7 @@ static int iss_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	spin_unlock_irqrestore(&lp->lock, flags);
 
 	dev_kfree_skb(skb);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 

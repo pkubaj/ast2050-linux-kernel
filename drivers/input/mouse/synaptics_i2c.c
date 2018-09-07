@@ -203,7 +203,7 @@ MODULE_PARM_DESC(no_filter, "No Filter. Default = 0 (off)");
  * and the irq configuration should be set to Falling Edge Trigger
  */
 /* Control IRQ / Polling option */
-static bool polling_req;
+static int polling_req;
 module_param(polling_req, bool, 0444);
 MODULE_PARM_DESC(polling_req, "Request Polling. Default = 0 (use irq)");
 
@@ -217,7 +217,6 @@ struct synaptics_i2c {
 	struct i2c_client	*client;
 	struct input_dev	*input;
 	struct delayed_work	dwork;
-	spinlock_t		lock;
 	int			no_data_count;
 	int			no_decel_param;
 	int			reduce_report_param;
@@ -367,28 +366,17 @@ static bool synaptics_i2c_get_input(struct synaptics_i2c *touch)
 	return xy_delta || gesture;
 }
 
-static void synaptics_i2c_reschedule_work(struct synaptics_i2c *touch,
-					  unsigned long delay)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&touch->lock, flags);
-
-	/*
-	 * If work is already scheduled then subsequent schedules will not
-	 * change the scheduled time that's why we have to cancel it first.
-	 */
-	__cancel_delayed_work(&touch->dwork);
-	schedule_delayed_work(&touch->dwork, delay);
-
-	spin_unlock_irqrestore(&touch->lock, flags);
-}
-
 static irqreturn_t synaptics_i2c_irq(int irq, void *dev_id)
 {
 	struct synaptics_i2c *touch = dev_id;
 
-	synaptics_i2c_reschedule_work(touch, 0);
+	/*
+	 * We want to have the work run immediately but it might have
+	 * already been scheduled with a delay, that's why we have to
+	 * cancel it first.
+	 */
+	cancel_delayed_work(&touch->dwork);
+	schedule_delayed_work(&touch->dwork, 0);
 
 	return IRQ_HANDLED;
 }
@@ -464,7 +452,7 @@ static void synaptics_i2c_work_handler(struct work_struct *work)
 	 * We poll the device once in THREAD_IRQ_SLEEP_SECS and
 	 * if error is detected, we try to reset and reconfigure the touchpad.
 	 */
-	synaptics_i2c_reschedule_work(touch, delay);
+	schedule_delayed_work(&touch->dwork, delay);
 }
 
 static int synaptics_i2c_open(struct input_dev *input)
@@ -477,8 +465,8 @@ static int synaptics_i2c_open(struct input_dev *input)
 		return ret;
 
 	if (polling_req)
-		synaptics_i2c_reschedule_work(touch,
-				msecs_to_jiffies(NO_DATA_SLEEP_MSECS));
+		schedule_delayed_work(&touch->dwork,
+				       msecs_to_jiffies(NO_DATA_SLEEP_MSECS));
 
 	return 0;
 }
@@ -533,7 +521,6 @@ struct synaptics_i2c *synaptics_i2c_touch_create(struct i2c_client *client)
 	touch->scan_rate_param = scan_rate;
 	set_scan_rate(touch, scan_rate);
 	INIT_DELAYED_WORK(&touch->dwork, synaptics_i2c_work_handler);
-	spin_lock_init(&touch->lock);
 
 	return touch;
 }
@@ -548,12 +535,14 @@ static int __devinit synaptics_i2c_probe(struct i2c_client *client,
 	if (!touch)
 		return -ENOMEM;
 
+	i2c_set_clientdata(client, touch);
+
 	ret = synaptics_i2c_reset_config(client);
 	if (ret)
 		goto err_mem_free;
 
 	if (client->irq < 1)
-		polling_req = true;
+		polling_req = 1;
 
 	touch->input = input_allocate_device();
 	if (!touch->input) {
@@ -574,7 +563,7 @@ static int __devinit synaptics_i2c_probe(struct i2c_client *client,
 			dev_warn(&touch->client->dev,
 				  "IRQ request failed: %d, "
 				  "falling back to polling\n", ret);
-			polling_req = true;
+			polling_req = 1;
 			synaptics_i2c_reg_set(touch->client,
 					      INTERRUPT_EN_REG, 0);
 		}
@@ -591,14 +580,12 @@ static int __devinit synaptics_i2c_probe(struct i2c_client *client,
 			 "Input device register failed: %d\n", ret);
 		goto err_input_free;
 	}
-
-	i2c_set_clientdata(client, touch);
-
 	return 0;
 
 err_input_free:
 	input_free_device(touch->input);
 err_mem_free:
+	i2c_set_clientdata(client, NULL);
 	kfree(touch);
 
 	return ret;
@@ -609,7 +596,7 @@ static int __devexit synaptics_i2c_remove(struct i2c_client *client)
 	struct synaptics_i2c *touch = i2c_get_clientdata(client);
 
 	if (!polling_req)
-		free_irq(client->irq, touch);
+		free_irq(touch->client->irq, touch);
 
 	input_unregister_device(touch->input);
 	i2c_set_clientdata(client, NULL);
@@ -640,8 +627,8 @@ static int synaptics_i2c_resume(struct i2c_client *client)
 	if (ret)
 		return ret;
 
-	synaptics_i2c_reschedule_work(touch,
-				msecs_to_jiffies(NO_DATA_SLEEP_MSECS));
+	schedule_delayed_work(&touch->dwork,
+			       msecs_to_jiffies(NO_DATA_SLEEP_MSECS));
 
 	return 0;
 }

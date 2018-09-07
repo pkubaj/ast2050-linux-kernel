@@ -76,8 +76,9 @@ get_v4l_control(struct file             *file,
 			dprintk("VIDIOC_G_CTRL: %d\n", err);
 			return 0;
 		}
-		return DIV_ROUND_CLOSEST((ctrl2.value-qctrl2.minimum) * 65535,
-					 qctrl2.maximum - qctrl2.minimum);
+		return ((ctrl2.value - qctrl2.minimum) * 65535
+			 + (qctrl2.maximum - qctrl2.minimum) / 2)
+			/ (qctrl2.maximum - qctrl2.minimum);
 	}
 	return 0;
 }

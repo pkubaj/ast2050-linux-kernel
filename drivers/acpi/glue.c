@@ -12,8 +12,6 @@
 #include <linux/rwsem.h>
 #include <linux/acpi.h>
 
-#include "internal.h"
-
 #define ACPI_GLUE_DEBUG	0
 #if ACPI_GLUE_DEBUG
 #define DBG(x...) printk(PREFIX x)
@@ -95,13 +93,15 @@ do_acpi_find_child(acpi_handle handle, u32 lvl, void *context, void **rv)
 {
 	acpi_status status;
 	struct acpi_device_info *info;
+	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 	struct acpi_find_child *find = context;
 
-	status = acpi_get_object_info(handle, &info);
+	status = acpi_get_object_info(handle, &buffer);
 	if (ACPI_SUCCESS(status)) {
+		info = buffer.pointer;
 		if (info->address == find->address)
 			find->handle = handle;
-		kfree(info);
+		kfree(buffer.pointer);
 	}
 	return AE_OK;
 }
@@ -121,7 +121,7 @@ EXPORT_SYMBOL(acpi_get_child);
 
 /* Link ACPI devices with physical devices */
 static void acpi_glue_data_handler(acpi_handle handle,
-				   void *context)
+				   u32 function, void *context)
 {
 	/* we provide an empty handler */
 }

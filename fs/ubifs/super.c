@@ -36,6 +36,7 @@
 #include <linux/mount.h>
 #include <linux/math64.h>
 #include <linux/writeback.h>
+#include <linux/smp_lock.h>
 #include "ubifs.h"
 
 /*
@@ -317,8 +318,6 @@ static int ubifs_write_inode(struct inode *inode, int wait)
 		if (err)
 			ubifs_err("can't write inode %lu, error %d",
 				  inode->i_ino, err);
-		else
-			err = dbg_check_inode_size(c, inode, ui->ui_size);
 	}
 
 	ui->dirty = 0;
@@ -439,6 +438,12 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
 {
 	int i, err;
 	struct ubifs_info *c = sb->s_fs_info;
+	struct writeback_control wbc = {
+		.sync_mode   = WB_SYNC_ALL,
+		.range_start = 0,
+		.range_end   = LLONG_MAX,
+		.nr_to_write = LONG_MAX,
+	};
 
 	/*
 	 * Zero @wait is just an advisory thing to help the file system shove
@@ -447,6 +452,17 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
 	 */
 	if (!wait)
 		return 0;
+
+	/*
+	 * VFS calls '->sync_fs()' before synchronizing all dirty inodes and
+	 * pages, so synchronize them first, then commit the journal. Strictly
+	 * speaking, it is not necessary to commit the journal here,
+	 * synchronizing write-buffers would be enough. But committing makes
+	 * UBIFS free space predictions much more accurate, so we want to let
+	 * the user be able to get more accurate results of 'statfs()' after
+	 * they synchronize the file system.
+	 */
+	generic_sync_sb_inodes(sb, &wbc);
 
 	/*
 	 * Synchronize write buffers, because 'ubifs_run_commit()' does not
@@ -458,13 +474,6 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
 			return err;
 	}
 
-	/*
-	 * Strictly speaking, it is not necessary to commit the journal here,
-	 * synchronizing write-buffers would be enough. But committing makes
-	 * UBIFS free space predictions much more accurate, so we want to let
-	 * the user be able to get more accurate results of 'statfs()' after
-	 * they synchronize the file system.
-	 */
 	err = ubifs_run_commit(c);
 	if (err)
 		return err;
@@ -1550,7 +1559,6 @@ static int ubifs_remount_rw(struct ubifs_info *c)
 		}
 		sup->leb_cnt = cpu_to_le32(c->leb_cnt);
 		err = ubifs_write_sb_node(c, sup);
-		kfree(sup);
 		if (err)
 			goto out;
 	}
@@ -1718,6 +1726,8 @@ static void ubifs_put_super(struct super_block *sb)
 	ubifs_msg("un-mount UBI device %d, volume %d", c->vi.ubi_num,
 		  c->vi.vol_id);
 
+	lock_kernel();
+
 	/*
 	 * The following asserts are only valid if there has not been a failure
 	 * of the media. For example, there will be dirty inodes if we failed
@@ -1782,6 +1792,8 @@ static void ubifs_put_super(struct super_block *sb)
 	ubi_close_volume(c->ubi);
 	mutex_unlock(&c->umount_mutex);
 	kfree(c);
+
+	unlock_kernel();
 }
 
 static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
@@ -1797,17 +1809,22 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
 		return err;
 	}
 
+	lock_kernel();
 	if ((sb->s_flags & MS_RDONLY) && !(*flags & MS_RDONLY)) {
 		if (c->ro_media) {
 			ubifs_msg("cannot re-mount due to prior errors");
+			unlock_kernel();
 			return -EROFS;
 		}
 		err = ubifs_remount_rw(c);
-		if (err)
+		if (err) {
+			unlock_kernel();
 			return err;
+		}
 	} else if (!(sb->s_flags & MS_RDONLY) && (*flags & MS_RDONLY)) {
 		if (c->ro_media) {
 			ubifs_msg("cannot re-mount due to prior errors");
+			unlock_kernel();
 			return -EROFS;
 		}
 		ubifs_remount_ro(c);
@@ -1822,6 +1839,7 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
 	}
 
 	ubifs_assert(c->lst.taken_empty_lebs > 0);
+	unlock_kernel();
 	return 0;
 }
 
@@ -1953,7 +1971,6 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
 	 *
 	 * Read-ahead will be disabled because @c->bdi.ra_pages is 0.
 	 */
-	c->bdi.name = "ubifs",
 	c->bdi.capabilities = BDI_CAP_MAP_COPY;
 	c->bdi.unplug_io_fn = default_unplug_io_fn;
 	err  = bdi_init(&c->bdi);
@@ -1968,7 +1985,6 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
 	if (err)
 		goto out_bdi;
 
-	sb->s_bdi = &c->bdi;
 	sb->s_fs_info = c;
 	sb->s_magic = UBIFS_SUPER_MAGIC;
 	sb->s_blocksize = UBIFS_BLOCK_SIZE;

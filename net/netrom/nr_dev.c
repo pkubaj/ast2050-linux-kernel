@@ -169,7 +169,7 @@ static int nr_close(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t nr_xmit(struct sk_buff *skb, struct net_device *dev)
+static int nr_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct net_device_stats *stats = &dev->stats;
 	unsigned int len = skb->len;
@@ -177,13 +177,13 @@ static netdev_tx_t nr_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (!nr_route_frame(skb, NULL)) {
 		kfree_skb(skb);
 		stats->tx_errors++;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	stats->tx_packets++;
 	stats->tx_bytes += len;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static const struct header_ops nr_header_ops = {

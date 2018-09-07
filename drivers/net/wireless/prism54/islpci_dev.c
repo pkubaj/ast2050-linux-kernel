@@ -23,7 +23,6 @@
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include <linux/pci.h>
-#include <linux/sched.h>
 #include <linux/etherdevice.h>
 #include <linux/delay.h>
 #include <linux/if_arp.h>

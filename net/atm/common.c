@@ -679,7 +679,7 @@ static int check_qos(const struct atm_qos *qos)
 }
 
 int vcc_setsockopt(struct socket *sock, int level, int optname,
-		   char __user *optval, unsigned int optlen)
+		   char __user *optval, int optlen)
 {
 	struct atm_vcc *vcc;
 	unsigned long value;
@@ -749,7 +749,6 @@ int vcc_getsockopt(struct socket *sock, int level, int optname,
 				if (!vcc->dev ||
 				    !test_bit(ATM_VF_ADDR,&vcc->flags))
 					return -ENOTCONN;
-				memset(&pvc, 0, sizeof(pvc));
 				pvc.sap_family = AF_ATMPVC;
 				pvc.sap_addr.itf = vcc->dev->number;
 				pvc.sap_addr.vpi = vcc->vpi;

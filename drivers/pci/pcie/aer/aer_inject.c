@@ -22,10 +22,11 @@
 #include <linux/miscdevice.h>
 #include <linux/pci.h>
 #include <linux/fs.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include "aerdrv.h"
 
-struct aer_error_inj {
+struct aer_error_inj
+{
 	u8 bus;
 	u8 dev;
 	u8 fn;
@@ -37,7 +38,8 @@ struct aer_error_inj {
 	u32 header_log3;
 };
 
-struct aer_error {
+struct aer_error
+{
 	struct list_head list;
 	unsigned int bus;
 	unsigned int devfn;
@@ -53,7 +55,8 @@ struct aer_error {
 	u32 source_id;
 };
 
-struct pci_bus_ops {
+struct pci_bus_ops
+{
 	struct list_head list;
 	struct pci_bus *bus;
 	struct pci_ops *ops;
@@ -147,7 +150,7 @@ static u32 *find_pci_config_dword(struct aer_error *err, int where,
 		target = &err->header_log1;
 		break;
 	case PCI_ERR_HEADER_LOG+8:
-		target = &err->header_log2;
+	        target = &err->header_log2;
 		break;
 	case PCI_ERR_HEADER_LOG+12:
 		target = &err->header_log3;
@@ -255,7 +258,8 @@ static int pci_bus_set_aer_ops(struct pci_bus *bus)
 	bus_ops = NULL;
 out:
 	spin_unlock_irqrestore(&inject_lock, flags);
-	kfree(bus_ops);
+	if (bus_ops)
+		kfree(bus_ops);
 	return 0;
 }
 
@@ -302,7 +306,7 @@ static int aer_inject(struct aer_error_inj *einj)
 	unsigned long flags;
 	unsigned int devfn = PCI_DEVFN(einj->dev, einj->fn);
 	int pos_cap_err, rp_pos_cap_err;
-	u32 sever, cor_mask, uncor_mask;
+	u32 sever;
 	int ret = 0;
 
 	dev = pci_get_bus_and_slot(einj->bus, devfn);
@@ -320,9 +324,6 @@ static int aer_inject(struct aer_error_inj *einj)
 		goto out_put;
 	}
 	pci_read_config_dword(dev, pos_cap_err + PCI_ERR_UNCOR_SEVER, &sever);
-	pci_read_config_dword(dev, pos_cap_err + PCI_ERR_COR_MASK, &cor_mask);
-	pci_read_config_dword(dev, pos_cap_err + PCI_ERR_UNCOR_MASK,
-			      &uncor_mask);
 
 	rp_pos_cap_err = pci_find_ext_capability(rpdev, PCI_EXT_CAP_ID_ERR);
 	if (!rp_pos_cap_err) {
@@ -356,21 +357,6 @@ static int aer_inject(struct aer_error_inj *einj)
 	err->header_log1 = einj->header_log1;
 	err->header_log2 = einj->header_log2;
 	err->header_log3 = einj->header_log3;
-
-	if (einj->cor_status && !(einj->cor_status & ~cor_mask)) {
-		ret = -EINVAL;
-		printk(KERN_WARNING "The correctable error(s) is masked "
-				"by device\n");
-		spin_unlock_irqrestore(&inject_lock, flags);
-		goto out_put;
-	}
-	if (einj->uncor_status && !(einj->uncor_status & ~uncor_mask)) {
-		ret = -EINVAL;
-		printk(KERN_WARNING "The uncorrectable error(s) is masked "
-				"by device\n");
-		spin_unlock_irqrestore(&inject_lock, flags);
-		goto out_put;
-	}
 
 	rperr = __find_aer_error_by_dev(rpdev);
 	if (!rperr) {
@@ -410,19 +396,15 @@ static int aer_inject(struct aer_error_inj *einj)
 	if (ret)
 		goto out_put;
 
-	if (find_aer_device(rpdev, &edev)) {
-		if (!get_service_data(edev)) {
-			printk(KERN_WARNING "AER service is not initialized\n");
-			ret = -EINVAL;
-			goto out_put;
-		}
+	if (find_aer_device(rpdev, &edev))
 		aer_irq(-1, edev);
-	}
 	else
 		ret = -EINVAL;
 out_put:
-	kfree(err_alloc);
-	kfree(rperr_alloc);
+	if (err_alloc)
+		kfree(err_alloc);
+	if (rperr_alloc)
+		kfree(rperr_alloc);
 	pci_dev_put(dev);
 	return ret;
 }
@@ -476,7 +458,8 @@ static void __exit aer_inject_exit(void)
 	}
 
 	spin_lock_irqsave(&inject_lock, flags);
-	list_for_each_entry_safe(err, err_next, &pci_bus_ops_list, list) {
+	list_for_each_entry_safe(err, err_next,
+				 &pci_bus_ops_list, list) {
 		list_del(&err->list);
 		kfree(err);
 	}

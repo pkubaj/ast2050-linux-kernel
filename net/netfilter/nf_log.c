@@ -83,8 +83,6 @@ EXPORT_SYMBOL(nf_log_unregister);
 
 int nf_log_bind_pf(u_int8_t pf, const struct nf_logger *logger)
 {
-	if (pf >= ARRAY_SIZE(nf_loggers))
-		return -EINVAL;
 	mutex_lock(&nf_log_mutex);
 	if (__find_logger(pf, logger->name) == NULL) {
 		mutex_unlock(&nf_log_mutex);
@@ -98,8 +96,6 @@ EXPORT_SYMBOL(nf_log_bind_pf);
 
 void nf_log_unbind_pf(u_int8_t pf)
 {
-	if (pf >= ARRAY_SIZE(nf_loggers))
-		return;
 	mutex_lock(&nf_log_mutex);
 	rcu_assign_pointer(nf_loggers[pf], NULL);
 	mutex_unlock(&nf_log_mutex);
@@ -132,8 +128,9 @@ EXPORT_SYMBOL(nf_log_packet);
 
 #ifdef CONFIG_PROC_FS
 static void *seq_start(struct seq_file *seq, loff_t *pos)
+	__acquires(RCU)
 {
-	mutex_lock(&nf_log_mutex);
+	rcu_read_lock();
 
 	if (*pos >= ARRAY_SIZE(nf_loggers))
 		return NULL;
@@ -152,8 +149,9 @@ static void *seq_next(struct seq_file *s, void *v, loff_t *pos)
 }
 
 static void seq_stop(struct seq_file *s, void *v)
+	__releases(RCU)
 {
-	mutex_unlock(&nf_log_mutex);
+	rcu_read_unlock();
 }
 
 static int seq_show(struct seq_file *s, void *v)
@@ -163,7 +161,7 @@ static int seq_show(struct seq_file *s, void *v)
 	struct nf_logger *t;
 	int ret;
 
-	logger = nf_loggers[*pos];
+	logger = rcu_dereference(nf_loggers[*pos]);
 
 	if (!logger)
 		ret = seq_printf(s, "%2lld NONE (", *pos);
@@ -173,16 +171,22 @@ static int seq_show(struct seq_file *s, void *v)
 	if (ret < 0)
 		return ret;
 
+	mutex_lock(&nf_log_mutex);
 	list_for_each_entry(t, &nf_loggers_l[*pos], list[*pos]) {
 		ret = seq_printf(s, "%s", t->name);
-		if (ret < 0)
+		if (ret < 0) {
+			mutex_unlock(&nf_log_mutex);
 			return ret;
+		}
 		if (&t->list[*pos] != nf_loggers_l[*pos].prev) {
 			ret = seq_printf(s, ",");
-			if (ret < 0)
+			if (ret < 0) {
+				mutex_unlock(&nf_log_mutex);
 				return ret;
+			}
 		}
 	}
+	mutex_unlock(&nf_log_mutex);
 
 	return seq_printf(s, ")\n");
 }
@@ -222,7 +226,7 @@ static char nf_log_sysctl_fnames[NFPROTO_NUMPROTO-NFPROTO_UNSPEC][3];
 static struct ctl_table nf_log_sysctl_table[NFPROTO_NUMPROTO+1];
 static struct ctl_table_header *nf_log_dir_header;
 
-static int nf_log_proc_dostring(ctl_table *table, int write,
+static int nf_log_proc_dostring(ctl_table *table, int write, struct file *filp,
 			 void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	const struct nf_logger *logger;
@@ -256,7 +260,7 @@ static int nf_log_proc_dostring(ctl_table *table, int write,
 			table->data = "NONE";
 		else
 			table->data = logger->name;
-		r = proc_dostring(table, write, buffer, lenp, ppos);
+		r = proc_dostring(table, write, filp, buffer, lenp, ppos);
 		mutex_unlock(&nf_log_mutex);
 	}
 

@@ -49,7 +49,6 @@
 #include <asm/numa.h>
 #include <asm/cacheflush.h>
 #include <asm/init.h>
-#include <linux/bootmem.h>
 
 static unsigned long dma_reserve __initdata;
 
@@ -616,21 +615,6 @@ void __init paging_init(void)
  */
 #ifdef CONFIG_MEMORY_HOTPLUG
 /*
- * After memory hotplug the variables max_pfn, max_low_pfn and high_memory need
- * updating.
- */
-static void  update_end_of_memory_vars(u64 start, u64 size)
-{
-	unsigned long end_pfn = PFN_UP(start + size);
-
-	if (end_pfn > max_pfn) {
-		max_pfn = end_pfn;
-		max_low_pfn = end_pfn;
-		high_memory = (void *)__va(max_pfn * PAGE_SIZE - 1) + 1;
-	}
-}
-
-/*
  * Memory is added always to NORMAL zone. This means you will never get
  * additional DMA/DMA32 memory.
  */
@@ -649,9 +633,6 @@ int arch_add_memory(int nid, u64 start, u64 size)
 	ret = __add_pages(nid, zone, start_pfn, nr_pages);
 	WARN_ON_ONCE(ret);
 
-	/* update max_pfn, max_low_pfn and high_memory */
-	update_end_of_memory_vars(start, size);
-
 	return ret;
 }
 EXPORT_SYMBOL_GPL(arch_add_memory);
@@ -666,7 +647,8 @@ EXPORT_SYMBOL_GPL(memory_add_physaddr_to_nid);
 
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
-static struct kcore_list kcore_vsyscall;
+static struct kcore_list kcore_mem, kcore_vmalloc, kcore_kernel,
+			 kcore_modules, kcore_vsyscall;
 
 void __init mem_init(void)
 {
@@ -695,12 +677,17 @@ void __init mem_init(void)
 	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
 
 	/* Register memory areas for /proc/kcore */
+	kclist_add(&kcore_mem, __va(0), max_low_pfn << PAGE_SHIFT);
+	kclist_add(&kcore_vmalloc, (void *)VMALLOC_START,
+		   VMALLOC_END-VMALLOC_START);
+	kclist_add(&kcore_kernel, &_stext, _end - _stext);
+	kclist_add(&kcore_modules, (void *)MODULES_VADDR, MODULES_LEN);
 	kclist_add(&kcore_vsyscall, (void *)VSYSCALL_START,
-			 VSYSCALL_END - VSYSCALL_START, KCORE_OTHER);
+				 VSYSCALL_END - VSYSCALL_START);
 
 	printk(KERN_INFO "Memory: %luk/%luk available (%ldk kernel code, "
 			 "%ldk absent, %ldk reserved, %ldk data, %ldk init)\n",
-		nr_free_pages() << (PAGE_SHIFT-10),
+		(unsigned long) nr_free_pages() << (PAGE_SHIFT-10),
 		max_pfn << (PAGE_SHIFT-10),
 		codesize >> 10,
 		absent_pages << (PAGE_SHIFT-10),
@@ -838,9 +825,6 @@ int kern_addr_valid(unsigned long addr)
 	pud = pud_offset(pgd, addr);
 	if (pud_none(*pud))
 		return 0;
-
-	if (pud_large(*pud))
-		return pfn_valid(pud_pfn(*pud));
 
 	pmd = pmd_offset(pud, addr);
 	if (pmd_none(*pmd))

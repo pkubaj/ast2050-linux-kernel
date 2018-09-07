@@ -9,7 +9,6 @@
 #undef DEBUG
 
 #include <linux/interrupt.h>
-#include <linux/oom.h>
 #include <linux/suspend.h>
 #include <linux/module.h>
 #include <linux/syscalls.h>
@@ -139,7 +138,7 @@ static void thaw_tasks(bool nosig_only)
 		if (nosig_only && should_send_signal(p))
 			continue;
 
-		if (cgroup_freezing_or_frozen(p))
+		if (cgroup_frozen(p))
 			continue;
 
 		thaw_process(p);

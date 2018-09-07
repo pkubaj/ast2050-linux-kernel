@@ -35,10 +35,6 @@
 #include "u_phonet.h"
 
 #define PN_MEDIA_USB	0x1B
-#define MAXPACKET	512
-#if (PAGE_SIZE % MAXPACKET)
-#error MAXPACKET must divide PAGE_SIZE!
-#endif
 
 /*-------------------------------------------------------------------------*/
 
@@ -49,10 +45,6 @@ struct phonet_port {
 
 struct f_phonet {
 	struct usb_function		function;
-	struct {
-		struct sk_buff		*skb;
-		spinlock_t		lock;
-	} rx;
 	struct net_device		*dev;
 	struct usb_ep			*in_ep, *out_ep;
 
@@ -60,7 +52,7 @@ struct f_phonet {
 	struct usb_request		*out_reqv[0];
 };
 
-static int phonet_rxq_size = 17;
+static int phonet_rxq_size = 2;
 
 static inline struct f_phonet *func_to_pn(struct usb_function *f)
 {
@@ -146,7 +138,7 @@ pn_hs_sink_desc = {
 
 	.bEndpointAddress =	USB_DIR_OUT,
 	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize =	cpu_to_le16(MAXPACKET),
+	.wMaxPacketSize =	cpu_to_le16(512),
 };
 
 static struct usb_endpoint_descriptor
@@ -264,15 +256,25 @@ out:
 		dev_kfree_skb(skb);
 		dev->stats.tx_dropped++;
 	}
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static int pn_net_mtu(struct net_device *dev, int new_mtu)
 {
+	struct phonet_port *port = netdev_priv(dev);
+	unsigned long flags;
+	int err = -EBUSY;
+
 	if ((new_mtu < PHONET_MIN_MTU) || (new_mtu > PHONET_MAX_MTU))
 		return -EINVAL;
-	dev->mtu = new_mtu;
-	return 0;
+
+	spin_lock_irqsave(&port->lock, flags);
+	if (!netif_carrier_ok(dev)) {
+		dev->mtu = new_mtu;
+		err = 0;
+	}
+	spin_unlock_irqrestore(&port->lock, flags);
+	return err;
 }
 
 static const struct net_device_ops pn_netdev_ops = {
@@ -306,21 +308,21 @@ static void pn_net_setup(struct net_device *dev)
 static int
 pn_rx_submit(struct f_phonet *fp, struct usb_request *req, gfp_t gfp_flags)
 {
-	struct net_device *dev = fp->dev;
-	struct page *page;
+	struct sk_buff *skb;
+	const size_t size = fp->dev->mtu;
 	int err;
 
-	page = __netdev_alloc_page(dev, gfp_flags);
-	if (!page)
+	skb = alloc_skb(size, gfp_flags);
+	if (!skb)
 		return -ENOMEM;
 
-	req->buf = page_address(page);
-	req->length = PAGE_SIZE;
-	req->context = page;
+	req->buf = skb->data;
+	req->length = size;
+	req->context = skb;
 
 	err = usb_ep_queue(fp->out_ep, req, gfp_flags);
 	if (unlikely(err))
-		netdev_free_page(dev, page);
+		dev_kfree_skb_any(skb);
 	return err;
 }
 
@@ -328,37 +330,25 @@ static void pn_rx_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_phonet *fp = ep->driver_data;
 	struct net_device *dev = fp->dev;
-	struct page *page = req->context;
-	struct sk_buff *skb;
-	unsigned long flags;
+	struct sk_buff *skb = req->context;
 	int status = req->status;
 
 	switch (status) {
 	case 0:
-		spin_lock_irqsave(&fp->rx.lock, flags);
-		skb = fp->rx.skb;
-		if (!skb)
-			skb = fp->rx.skb = netdev_alloc_skb(dev, 12);
-		if (req->actual < req->length) /* Last fragment */
-			fp->rx.skb = NULL;
-		spin_unlock_irqrestore(&fp->rx.lock, flags);
-
-		if (unlikely(!skb))
+		if (unlikely(!netif_running(dev)))
 			break;
-		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags, page, 0,
-				req->actual);
-		page = NULL;
+		if (unlikely(req->actual < 1))
+			break;
+		skb_put(skb, req->actual);
+		skb->protocol = htons(ETH_P_PHONET);
+		skb_reset_mac_header(skb);
+		__skb_pull(skb, 1);
+		skb->dev = dev;
+		dev->stats.rx_packets++;
+		dev->stats.rx_bytes += skb->len;
 
-		if (req->actual < req->length) { /* Last fragment */
-			skb->protocol = htons(ETH_P_PHONET);
-			skb_reset_mac_header(skb);
-			pskb_pull(skb, 1);
-			skb->dev = dev;
-			dev->stats.rx_packets++;
-			dev->stats.rx_bytes += skb->len;
-
-			netif_rx(skb);
-		}
+		netif_rx(skb);
+		skb = NULL;
 		break;
 
 	/* Do not resubmit in these cases: */
@@ -376,8 +366,8 @@ static void pn_rx_complete(struct usb_ep *ep, struct usb_request *req)
 		break;
 	}
 
-	if (page)
-		netdev_free_page(dev, page);
+	if (skb)
+		dev_kfree_skb_any(skb);
 	if (req)
 		pn_rx_submit(fp, req, GFP_ATOMIC);
 }
@@ -395,10 +385,6 @@ static void __pn_reset(struct usb_function *f)
 
 	usb_ep_disable(fp->out_ep);
 	usb_ep_disable(fp->in_ep);
-	if (fp->rx.skb) {
-		dev_kfree_skb_irq(fp->rx.skb);
-		fp->rx.skb = NULL;
-	}
 }
 
 static int pn_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
@@ -597,7 +583,6 @@ int __init phonet_bind_config(struct usb_configuration *c)
 	fp->function.set_alt = pn_set_alt;
 	fp->function.get_alt = pn_get_alt;
 	fp->function.disable = pn_disconnect;
-	spin_lock_init(&fp->rx.lock);
 
 	err = usb_add_function(c, &fp->function);
 	if (err)

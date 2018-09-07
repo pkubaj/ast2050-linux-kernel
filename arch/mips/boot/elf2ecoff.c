@@ -59,8 +59,8 @@ struct sect {
 };
 
 int *symTypeTable;
-int must_convert_endian;
-int format_bigendian;
+int must_convert_endian = 0;
+int format_bigendian = 0;
 
 static void copy(int out, int in, off_t offset, off_t size)
 {

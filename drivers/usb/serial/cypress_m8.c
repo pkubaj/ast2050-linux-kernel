@@ -172,7 +172,8 @@ static int  cypress_earthmate_startup(struct usb_serial *serial);
 static int  cypress_hidcom_startup(struct usb_serial *serial);
 static int  cypress_ca42v2_startup(struct usb_serial *serial);
 static void cypress_release(struct usb_serial *serial);
-static int  cypress_open(struct tty_struct *tty, struct usb_serial_port *port);
+static int  cypress_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp);
 static void cypress_close(struct usb_serial_port *port);
 static void cypress_dtr_rts(struct usb_serial_port *port, int on);
 static int  cypress_write(struct tty_struct *tty, struct usb_serial_port *port,
@@ -632,7 +633,8 @@ static void cypress_release(struct usb_serial *serial)
 }
 
 
-static int cypress_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int cypress_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct cypress_private *priv = usb_get_serial_port_data(port);
 	struct usb_serial *serial = port->serial;
@@ -1155,12 +1157,13 @@ static void cypress_throttle(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct cypress_private *priv = usb_get_serial_port_data(port);
+	unsigned long flags;
 
 	dbg("%s - port %d", __func__, port->number);
 
-	spin_lock_irq(&priv->lock);
+	spin_lock_irqsave(&priv->lock, flags);
 	priv->rx_flags = THROTTLED;
-	spin_unlock_irq(&priv->lock);
+	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 
@@ -1169,13 +1172,14 @@ static void cypress_unthrottle(struct tty_struct *tty)
 	struct usb_serial_port *port = tty->driver_data;
 	struct cypress_private *priv = usb_get_serial_port_data(port);
 	int actually_throttled, result;
+	unsigned long flags;
 
 	dbg("%s - port %d", __func__, port->number);
 
-	spin_lock_irq(&priv->lock);
+	spin_lock_irqsave(&priv->lock, flags);
 	actually_throttled = priv->rx_flags & ACTUALLY_THROTTLED;
 	priv->rx_flags = 0;
-	spin_unlock_irq(&priv->lock);
+	spin_unlock_irqrestore(&priv->lock, flags);
 
 	if (!priv->comm_is_ok)
 		return;
@@ -1183,7 +1187,7 @@ static void cypress_unthrottle(struct tty_struct *tty)
 	if (actually_throttled) {
 		port->interrupt_in_urb->dev = port->serial->dev;
 
-		result = usb_submit_urb(port->interrupt_in_urb, GFP_KERNEL);
+		result = usb_submit_urb(port->interrupt_in_urb, GFP_ATOMIC);
 		if (result) {
 			dev_err(&port->dev, "%s - failed submitting read urb, "
 					"error %d\n", __func__, result);

@@ -562,7 +562,7 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 		netif_start_queue(dev);
 		dev->trans_start = jiffies;
 
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 
@@ -648,7 +648,7 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 
 	local_irq_restore(flags);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* The LANCE interrupt handler. */

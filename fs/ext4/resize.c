@@ -746,6 +746,7 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 	struct inode *inode = NULL;
 	handle_t *handle;
 	int gdb_off, gdb_num;
+	int num_grp_locked = 0;
 	int err, err2;
 
 	gdb_num = input->group / EXT4_DESC_PER_BLOCK(sb);
@@ -855,6 +856,7 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
          * using the new disk blocks.
          */
 
+	num_grp_locked = ext4_mb_get_buddy_cache_lock(sb, input->group);
 	/* Update group descriptor block for new group */
 	gdp = (struct ext4_group_desc *)((char *)primary->b_data +
 					 gdb_off * EXT4_DESC_SIZE(sb));
@@ -873,8 +875,10 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 	 * descriptor
 	 */
 	err = ext4_mb_add_groupinfo(sb, input->group, gdp);
-	if (err)
+	if (err) {
+		ext4_mb_put_buddy_cache_lock(sb, input->group, num_grp_locked);
 		goto exit_journal;
+	}
 
 	/*
 	 * Make the new blocks and inodes valid next.  We do this before
@@ -916,6 +920,7 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 
 	/* Update the global fs size fields */
 	sbi->s_groups_count++;
+	ext4_mb_put_buddy_cache_lock(sb, input->group, num_grp_locked);
 
 	ext4_handle_dirty_metadata(handle, NULL, primary);
 
@@ -930,8 +935,7 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 	percpu_counter_add(&sbi->s_freeinodes_counter,
 			   EXT4_INODES_PER_GROUP(sb));
 
-	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_FLEX_BG) &&
-	    sbi->s_log_groups_per_flex) {
+	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_FLEX_BG)) {
 		ext4_group_t flex_group;
 		flex_group = ext4_flex_group(sbi, input->group);
 		atomic_add(input->free_blocks_count,

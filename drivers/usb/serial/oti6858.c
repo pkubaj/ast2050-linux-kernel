@@ -141,7 +141,8 @@ struct oti6858_control_pkt {
 	  && ((a)->frame_fmt == (priv)->pending_setup.frame_fmt))
 
 /* function prototypes */
-static int oti6858_open(struct tty_struct *tty, struct usb_serial_port *port);
+static int oti6858_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp);
 static void oti6858_close(struct usb_serial_port *port);
 static void oti6858_set_termios(struct tty_struct *tty,
 			struct usb_serial_port *port, struct ktermios *old);
@@ -288,7 +289,7 @@ static void setup_line(struct work_struct *work)
 
 	dbg("%s(): submitting interrupt urb", __func__);
 	port->interrupt_in_urb->dev = port->serial->dev;
-	result = usb_submit_urb(port->interrupt_in_urb, GFP_KERNEL);
+	result = usb_submit_urb(port->interrupt_in_urb, GFP_ATOMIC);
 	if (result != 0) {
 		dev_err(&port->dev, "%s(): usb_submit_urb() failed"
 				" with error %d\n", __func__, result);
@@ -335,7 +336,7 @@ void send_data(struct work_struct *work)
 
 		dbg("%s(): submitting interrupt urb", __func__);
 		port->interrupt_in_urb->dev = port->serial->dev;
-		result = usb_submit_urb(port->interrupt_in_urb, GFP_NOIO);
+		result = usb_submit_urb(port->interrupt_in_urb, GFP_ATOMIC);
 		if (result != 0) {
 			dev_err(&port->dev, "%s(): usb_submit_urb() failed"
 				" with error %d\n", __func__, result);
@@ -349,7 +350,7 @@ void send_data(struct work_struct *work)
 
 	port->write_urb->transfer_buffer_length = count;
 	port->write_urb->dev = port->serial->dev;
-	result = usb_submit_urb(port->write_urb, GFP_NOIO);
+	result = usb_submit_urb(port->write_urb, GFP_ATOMIC);
 	if (result != 0) {
 		dev_err(&port->dev, "%s(): usb_submit_urb() failed"
 			       " with error %d\n", __func__, result);
@@ -564,7 +565,8 @@ static void oti6858_set_termios(struct tty_struct *tty,
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
-static int oti6858_open(struct tty_struct *tty, struct usb_serial_port *port)
+static int oti6858_open(struct tty_struct *tty,
+			struct usb_serial_port *port, struct file *filp)
 {
 	struct oti6858_private *priv = usb_get_serial_port_data(port);
 	struct ktermios tmp_termios;

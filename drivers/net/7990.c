@@ -585,7 +585,7 @@ int lance_start_xmit (struct sk_buff *skb, struct net_device *dev)
 		lp->tx_full = 1;
 	spin_unlock_irqrestore (&lp->devlock, flags);
 
-        return NETDEV_TX_OK;
+        return 0;
 }
 EXPORT_SYMBOL_GPL(lance_start_xmit);
 

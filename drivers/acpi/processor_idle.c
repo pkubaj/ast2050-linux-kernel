@@ -60,8 +60,6 @@
 #include <acpi/processor.h>
 #include <asm/processor.h>
 
-#define PREFIX "ACPI: "
-
 #define ACPI_PROCESSOR_CLASS            "processor"
 #define _COMPONENT              ACPI_PROCESSOR_COMPONENT
 ACPI_MODULE_NAME("processor_idle");
@@ -110,14 +108,6 @@ static struct dmi_system_id __cpuinitdata processor_power_dmi_table[] = {
 	  DMI_MATCH(DMI_BIOS_VENDOR,"Phoenix Technologies LTD"),
 	  DMI_MATCH(DMI_BIOS_VERSION,"SHE845M0.86C.0013.D.0302131307")},
 	 (void *)2},
-	{ set_max_cstate, "Pavilion zv5000", {
-	  DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
-	  DMI_MATCH(DMI_PRODUCT_NAME,"Pavilion zv5000 (DS502A#ABA)")},
-	 (void *)1},
-	{ set_max_cstate, "Asus L8400B", {
-	  DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer Inc."),
-	  DMI_MATCH(DMI_PRODUCT_NAME,"L8400B series Notebook PC")},
-	 (void *)1},
 	{},
 };
 
@@ -306,17 +296,6 @@ static int acpi_processor_get_power_info_fadt(struct acpi_processor *pr)
 	/* determine latencies from FADT */
 	pr->power.states[ACPI_STATE_C2].latency = acpi_gbl_FADT.C2latency;
 	pr->power.states[ACPI_STATE_C3].latency = acpi_gbl_FADT.C3latency;
-
-	/*
-	 * FADT specified C2 latency must be less than or equal to
-	 * 100 microseconds.
-	 */
-	if (acpi_gbl_FADT.C2latency > ACPI_PROCESSOR_MAX_C2_LATENCY) {
-		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-			"C2 latency too large [%d]\n", acpi_gbl_FADT.C2latency));
-		/* invalidate C2 */
-		pr->power.states[ACPI_STATE_C2].address = 0;
-	}
 
 	ACPI_DEBUG_PRINT((ACPI_DB_INFO,
 			  "lvl2[0x%08x] lvl3[0x%08x]\n",
@@ -514,6 +493,16 @@ static void acpi_processor_power_verify_c2(struct acpi_processor_cx *cx)
 		return;
 
 	/*
+	 * C2 latency must be less than or equal to 100
+	 * microseconds.
+	 */
+	else if (cx->latency > ACPI_PROCESSOR_MAX_C2_LATENCY) {
+		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
+				  "latency too large [%d]\n", cx->latency));
+		return;
+	}
+
+	/*
 	 * Otherwise we've met all of our C2 requirements.
 	 * Normalize the C2 latency to expidite policy
 	 */
@@ -691,7 +680,6 @@ static int acpi_processor_get_power_info(struct acpi_processor *pr)
 	return 0;
 }
 
-#ifdef CONFIG_ACPI_PROCFS
 static int acpi_processor_power_seq_show(struct seq_file *seq, void *offset)
 {
 	struct acpi_processor *pr = seq->private;
@@ -771,7 +759,7 @@ static const struct file_operations acpi_processor_power_fops = {
 	.llseek = seq_lseek,
 	.release = single_release,
 };
-#endif
+
 
 /**
  * acpi_idle_bm_check - checks if bus master activity was detected
@@ -962,7 +950,7 @@ static int acpi_idle_enter_bm(struct cpuidle_device *dev,
 	if (acpi_idle_suspend)
 		return(acpi_idle_enter_c1(dev, state));
 
-	if (!cx->bm_sts_skip && acpi_idle_bm_check()) {
+	if (acpi_idle_bm_check()) {
 		if (dev->safe_state) {
 			dev->last_state = dev->safe_state;
 			return dev->safe_state->enter(dev, dev->safe_state);
@@ -1071,9 +1059,6 @@ static int acpi_processor_setup_cpuidle(struct acpi_processor *pr)
 		return -EINVAL;
 	}
 
-	if (!dev)
-		return -EINVAL;
-
 	dev->cpu = pr->id;
 	for (i = 0; i < CPUIDLE_STATE_MAX; i++) {
 		dev->states[i].name[0] = '\0';
@@ -1179,9 +1164,8 @@ int __cpuinit acpi_processor_power_init(struct acpi_processor *pr,
 {
 	acpi_status status = 0;
 	static int first_run;
-#ifdef CONFIG_ACPI_PROCFS
 	struct proc_dir_entry *entry = NULL;
-#endif
+	unsigned int i;
 
 	if (boot_option_idle_override)
 		return 0;
@@ -1229,8 +1213,15 @@ int __cpuinit acpi_processor_power_init(struct acpi_processor *pr,
 		acpi_processor_setup_cpuidle(pr);
 		if (cpuidle_register_device(&pr->power.dev))
 			return -EIO;
+
+		printk(KERN_INFO PREFIX "CPU%d (power states:", pr->id);
+		for (i = 1; i <= pr->power.count; i++)
+			if (pr->power.states[i].valid)
+				printk(" C%d[C%d]", i,
+				       pr->power.states[i].type);
+		printk(")\n");
 	}
-#ifdef CONFIG_ACPI_PROCFS
+
 	/* 'power' [R] */
 	entry = proc_create_data(ACPI_PROCESSOR_FILE_POWER,
 				 S_IRUGO, acpi_device_dir(device),
@@ -1238,7 +1229,6 @@ int __cpuinit acpi_processor_power_init(struct acpi_processor *pr,
 				 acpi_driver_data(device));
 	if (!entry)
 		return -EIO;
-#endif
 	return 0;
 }
 
@@ -1251,11 +1241,9 @@ int acpi_processor_power_exit(struct acpi_processor *pr,
 	cpuidle_unregister_device(&pr->power.dev);
 	pr->flags.power_setup_done = 0;
 
-#ifdef CONFIG_ACPI_PROCFS
 	if (acpi_device_dir(device))
 		remove_proc_entry(ACPI_PROCESSOR_FILE_POWER,
 				  acpi_device_dir(device));
-#endif
 
 	return 0;
 }

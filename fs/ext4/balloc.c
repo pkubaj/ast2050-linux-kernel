@@ -189,6 +189,9 @@ unsigned ext4_init_block_bitmap(struct super_block *sb, struct buffer_head *bh,
  * when a file system is mounted (see ext4_fill_super).
  */
 
+
+#define in_range(b, first, len)	((b) >= (first) && (b) <= (first) + (len) - 1)
+
 /**
  * ext4_get_group_desc() -- load group descriptor from disk
  * @sb:			super block
@@ -475,7 +478,7 @@ void ext4_add_groupblocks(handle_t *handle, struct super_block *sb,
 	 * new bitmap information
 	 */
 	set_bit(EXT4_GROUP_INFO_NEED_INIT_BIT, &(grp->bb_state));
-	grp->bb_free += blocks_freed;
+	ext4_mb_update_group_info(grp, blocks_freed);
 	up_write(&grp->alloc_sem);
 
 	/* We dirtied the bitmap block */

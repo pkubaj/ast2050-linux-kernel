@@ -855,10 +855,6 @@ static int powernow_k8_cpu_init_acpi(struct powernow_k8_data *data)
 		goto err_out;
 	}
 
-	/* fill in data */
-	data->numps = data->acpi_data.state_count;
-	powernow_k8_acpi_pst_values(data, 0);
-
 	if (cpu_family == CPU_HW_PSTATE)
 		ret_val = fill_powernow_table_pstate(data, powernow_table);
 	else
@@ -871,8 +867,11 @@ static int powernow_k8_cpu_init_acpi(struct powernow_k8_data *data)
 	powernow_table[data->acpi_data.state_count].index = 0;
 	data->powernow_table = powernow_table;
 
+	/* fill in data */
+	data->numps = data->acpi_data.state_count;
 	if (cpumask_first(cpu_core_mask(data->cpu)) == data->cpu)
 		print_basics(data);
+	powernow_k8_acpi_pst_values(data, 0);
 
 	/* notify BIOS that we exist */
 	acpi_processor_notify_smm(THIS_MODULE);
@@ -929,8 +928,7 @@ static int fill_powernow_table_pstate(struct powernow_k8_data *data,
 		powernow_table[i].index = index;
 
 		/* Frequency may be rounded for these */
-		if ((boot_cpu_data.x86 == 0x10 && boot_cpu_data.x86_model < 10)
-				 || boot_cpu_data.x86 == 0x11) {
+		if (boot_cpu_data.x86 == 0x10 || boot_cpu_data.x86 == 0x11) {
 			powernow_table[i].frequency =
 				freq_from_fid_did(lo & 0x3f, (lo >> 6) & 7);
 		} else
@@ -944,6 +942,7 @@ static int fill_powernow_table_fidvid(struct powernow_k8_data *data,
 		struct cpufreq_frequency_table *powernow_table)
 {
 	int i;
+	int cntlofreq = 0;
 
 	for (i = 0; i < data->acpi_data.state_count; i++) {
 		u32 fid;
@@ -982,6 +981,27 @@ static int fill_powernow_table_fidvid(struct powernow_k8_data *data,
 			dprintk("invalid vid %u, ignoring\n", vid);
 			invalidate_entry(powernow_table, i);
 			continue;
+		}
+
+		/* verify only 1 entry from the lo frequency table */
+		if (fid < HI_FID_TABLE_BOTTOM) {
+			if (cntlofreq) {
+				/* if both entries are the same,
+				 * ignore this one ... */
+				if ((freq != powernow_table[cntlofreq].frequency) ||
+				    (index != powernow_table[cntlofreq].index)) {
+					printk(KERN_ERR PFX
+						"Too many lo freq table "
+						"entries\n");
+					return 1;
+				}
+
+				dprintk("double low frequency table entry, "
+						"ignoring it.\n");
+				invalidate_entry(powernow_table, i);
+				continue;
+			} else
+				cntlofreq = i;
 		}
 
 		if (freq != (data->acpi_data.states[i].core_frequency * 1000)) {
@@ -1023,7 +1043,7 @@ static int get_transition_latency(struct powernow_k8_data *data)
 		 * set it to 1 to avoid problems in the future.
 		 * For all others it's a BIOS bug.
 		 */
-		if (boot_cpu_data.x86 != 0x11)
+		if (!boot_cpu_data.x86 == 0x11)
 			printk(KERN_ERR FW_WARN PFX "Invalid zero transition "
 				"latency\n");
 		max_latency = 1;

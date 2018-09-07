@@ -22,7 +22,7 @@ static unsigned int __blk_recalc_rq_segments(struct request_queue *q,
 		return 0;
 
 	fbio = bio;
-	cluster = blk_queue_cluster(q);
+	cluster = test_bit(QUEUE_FLAG_CLUSTER, &q->queue_flags);
 	seg_size = 0;
 	phys_size = nr_phys_segs = 0;
 	for_each_bio(bio) {
@@ -88,7 +88,7 @@ EXPORT_SYMBOL(blk_recount_segments);
 static int blk_phys_contig_segment(struct request_queue *q, struct bio *bio,
 				   struct bio *nxt)
 {
-	if (!blk_queue_cluster(q))
+	if (!test_bit(QUEUE_FLAG_CLUSTER, &q->queue_flags))
 		return 0;
 
 	if (bio->bi_seg_back_size + nxt->bi_seg_front_size >
@@ -124,7 +124,7 @@ int blk_rq_map_sg(struct request_queue *q, struct request *rq,
 	int nsegs, cluster;
 
 	nsegs = 0;
-	cluster = blk_queue_cluster(q);
+	cluster = test_bit(QUEUE_FLAG_CLUSTER, &q->queue_flags);
 
 	/*
 	 * for each bio in rq
@@ -311,36 +311,6 @@ static int ll_merge_requests_fn(struct request_queue *q, struct request *req,
 	return 1;
 }
 
-/**
- * blk_rq_set_mixed_merge - mark a request as mixed merge
- * @rq: request to mark as mixed merge
- *
- * Description:
- *     @rq is about to be mixed merged.  Make sure the attributes
- *     which can be mixed are set in each bio and mark @rq as mixed
- *     merged.
- */
-void blk_rq_set_mixed_merge(struct request *rq)
-{
-	unsigned int ff = rq->cmd_flags & REQ_FAILFAST_MASK;
-	struct bio *bio;
-
-	if (rq->cmd_flags & REQ_MIXED_MERGE)
-		return;
-
-	/*
-	 * @rq will no longer represent mixable attributes for all the
-	 * contained bios.  It will just track those of the first one.
-	 * Distributes the attributs to each bio.
-	 */
-	for (bio = rq->bio; bio; bio = bio->bi_next) {
-		WARN_ON_ONCE((bio->bi_rw & REQ_FAILFAST_MASK) &&
-			     (bio->bi_rw & REQ_FAILFAST_MASK) != ff);
-		bio->bi_rw |= ff;
-	}
-	rq->cmd_flags |= REQ_MIXED_MERGE;
-}
-
 static void blk_account_io_merge(struct request *req)
 {
 	if (blk_do_io_stat(req)) {
@@ -351,7 +321,7 @@ static void blk_account_io_merge(struct request *req)
 		part = disk_map_sector_rcu(req->rq_disk, blk_rq_pos(req));
 
 		part_round_stats(cpu, part);
-		part_dec_in_flight(part, rq_data_dir(req));
+		part_dec_in_flight(part);
 
 		part_stat_unlock();
 	}
@@ -380,6 +350,12 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	if (blk_integrity_rq(req) != blk_integrity_rq(next))
 		return 0;
 
+	/* don't merge requests of different failfast settings */
+	if (blk_failfast_dev(req)	!= blk_failfast_dev(next)	||
+	    blk_failfast_transport(req)	!= blk_failfast_transport(next)	||
+	    blk_failfast_driver(req)	!= blk_failfast_driver(next))
+		return 0;
+
 	/*
 	 * If we are allowed to merge, then append bio list
 	 * from next to rq and release next. merge_requests_fn
@@ -388,19 +364,6 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	 */
 	if (!ll_merge_requests_fn(q, req, next))
 		return 0;
-
-	/*
-	 * If failfast settings disagree or any of the two is already
-	 * a mixed merge, mark both as mixed before proceeding.  This
-	 * makes sure that all involved bios have mixable attributes
-	 * set properly.
-	 */
-	if ((req->cmd_flags | next->cmd_flags) & REQ_MIXED_MERGE ||
-	    (req->cmd_flags & REQ_FAILFAST_MASK) !=
-	    (next->cmd_flags & REQ_FAILFAST_MASK)) {
-		blk_rq_set_mixed_merge(req);
-		blk_rq_set_mixed_merge(next);
-	}
 
 	/*
 	 * At this point we have either done a back merge

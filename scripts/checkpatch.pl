@@ -2,7 +2,7 @@
 # (c) 2001, Dave Jones. <davej@redhat.com> (the file handling bit)
 # (c) 2005, Joel Schopp <jschopp@austin.ibm.com> (the ugly bit)
 # (c) 2007,2008, Andy Whitcroft <apw@uk.ibm.com> (new conditions, test suite)
-# (c) 2008,2009, Andy Whitcroft <apw@canonical.com>
+# (c) 2008, Andy Whitcroft <apw@canonical.com>
 # Licensed under the terms of the GNU GPL License version 2
 
 use strict;
@@ -10,7 +10,7 @@ use strict;
 my $P = $0;
 $P =~ s@.*/@@g;
 
-my $V = '0.30';
+my $V = '0.28';
 
 use Getopt::Long qw(:config no_auto_abbrev);
 
@@ -28,41 +28,6 @@ my $mailback = 0;
 my $summary_file = 0;
 my $root;
 my %debug;
-my $help = 0;
-
-sub help {
-	my ($exitcode) = @_;
-
-	print << "EOM";
-Usage: $P [OPTION]... [FILE]...
-Version: $V
-
-Options:
-  -q, --quiet                quiet
-  --no-tree                  run without a kernel tree
-  --no-signoff               do not check for 'Signed-off-by' line
-  --patch                    treat FILE as patchfile (default)
-  --emacs                    emacs compile window format
-  --terse                    one line per report
-  -f, --file                 treat FILE as regular source file
-  --subjective, --strict     enable more subjective tests
-  --root=PATH                PATH to the kernel tree root
-  --no-summary               suppress the per-file summary
-  --mailback                 only produce a report in case of warnings/errors
-  --summary-file             include the filename in summary
-  --debug KEY=[0|1]          turn on/off debugging of KEY, where KEY is one of
-                             'values', 'possible', 'type', and 'attr' (default
-                             is all off)
-  --test-only=WORD           report only warnings/errors containing WORD
-                             literally
-  -h, --help, --version      display this help and exit
-
-When FILE is - read standard input.
-EOM
-
-	exit($exitcode);
-}
-
 GetOptions(
 	'q|quiet+'	=> \$quiet,
 	'tree!'		=> \$tree,
@@ -70,7 +35,7 @@ GetOptions(
 	'patch!'	=> \$chk_patch,
 	'emacs!'	=> \$emacs,
 	'terse!'	=> \$terse,
-	'f|file!'	=> \$file,
+	'file!'		=> \$file,
 	'subjective!'	=> \$check,
 	'strict!'	=> \$check,
 	'root=s'	=> \$root,
@@ -80,16 +45,22 @@ GetOptions(
 
 	'debug=s'	=> \%debug,
 	'test-only=s'	=> \$tst_only,
-	'h|help'	=> \$help,
-	'version'	=> \$help
-) or help(1);
-
-help(0) if ($help);
+) or exit;
 
 my $exit = 0;
 
 if ($#ARGV < 0) {
-	print "$P: no input files\n";
+	print "usage: $P [options] patchfile\n";
+	print "version: $V\n";
+	print "options: -q               => quiet\n";
+	print "         --no-tree        => run without a kernel tree\n";
+	print "         --terse          => one line per report\n";
+	print "         --emacs          => emacs compile window format\n";
+	print "         --file           => check a source file\n";
+	print "         --strict         => enable more subjective tests\n";
+	print "         --root           => path to the kernel tree root\n";
+	print "         --no-summary     => suppress the per-file summary\n";
+	print "         --summary-file   => include the filename in summary\n";
 	exit(1);
 }
 
@@ -130,10 +101,7 @@ if ($tree) {
 
 my $emitted_corrupt = 0;
 
-our $Ident	= qr{
-			[A-Za-z_][A-Za-z\d_]*
-			(?:\s*\#\#\s*[A-Za-z_][A-Za-z\d_]*)*
-		}x;
+our $Ident       = qr{[A-Za-z_][A-Za-z\d_]*};
 our $Storage	= qr{extern|static|asmlinkage};
 our $Sparse	= qr{
 			__user|
@@ -185,7 +153,7 @@ our $UTF8	= qr {
 }x;
 
 our $typeTypedefs = qr{(?x:
-	(?:__)?(?:u|s|be|le)(?:8|16|32|64)|
+	(?:__)?(?:u|s|be|le)(?:\d|\d\d)|
 	atomic_t
 )};
 
@@ -388,13 +356,6 @@ sub sanitise_line {
 			$off++;
 			next;
 		}
-		if ($sanitise_quote eq '' && substr($line, $off, 2) eq '//') {
-			$sanitise_quote = '//';
-
-			substr($res, $off, 2, $sanitise_quote);
-			$off++;
-			next;
-		}
 
 		# A \ in a string means ignore the next character.
 		if (($sanitise_quote eq "'" || $sanitise_quote eq '"') &&
@@ -418,17 +379,11 @@ sub sanitise_line {
 		#print "c<$c> SQ<$sanitise_quote>\n";
 		if ($off != 0 && $sanitise_quote eq '*/' && $c ne "\t") {
 			substr($res, $off, 1, $;);
-		} elsif ($off != 0 && $sanitise_quote eq '//' && $c ne "\t") {
-			substr($res, $off, 1, $;);
 		} elsif ($off != 0 && $sanitise_quote && $c ne "\t") {
 			substr($res, $off, 1, 'X');
 		} else {
 			substr($res, $off, 1, $c);
 		}
-	}
-
-	if ($sanitise_quote eq '//') {
-		$sanitise_quote = '';
 	}
 
 	# The pathname on a #include may be surrounded by '<' and '>'.
@@ -1000,25 +955,23 @@ sub annotate_values {
 
 sub possible {
 	my ($possible, $line) = @_;
-	my $notPermitted = qr{(?:
+
+	print "CHECK<$possible> ($line)\n" if ($dbg_possible > 2);
+	if ($possible !~ /(?:
 		^(?:
 			$Modifier|
 			$Storage|
 			$Type|
-			DEFINE_\S+
-		)$|
-		^(?:
+			DEFINE_\S+|
 			goto|
 			return|
 			case|
 			else|
 			asm|__asm__|
 			do
-		)(?:\s|$)|
+		)$|
 		^(?:typedef|struct|enum)\b
-	    )}x;
-	warn "CHECK<$possible> ($line)\n" if ($dbg_possible > 2);
-	if ($possible !~ $notPermitted) {
+	    )/x) {
 		# Check for modifiers.
 		$possible =~ s/\s*$Storage\s*//g;
 		$possible =~ s/\s*$Sparse\s*//g;
@@ -1027,10 +980,8 @@ sub possible {
 		} elsif ($possible =~ /\s/) {
 			$possible =~ s/\s*$Type\s*//g;
 			for my $modifier (split(' ', $possible)) {
-				if ($modifier !~ $notPermitted) {
-					warn "MODIFIER: $modifier ($possible) ($line)\n" if ($dbg_possible);
-					push(@modifierList, $modifier);
-				}
+				warn "MODIFIER: $modifier ($possible) ($line)\n" if ($dbg_possible);
+				push(@modifierList, $modifier);
 			}
 
 		} else {
@@ -1145,7 +1096,6 @@ sub process {
 	# suppression flags
 	my %suppress_ifbraces;
 	my %suppress_whiletrailers;
-	my %suppress_export;
 
 	# Pre-scan the patch sanitizing the lines.
 	# Pre-scan the patch looking for any __setup documentation.
@@ -1238,6 +1188,7 @@ sub process {
 		$linenr++;
 
 		my $rawline = $rawlines[$linenr - 1];
+		my $hunk_line = ($realcnt != 0);
 
 #extract the line range in the file after the patch is applied
 		if ($line=~/^\@\@ -\d+(?:,\d+)? \+(\d+)(,(\d+))? \@\@/) {
@@ -1254,7 +1205,6 @@ sub process {
 
 			%suppress_ifbraces = ();
 			%suppress_whiletrailers = ();
-			%suppress_export = ();
 			next;
 
 # track the line number as we move through the hunk, note that
@@ -1277,8 +1227,6 @@ sub process {
 		} elsif ($realcnt == 1) {
 			$realcnt--;
 		}
-
-		my $hunk_line = ($realcnt != 0);
 
 #make up the handle for any error we report on this line
 		$prefix = "$filename:$realline: " if ($emacs && $file);
@@ -1388,18 +1336,6 @@ sub process {
 			WARN("adding a line without newline at end of file\n" . $herecurr);
 		}
 
-# Blackfin: use hi/lo macros
-		if ($realfile =~ m@arch/blackfin/.*\.S$@) {
-			if ($line =~ /\.[lL][[:space:]]*=.*&[[:space:]]*0x[fF][fF][fF][fF]/) {
-				my $herevet = "$here\n" . cat_vet($line) . "\n";
-				ERROR("use the LO() macro, not (... & 0xFFFF)\n" . $herevet);
-			}
-			if ($line =~ /\.[hH][[:space:]]*=.*>>[[:space:]]*16/) {
-				my $herevet = "$here\n" . cat_vet($line) . "\n";
-				ERROR("use the HI() macro, not (... >> 16)\n" . $herevet);
-			}
-		}
-
 # check we are in a valid source file C or perl if not then ignore this hunk
 		next if ($realfile !~ /\.(h|c|pl)$/);
 
@@ -1419,32 +1355,13 @@ sub process {
 			WARN("CVS style keyword markers, these will _not_ be updated\n". $herecurr);
 		}
 
-# Blackfin: don't use __builtin_bfin_[cs]sync
-		if ($line =~ /__builtin_bfin_csync/) {
-			my $herevet = "$here\n" . cat_vet($line) . "\n";
-			ERROR("use the CSYNC() macro in asm/blackfin.h\n" . $herevet);
-		}
-		if ($line =~ /__builtin_bfin_ssync/) {
-			my $herevet = "$here\n" . cat_vet($line) . "\n";
-			ERROR("use the SSYNC() macro in asm/blackfin.h\n" . $herevet);
-		}
-
 # Check for potential 'bare' types
-		my ($stat, $cond, $line_nr_next, $remain_next, $off_next,
-		    $realline_next);
+		my ($stat, $cond, $line_nr_next, $remain_next, $off_next);
 		if ($realcnt && $line =~ /.\s*\S/) {
 			($stat, $cond, $line_nr_next, $remain_next, $off_next) =
 				ctx_statement_block($linenr, $realcnt, 0);
 			$stat =~ s/\n./\n /g;
 			$cond =~ s/\n./\n /g;
-
-			# Find the real next line.
-			$realline_next = $line_nr_next;
-			if (defined $realline_next &&
-			    (!defined $lines[$realline_next - 1] ||
-			     substr($lines[$realline_next - 1], $off_next) =~ /^\s*$/)) {
-				$realline_next++;
-			}
 
 			my $s = $stat;
 			$s =~ s/{.*$//s;
@@ -1454,8 +1371,6 @@ sub process {
 
 			# Ignore functions being called
 			} elsif ($s =~ /^.\s*$Ident\s*\(/s) {
-
-			} elsif ($s =~ /^.\s*else\b/s) {
 
 			# declarations always start with types
 			} elsif ($prev_values eq 'E' && $s =~ /^.\s*(?:$Storage\s+)?(?:$Inline\s+)?(?:const\s+)?((?:\s*$Ident)+?)\b(?:\s+$Sparse)?\s*\**\s*(?:$Ident|\(\*[^\)]*\))(?:\s*$Modifier)?\s*(?:;|=|,|\()/s) {
@@ -1617,9 +1532,8 @@ sub process {
 				    $s =~ /^\s*#\s*?/ ||
 				    $s =~ /^\s*$Ident\s*:/) {
 					$continuation = ($s =~ /^.*?\\\n/) ? 1 : 0;
-					if ($s =~ s/^.*?\n//) {
-						$cond_lines++;
-					}
+					$s =~ s/^.*?\n//;
+					$cond_lines++;
 				}
 			}
 
@@ -1680,8 +1594,8 @@ sub process {
 		}
 
 # check for initialisation to aggregates open brace on the next line
-		if ($line =~ /^.\s*{/ &&
-		    $prevline =~ /(?:^|[^=])=\s*$/) {
+		if ($prevline =~ /$Declare\s*$Ident\s*=\s*$/ &&
+		    $line =~ /^.\s*{/) {
 			ERROR("that open brace { should be on the previous line\n" . $hereprev);
 		}
 
@@ -1706,39 +1620,20 @@ sub process {
 		$line =~ s@//.*@@;
 		$opline =~ s@//.*@@;
 
-# EXPORT_SYMBOL should immediately follow the thing it is exporting, consider
-# the whole statement.
-#print "APW <$lines[$realline_next - 1]>\n";
-		if (defined $realline_next &&
-		    exists $lines[$realline_next - 1] &&
-		    !defined $suppress_export{$realline_next} &&
-		    ($lines[$realline_next - 1] =~ /EXPORT_SYMBOL.*\((.*)\)/ ||
-		     $lines[$realline_next - 1] =~ /EXPORT_UNUSED_SYMBOL.*\((.*)\)/)) {
+#EXPORT_SYMBOL should immediately follow its function closing }.
+		if (($line =~ /EXPORT_SYMBOL.*\((.*)\)/) ||
+		    ($line =~ /EXPORT_UNUSED_SYMBOL.*\((.*)\)/)) {
 			my $name = $1;
-			if ($stat !~ /(?:
-				\n.}\s*$|
+			if ($prevline !~ /(?:
+				^.}|
 				^.DEFINE_$Ident\(\Q$name\E\)|
 				^.DECLARE_$Ident\(\Q$name\E\)|
 				^.LIST_HEAD\(\Q$name\E\)|
-				^.(?:$Storage\s+)?$Type\s*\(\s*\*\s*\Q$name\E\s*\)\s*\(|
-				\b\Q$name\E(?:\s+$Attribute)*\s*(?:;|=|\[|\()
+				^.$Type\s*\(\s*\*\s*\Q$name\E\s*\)\s*\(|
+				\b\Q$name\E(?:\s+$Attribute)?\s*(?:;|=|\[)
 			    )/x) {
-#print "FOO A<$lines[$realline_next - 1]> stat<$stat> name<$name>\n";
-				$suppress_export{$realline_next} = 2;
-			} else {
-				$suppress_export{$realline_next} = 1;
+				WARN("EXPORT_SYMBOL(foo); should immediately follow its function/variable\n" . $herecurr);
 			}
-		}
-		if (!defined $suppress_export{$linenr} &&
-		    $prevline =~ /^.\s*$/ &&
-		    ($line =~ /EXPORT_SYMBOL.*\((.*)\)/ ||
-		     $line =~ /EXPORT_UNUSED_SYMBOL.*\((.*)\)/)) {
-#print "FOO B <$lines[$linenr - 1]>\n";
-			$suppress_export{$linenr} = 2;
-		}
-		if (defined $suppress_export{$linenr} &&
-		    $suppress_export{$linenr} == 2) {
-			WARN("EXPORT_SYMBOL(foo); should immediately follow its function/variable\n" . $herecurr);
 		}
 
 # check for external initialisers.
@@ -1996,7 +1891,7 @@ sub process {
 						# A unary '*' may be const
 
 					} elsif ($ctx =~ /.xW/) {
-						ERROR("space prohibited after that '$op' $at\n" . $hereptr);
+						ERROR("Aspace prohibited after that '$op' $at\n" . $hereptr);
 					}
 
 				# unary ++ and unary -- are allowed no space on one side.
@@ -2348,8 +2243,7 @@ sub process {
 				DECLARE_PER_CPU|
 				DEFINE_PER_CPU|
 				__typeof__\(|
-				\.$Ident\s*=\s*|
-				^\"|\"$
+				\.$Ident\s*=\s*
 			}x;
 			#print "REST<$rest> dstat<$dstat>\n";
 			if ($rest ne '') {

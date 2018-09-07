@@ -173,10 +173,9 @@ static int dao_set_left_input(struct dao *dao, struct rsc *input)
 	int i;
 
 	entry = kzalloc((sizeof(*entry) * daio->rscl.msr), GFP_KERNEL);
-	if (!entry)
+	if (NULL == entry)
 		return -ENOMEM;
 
-	dao->ops->clear_left_input(dao);
 	/* Program master and conjugate resources */
 	input->ops->master(input);
 	daio->rscl.ops->master(&daio->rscl);
@@ -202,10 +201,9 @@ static int dao_set_right_input(struct dao *dao, struct rsc *input)
 	int i;
 
 	entry = kzalloc((sizeof(*entry) * daio->rscr.msr), GFP_KERNEL);
-	if (!entry)
+	if (NULL == entry)
 		return -ENOMEM;
 
-	dao->ops->clear_right_input(dao);
 	/* Program master and conjugate resources */
 	input->ops->master(input);
 	daio->rscr.ops->master(&daio->rscr);
@@ -230,7 +228,7 @@ static int dao_clear_left_input(struct dao *dao)
 	struct daio *daio = &dao->daio;
 	int i;
 
-	if (!dao->imappers[0])
+	if (NULL == dao->imappers[0])
 		return 0;
 
 	entry = dao->imappers[0];
@@ -254,7 +252,7 @@ static int dao_clear_right_input(struct dao *dao)
 	struct daio *daio = &dao->daio;
 	int i;
 
-	if (!dao->imappers[daio->rscl.msr])
+	if (NULL == dao->imappers[daio->rscl.msr])
 		return 0;
 
 	entry = dao->imappers[daio->rscl.msr];
@@ -410,7 +408,7 @@ static int dao_rsc_init(struct dao *dao,
 		return err;
 
 	dao->imappers = kzalloc(sizeof(void *)*desc->msr*2, GFP_KERNEL);
-	if (!dao->imappers) {
+	if (NULL == dao->imappers) {
 		err = -ENOMEM;
 		goto error1;
 	}
@@ -444,11 +442,11 @@ error1:
 
 static int dao_rsc_uninit(struct dao *dao)
 {
-	if (dao->imappers) {
-		if (dao->imappers[0])
+	if (NULL != dao->imappers) {
+		if (NULL != dao->imappers[0])
 			dao_clear_left_input(dao);
 
-		if (dao->imappers[dao->daio.rscl.msr])
+		if (NULL != dao->imappers[dao->daio.rscl.msr])
 			dao_clear_right_input(dao);
 
 		kfree(dao->imappers);
@@ -557,7 +555,7 @@ static int get_daio_rsc(struct daio_mgr *mgr,
 	/* Allocate mem for daio resource */
 	if (desc->type <= DAIO_OUT_MAX) {
 		dao = kzalloc(sizeof(*dao), GFP_KERNEL);
-		if (!dao) {
+		if (NULL == dao) {
 			err = -ENOMEM;
 			goto error;
 		}
@@ -568,7 +566,7 @@ static int get_daio_rsc(struct daio_mgr *mgr,
 		*rdaio = &dao->daio;
 	} else {
 		dai = kzalloc(sizeof(*dai), GFP_KERNEL);
-		if (!dai) {
+		if (NULL == dai) {
 			err = -ENOMEM;
 			goto error;
 		}
@@ -585,9 +583,9 @@ static int get_daio_rsc(struct daio_mgr *mgr,
 	return 0;
 
 error:
-	if (dao)
+	if (NULL != dao)
 		kfree(dao);
-	else if (dai)
+	else if (NULL != dai)
 		kfree(dai);
 
 	spin_lock_irqsave(&mgr->mgr_lock, flags);
@@ -665,7 +663,7 @@ static int daio_imap_add(struct daio_mgr *mgr, struct imapper *entry)
 	int err;
 
 	spin_lock_irqsave(&mgr->imap_lock, flags);
-	if (!entry->addr && mgr->init_imap_added) {
+	if ((0 == entry->addr) && (mgr->init_imap_added)) {
 		input_mapper_delete(&mgr->imappers, mgr->init_imap,
 							daio_map_op, mgr);
 		mgr->init_imap_added = 0;
@@ -709,7 +707,7 @@ int daio_mgr_create(void *hw, struct daio_mgr **rdaio_mgr)
 
 	*rdaio_mgr = NULL;
 	daio_mgr = kzalloc(sizeof(*daio_mgr), GFP_KERNEL);
-	if (!daio_mgr)
+	if (NULL == daio_mgr)
 		return -ENOMEM;
 
 	err = rsc_mgr_init(&daio_mgr->mgr, DAIO, DAIO_RESOURCE_NUM, hw);
@@ -720,7 +718,7 @@ int daio_mgr_create(void *hw, struct daio_mgr **rdaio_mgr)
 	spin_lock_init(&daio_mgr->imap_lock);
 	INIT_LIST_HEAD(&daio_mgr->imappers);
 	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
-	if (!entry) {
+	if (NULL == entry) {
 		err = -ENOMEM;
 		goto error2;
 	}

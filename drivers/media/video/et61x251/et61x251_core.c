@@ -1379,10 +1379,8 @@ et61x251_read(struct file* filp, char __user * buf,
 			    (!list_empty(&cam->outqueue)) ||
 			    (cam->state & DEV_DISCONNECTED) ||
 			    (cam->state & DEV_MISCONFIGURED),
-			    msecs_to_jiffies(
-				cam->module_param.frame_timeout * 1000
-			    )
-			  );
+			    cam->module_param.frame_timeout *
+			    1000 * msecs_to_jiffies(1) );
 		if (timeout < 0) {
 			mutex_unlock(&cam->fileop_mutex);
 			return timeout;
@@ -1496,7 +1494,7 @@ static void et61x251_vm_close(struct vm_area_struct* vma)
 }
 
 
-static const struct vm_operations_struct et61x251_vm_ops = {
+static struct vm_operations_struct et61x251_vm_ops = {
 	.open = et61x251_vm_open,
 	.close = et61x251_vm_close,
 };

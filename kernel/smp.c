@@ -29,7 +29,8 @@ enum {
 
 struct call_function_data {
 	struct call_single_data	csd;
-	atomic_t		refs;
+	spinlock_t		lock;
+	unsigned int		refs;
 	cpumask_var_t		cpumask;
 };
 
@@ -38,7 +39,9 @@ struct call_single_queue {
 	spinlock_t		lock;
 };
 
-static DEFINE_PER_CPU(struct call_function_data, cfd_data);
+static DEFINE_PER_CPU(struct call_function_data, cfd_data) = {
+	.lock			= __SPIN_LOCK_UNLOCKED(cfd_data.lock),
+};
 
 static int
 hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
@@ -174,11 +177,6 @@ void generic_smp_call_function_interrupt(void)
 	int cpu = get_cpu();
 
 	/*
-	 * Shouldn't receive this interrupt on a cpu that is not yet online.
-	 */
-	WARN_ON_ONCE(!cpu_online(cpu));
-
-	/*
 	 * Ensure entry is visible on call_function_queue after we have
 	 * entered the IPI. See comment in smp_call_function_many.
 	 * If we don't have this, then we may miss an entry on the list
@@ -193,38 +191,25 @@ void generic_smp_call_function_interrupt(void)
 	list_for_each_entry_rcu(data, &call_function.queue, csd.list) {
 		int refs;
 
-		/*
-		 * Since we walk the list without any locks, we might
-		 * see an entry that was completed, removed from the
-		 * list and is in the process of being reused.
-		 *
-		 * We must check that the cpu is in the cpumask before
-		 * checking the refs, and both must be set before
-		 * executing the callback on this cpu.
-		 */
-
-		if (!cpumask_test_cpu(cpu, data->cpumask))
+		spin_lock(&data->lock);
+		if (!cpumask_test_cpu(cpu, data->cpumask)) {
+			spin_unlock(&data->lock);
 			continue;
-
-		smp_rmb();
-
-		if (atomic_read(&data->refs) == 0)
-			continue;
-
-		if (!cpumask_test_and_clear_cpu(cpu, data->cpumask))
-			continue;
+		}
+		cpumask_clear_cpu(cpu, data->cpumask);
+		spin_unlock(&data->lock);
 
 		data->csd.func(data->csd.info);
 
-		refs = atomic_dec_return(&data->refs);
-		WARN_ON(refs < 0);
+		spin_lock(&data->lock);
+		WARN_ON(data->refs == 0);
+		refs = --data->refs;
 		if (!refs) {
-			WARN_ON(!cpumask_empty(data->cpumask));
-
 			spin_lock(&call_function.lock);
 			list_del_rcu(&data->csd.list);
 			spin_unlock(&call_function.lock);
 		}
+		spin_unlock(&data->lock);
 
 		if (refs)
 			continue;
@@ -244,11 +229,6 @@ void generic_smp_call_function_single_interrupt(void)
 	struct call_single_queue *q = &__get_cpu_var(call_single_queue);
 	unsigned int data_flags;
 	LIST_HEAD(list);
-
-	/*
-	 * Shouldn't receive this interrupt on a cpu that is not yet online.
-	 */
-	WARN_ON_ONCE(!cpu_online(smp_processor_id()));
 
 	spin_lock(&q->lock);
 	list_replace_init(&q->list, &list);
@@ -305,14 +285,8 @@ int smp_call_function_single(int cpu, void (*func) (void *info), void *info,
 	 */
 	this_cpu = get_cpu();
 
-	/*
-	 * Can deadlock when called with interrupts disabled.
-	 * We allow cpu's that are not yet online though, as no one else can
-	 * send smp call function interrupt to this cpu and as such deadlocks
-	 * can't happen.
-	 */
-	WARN_ON_ONCE(cpu_online(this_cpu) && irqs_disabled()
-		     && !oops_in_progress);
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON_ONCE(irqs_disabled() && !oops_in_progress);
 
 	if (cpu == this_cpu) {
 		local_irq_save(flags);
@@ -355,17 +329,18 @@ void __smp_call_function_single(int cpu, struct call_single_data *data,
 {
 	csd_lock(data);
 
-	/*
-	 * Can deadlock when called with interrupts disabled.
-	 * We allow cpu's that are not yet online though, as no one else can
-	 * send smp call function interrupt to this cpu and as such deadlocks
-	 * can't happen.
-	 */
-	WARN_ON_ONCE(cpu_online(smp_processor_id()) && wait && irqs_disabled()
-		     && !oops_in_progress);
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON_ONCE(wait && irqs_disabled() && !oops_in_progress);
 
 	generic_exec_single(cpu, data, wait);
 }
+
+/* Deprecated: shim for archs using old arch_send_call_function_ipi API. */
+
+#ifndef arch_send_call_function_ipi_mask
+# define arch_send_call_function_ipi_mask(maskp) \
+	 arch_send_call_function_ipi(*(maskp))
+#endif
 
 /**
  * smp_call_function_many(): Run a function on a set of other CPUs.
@@ -388,18 +363,12 @@ void smp_call_function_many(const struct cpumask *mask,
 {
 	struct call_function_data *data;
 	unsigned long flags;
-	int refs, cpu, next_cpu, this_cpu = smp_processor_id();
+	int cpu, next_cpu, this_cpu = smp_processor_id();
 
-	/*
-	 * Can deadlock when called with interrupts disabled.
-	 * We allow cpu's that are not yet online though, as no one else can
-	 * send smp call function interrupt to this cpu and as such deadlocks
-	 * can't happen.
-	 */
-	WARN_ON_ONCE(cpu_online(this_cpu) && irqs_disabled()
-		     && !oops_in_progress);
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON_ONCE(irqs_disabled() && !oops_in_progress);
 
-	/* Try to fastpath.  So, what's a CPU they want? Ignoring this one. */
+	/* So, what's a CPU they want? Ignoring this one. */
 	cpu = cpumask_first_and(mask, cpu_online_mask);
 	if (cpu == this_cpu)
 		cpu = cpumask_next_and(cpu, mask, cpu_online_mask);
@@ -422,63 +391,23 @@ void smp_call_function_many(const struct cpumask *mask,
 	data = &__get_cpu_var(cfd_data);
 	csd_lock(&data->csd);
 
-	/* This BUG_ON verifies our reuse assertions and can be removed */
-	BUG_ON(atomic_read(&data->refs) || !cpumask_empty(data->cpumask));
-
-	/*
-	 * The global call function queue list add and delete are protected
-	 * by a lock, but the list is traversed without any lock, relying
-	 * on the rcu list add and delete to allow safe concurrent traversal.
-	 * We reuse the call function data without waiting for any grace
-	 * period after some other cpu removes it from the global queue.
-	 * This means a cpu might find our data block as it is being
-	 * filled out.
-	 *
-	 * We hold off the interrupt handler on the other cpu by
-	 * ordering our writes to the cpu mask vs our setting of the
-	 * refs counter.  We assert only the cpu owning the data block
-	 * will set a bit in cpumask, and each bit will only be cleared
-	 * by the subject cpu.  Each cpu must first find its bit is
-	 * set and then check that refs is set indicating the element is
-	 * ready to be processed, otherwise it must skip the entry.
-	 *
-	 * On the previous iteration refs was set to 0 by another cpu.
-	 * To avoid the use of transitivity, set the counter to 0 here
-	 * so the wmb will pair with the rmb in the interrupt handler.
-	 */
-	atomic_set(&data->refs, 0);	/* convert 3rd to 1st party write */
-
+	spin_lock_irqsave(&data->lock, flags);
 	data->csd.func = func;
 	data->csd.info = info;
-
-	/* Ensure 0 refs is visible before mask.  Also orders func and info */
-	smp_wmb();
-
-	/* We rely on the "and" being processed before the store */
 	cpumask_and(data->cpumask, mask, cpu_online_mask);
 	cpumask_clear_cpu(this_cpu, data->cpumask);
-	refs = cpumask_weight(data->cpumask);
+	data->refs = cpumask_weight(data->cpumask);
 
-	/* Some callers race with other cpus changing the passed mask */
-	if (unlikely(!refs)) {
-		csd_unlock(&data->csd);
-		return;
-	}
-
-	spin_lock_irqsave(&call_function.lock, flags);
+	spin_lock(&call_function.lock);
 	/*
 	 * Place entry at the _HEAD_ of the list, so that any cpu still
 	 * observing the entry in generic_smp_call_function_interrupt()
 	 * will not miss any other list entries:
 	 */
 	list_add_rcu(&data->csd.list, &call_function.queue);
-	/*
-	 * We rely on the wmb() in list_add_rcu to complete our writes
-	 * to the cpumask before this write to refs, which indicates
-	 * data is on the list and is ready to be processed.
-	 */
-	atomic_set(&data->refs, refs);
-	spin_unlock_irqrestore(&call_function.lock, flags);
+	spin_unlock(&call_function.lock);
+
+	spin_unlock_irqrestore(&data->lock, flags);
 
 	/*
 	 * Make the list addition visible before sending the ipi.

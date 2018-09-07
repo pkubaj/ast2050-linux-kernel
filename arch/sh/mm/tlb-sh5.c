@@ -117,15 +117,26 @@ int sh64_put_wired_dtlb_entry(unsigned long long entry)
  * Load up a virtual<->physical translation for @eaddr<->@paddr in the
  * pre-allocated TLB slot @config_addr (see sh64_get_wired_dtlb_entry).
  */
-void sh64_setup_tlb_slot(unsigned long long config_addr, unsigned long eaddr,
-			 unsigned long asid, unsigned long paddr)
+inline void sh64_setup_tlb_slot(unsigned long long config_addr,
+				unsigned long eaddr,
+				unsigned long asid,
+				unsigned long paddr)
 {
 	unsigned long long pteh, ptel;
 
-	pteh = neff_sign_extend(eaddr);
+	/* Sign extension */
+#if (NEFF == 32)
+	pteh = (unsigned long long)(signed long long)(signed long) eaddr;
+#else
+#error "Can't sign extend more than 32 bits yet"
+#endif
 	pteh &= PAGE_MASK;
 	pteh |= (asid << PTEH_ASID_SHIFT) | PTEH_VALID;
-	ptel = neff_sign_extend(paddr);
+#if (NEFF == 32)
+	ptel = (unsigned long long)(signed long long)(signed long) paddr;
+#else
+#error "Can't sign extend more than 32 bits yet"
+#endif
 	ptel &= PAGE_MASK;
 	ptel |= (_PAGE_CACHABLE | _PAGE_READ | _PAGE_WRITE);
 
@@ -141,5 +152,5 @@ void sh64_setup_tlb_slot(unsigned long long config_addr, unsigned long eaddr,
  *
  * Teardown any existing mapping in the TLB slot @config_addr.
  */
-void sh64_teardown_tlb_slot(unsigned long long config_addr)
+inline void sh64_teardown_tlb_slot(unsigned long long config_addr)
 	__attribute__ ((alias("__flush_tlb_slot")));

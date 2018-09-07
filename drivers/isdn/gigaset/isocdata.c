@@ -429,7 +429,7 @@ static inline int hdlc_buildframe(struct isowbuf_t *iwb,
 		return -EAGAIN;
 	}
 
-	dump_bytes(DEBUG_STREAM_DUMP, "snd data", in, count);
+	dump_bytes(DEBUG_STREAM, "snd data", in, count);
 
 	/* bitstuff and checksum input data */
 	fcs = PPP_INITFCS;
@@ -448,6 +448,7 @@ static inline int hdlc_buildframe(struct isowbuf_t *iwb,
 	/* put closing flag and repeat byte for flag idle */
 	isowbuf_putflag(iwb);
 	end = isowbuf_donewrite(iwb);
+	dump_bytes(DEBUG_STREAM_DUMP, "isowbuf", iwb->data, end + 1);
 	return end;
 }
 
@@ -481,8 +482,6 @@ static inline int trans_buildframe(struct isowbuf_t *iwb,
 	}
 
 	gig_dbg(DEBUG_STREAM, "put %d bytes", count);
-	dump_bytes(DEBUG_STREAM_DUMP, "snd data", in, count);
-
 	write = iwb->write;
 	do {
 		c = bitrev8(*in++);
@@ -584,7 +583,7 @@ static inline void hdlc_done(struct bc_state *bcs)
 		procskb->tail -= 2;
 		gig_dbg(DEBUG_ISO, "%s: good frame (%d octets)",
 			__func__, procskb->len);
-		dump_bytes(DEBUG_STREAM_DUMP,
+		dump_bytes(DEBUG_STREAM,
 			   "rcv data", procskb->data, procskb->len);
 		bcs->hw.bas->goodbytes += procskb->len;
 		gigaset_rcv_skb(procskb, bcs->cs, bcs);
@@ -879,8 +878,6 @@ static inline void trans_receive(unsigned char *src, unsigned count,
 			dobytes--;
 		}
 		if (dobytes == 0) {
-			dump_bytes(DEBUG_STREAM_DUMP,
-				   "rcv data", skb->data, skb->len);
 			gigaset_rcv_skb(skb, bcs->cs, bcs);
 			bcs->skb = skb = dev_alloc_skb(SBUFSIZE + HW_HDR_LEN);
 			if (!skb) {
@@ -976,17 +973,16 @@ void gigaset_isoc_input(struct inbuf_t *inbuf)
 
 /* == data output ========================================================== */
 
-/**
- * gigaset_isoc_send_skb() - queue an skb for sending
- * @bcs:	B channel descriptor structure.
- * @skb:	data to send.
- *
- * Called by i4l.c to queue an skb for sending, and start transmission if
- * necessary.
- *
- * Return value:
- *	number of bytes accepted for sending (skb->len) if ok,
- *	error code < 0 (eg. -ENODEV) on error
+/* gigaset_send_skb
+ * called by common.c to queue an skb for sending
+ * and start transmission if necessary
+ * parameters:
+ *	B Channel control structure
+ *	skb
+ * return value:
+ *	number of bytes accepted for sending
+ *	(skb->len if ok, 0 if out of buffer space)
+ *	or error code (< 0, eg. -EINVAL)
  */
 int gigaset_isoc_send_skb(struct bc_state *bcs, struct sk_buff *skb)
 {

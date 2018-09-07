@@ -106,20 +106,20 @@ static int audio_set_endpoint_req(struct usb_configuration *c,
 			ctrl->bRequest, w_value, len, ep);
 
 	switch (ctrl->bRequest) {
-	case UAC_SET_CUR:
+	case SET_CUR:
 		value = 0;
 		break;
 
-	case UAC_SET_MIN:
+	case SET_MIN:
 		break;
 
-	case UAC_SET_MAX:
+	case SET_MAX:
 		break;
 
-	case UAC_SET_RES:
+	case SET_RES:
 		break;
 
-	case UAC_SET_MEM:
+	case SET_MEM:
 		break;
 
 	default:
@@ -142,13 +142,13 @@ static int audio_get_endpoint_req(struct usb_configuration *c,
 			ctrl->bRequest, w_value, len, ep);
 
 	switch (ctrl->bRequest) {
-	case UAC_GET_CUR:
-	case UAC_GET_MIN:
-	case UAC_GET_MAX:
-	case UAC_GET_RES:
+	case GET_CUR:
+	case GET_MIN:
+	case GET_MAX:
+	case GET_RES:
 		value = 3;
 		break;
-	case UAC_GET_MEM:
+	case GET_MEM:
 		break;
 	default:
 		break;
@@ -171,11 +171,11 @@ audio_setup(struct usb_configuration *c, const struct usb_ctrlrequest *ctrl)
 	 * Audio class messages; interface activation uses set_alt().
 	 */
 	switch (ctrl->bRequestType) {
-	case USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_ENDPOINT:
+	case USB_AUDIO_SET_ENDPOINT:
 		value = audio_set_endpoint_req(c, ctrl);
 		break;
 
-	case USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_ENDPOINT:
+	case USB_AUDIO_GET_ENDPOINT:
 		value = audio_get_endpoint_req(c, ctrl);
 		break;
 

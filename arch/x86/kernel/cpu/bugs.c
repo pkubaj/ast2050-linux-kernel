@@ -81,7 +81,7 @@ static void __init check_fpu(void)
 
 	boot_cpu_data.fdiv_bug = fdiv_bug;
 	if (boot_cpu_data.fdiv_bug)
-		printk(KERN_WARNING "Hmm, FPU with FDIV bug.\n");
+		printk("Hmm, FPU with FDIV bug.\n");
 }
 
 static void __init check_hlt(void)
@@ -98,7 +98,7 @@ static void __init check_hlt(void)
 	halt();
 	halt();
 	halt();
-	printk(KERN_CONT "OK.\n");
+	printk("OK.\n");
 }
 
 /*
@@ -122,9 +122,9 @@ static void __init check_popad(void)
 	 * CPU hard. Too bad.
 	 */
 	if (res != 12345678)
-		printk(KERN_CONT "Buggy.\n");
+		printk("Buggy.\n");
 	else
-		printk(KERN_CONT "OK.\n");
+		printk("OK.\n");
 #endif
 }
 
@@ -156,7 +156,7 @@ void __init check_bugs(void)
 {
 	identify_boot_cpu();
 #ifndef CONFIG_SMP
-	printk(KERN_INFO "CPU: ");
+	printk("CPU: ");
 	print_cpu_info(&boot_cpu_data);
 #endif
 	check_config();

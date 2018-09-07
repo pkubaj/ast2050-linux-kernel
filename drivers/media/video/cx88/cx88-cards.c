@@ -1283,51 +1283,6 @@ static const struct cx88_board cx88_boards[] = {
 		},
 		.mpeg           = CX88_MPEG_DVB,
 	},
-	[CX88_BOARD_WINFAST_DTV2000H_J] = {
-		.name           = "WinFast DTV2000 H rev. J",
-		.tuner_type     = TUNER_PHILIPS_FMD1216ME_MK3,
-		.radio_type     = UNSET,
-		.tuner_addr     = ADDR_UNSET,
-		.radio_addr     = ADDR_UNSET,
-		.tda9887_conf   = TDA9887_PRESENT,
-		.input          = {{
-			.type   = CX88_VMUX_TELEVISION,
-			.vmux   = 0,
-			.gpio0  = 0x00017300,
-			.gpio1  = 0x00008207,
-			.gpio2	= 0x00000000,
-			.gpio3  = 0x02000000,
-		},{
-			.type   = CX88_VMUX_TELEVISION,
-			.vmux   = 0,
-			.gpio0  = 0x00018300,
-			.gpio1  = 0x0000f207,
-			.gpio2	= 0x00017304,
-			.gpio3  = 0x02000000,
-		},{
-			.type   = CX88_VMUX_COMPOSITE1,
-			.vmux   = 1,
-			.gpio0  = 0x00018301,
-			.gpio1  = 0x0000f207,
-			.gpio2	= 0x00017304,
-			.gpio3  = 0x02000000,
-		},{
-			.type   = CX88_VMUX_SVIDEO,
-			.vmux   = 2,
-			.gpio0  = 0x00018301,
-			.gpio1  = 0x0000f207,
-			.gpio2	= 0x00017304,
-			.gpio3  = 0x02000000,
-		}},
-		.radio = {
-			 .type  = CX88_RADIO,
-			 .gpio0 = 0x00015702,
-			 .gpio1 = 0x0000f207,
-			 .gpio2 = 0x00015702,
-			 .gpio3 = 0x02000000,
-		},
-		.mpeg           = CX88_MPEG_DVB,
-	},
 	[CX88_BOARD_GENIATECH_DVBS] = {
 		.name          = "Geniatech DVB-S",
 		.tuner_type    = TUNER_ABSENT,
@@ -1953,8 +1908,7 @@ static const struct cx88_board cx88_boards[] = {
 		.radio_addr     = ADDR_UNSET,
 		.input          = {{
 			.type   = CX88_VMUX_DVB,
-			.vmux   = 0,
-			.gpio0  = 0x8080,
+			.vmux   = 1,
 		} },
 		.mpeg           = CX88_MPEG_DVB,
 	},
@@ -2327,10 +2281,6 @@ static const struct cx88_subid cx88_subids[] = {
 		.subvendor = 0x107d,
 		.subdevice = 0x665e,
 		.card      = CX88_BOARD_WINFAST_DTV2000H,
-	},{
-		.subvendor = 0x107d,
-		.subdevice = 0x6f2b,
-		.card      = CX88_BOARD_WINFAST_DTV2000H_J,
 	},{
 		.subvendor = 0x18ac,
 		.subdevice = 0xd800, /* FusionHDTV 3 Gold (original revision) */
@@ -3212,11 +3162,7 @@ static void cx88_card_setup(struct cx88_core *core)
 	case  CX88_BOARD_PROF_6200:
 	case  CX88_BOARD_PROF_7300:
 	case  CX88_BOARD_SATTRADE_ST4200:
-		cx_write(MO_GP0_IO, 0x8000);
-		msleep(100);
 		cx_write(MO_SRST_IO, 0);
-		msleep(10);
-		cx_write(MO_GP0_IO, 0x8080);
 		msleep(100);
 		cx_write(MO_SRST_IO, 1);
 		msleep(100);
@@ -3439,20 +3385,20 @@ struct cx88_core *cx88_core_create(struct pci_dev *pci, int nr)
 		   The radio_type is sometimes missing, or set to UNSET but
 		   later code configures a tea5767.
 		 */
-		v4l2_i2c_new_subdev(&core->v4l2_dev, &core->i2c_adap,
+		v4l2_i2c_new_probed_subdev(&core->v4l2_dev, &core->i2c_adap,
 				"tuner", "tuner",
-				0, v4l2_i2c_tuner_addrs(ADDRS_RADIO));
+				v4l2_i2c_tuner_addrs(ADDRS_RADIO));
 		if (has_demod)
-			v4l2_i2c_new_subdev(&core->v4l2_dev,
+			v4l2_i2c_new_probed_subdev(&core->v4l2_dev,
 				&core->i2c_adap, "tuner", "tuner",
-				0, v4l2_i2c_tuner_addrs(ADDRS_DEMOD));
+				v4l2_i2c_tuner_addrs(ADDRS_DEMOD));
 		if (core->board.tuner_addr == ADDR_UNSET) {
-			v4l2_i2c_new_subdev(&core->v4l2_dev,
+			v4l2_i2c_new_probed_subdev(&core->v4l2_dev,
 				&core->i2c_adap, "tuner", "tuner",
-				0, has_demod ? tv_addrs + 4 : tv_addrs);
+				has_demod ? tv_addrs + 4 : tv_addrs);
 		} else {
 			v4l2_i2c_new_subdev(&core->v4l2_dev, &core->i2c_adap,
-				"tuner", "tuner", core->board.tuner_addr, NULL);
+				"tuner", "tuner", core->board.tuner_addr);
 		}
 	}
 

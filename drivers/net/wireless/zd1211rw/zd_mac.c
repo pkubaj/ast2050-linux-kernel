@@ -711,8 +711,7 @@ int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length)
 
 	memcpy(skb_put(skb, length), buffer, length);
 
-	memcpy(IEEE80211_SKB_RXCB(skb), &stats, sizeof(stats));
-	ieee80211_rx_irqsafe(hw, skb);
+	ieee80211_rx_irqsafe(hw, skb, &stats);
 	return 0;
 }
 
@@ -796,40 +795,18 @@ static void set_rx_filter_handler(struct work_struct *work)
 		dev_err(zd_mac_dev(mac), "set_rx_filter_handler error %d\n", r);
 }
 
-static u64 zd_op_prepare_multicast(struct ieee80211_hw *hw,
-				   int mc_count, struct dev_addr_list *mclist)
-{
-	struct zd_mac *mac = zd_hw_mac(hw);
-	struct zd_mc_hash hash;
-	int i;
-
-	zd_mc_clear(&hash);
-
-	for (i = 0; i < mc_count; i++) {
-		if (!mclist)
-			break;
-		dev_dbg_f(zd_mac_dev(mac), "mc addr %pM\n", mclist->dmi_addr);
-		zd_mc_add_addr(&hash, mclist->dmi_addr);
-		mclist = mclist->next;
-	}
-
-	return hash.low | ((u64)hash.high << 32);
-}
-
 #define SUPPORTED_FIF_FLAGS \
 	(FIF_PROMISC_IN_BSS | FIF_ALLMULTI | FIF_FCSFAIL | FIF_CONTROL | \
 	FIF_OTHER_BSS | FIF_BCN_PRBRESP_PROMISC)
 static void zd_op_configure_filter(struct ieee80211_hw *hw,
 			unsigned int changed_flags,
 			unsigned int *new_flags,
-			u64 multicast)
+			int mc_count, struct dev_mc_list *mclist)
 {
-	struct zd_mc_hash hash = {
-		.low = multicast,
-		.high = multicast >> 32,
-	};
+	struct zd_mc_hash hash;
 	struct zd_mac *mac = zd_hw_mac(hw);
 	unsigned long flags;
+	int i;
 
 	/* Only deal with supported flags */
 	changed_flags &= SUPPORTED_FIF_FLAGS;
@@ -841,16 +818,25 @@ static void zd_op_configure_filter(struct ieee80211_hw *hw,
 	if (!changed_flags)
 		return;
 
-	if (*new_flags & (FIF_PROMISC_IN_BSS | FIF_ALLMULTI))
+	if (*new_flags & (FIF_PROMISC_IN_BSS | FIF_ALLMULTI)) {
 		zd_mc_add_all(&hash);
+	} else {
+		zd_mc_clear(&hash);
+		for (i = 0; i < mc_count; i++) {
+			if (!mclist)
+				break;
+			dev_dbg_f(zd_mac_dev(mac), "mc addr %pM\n",
+				  mclist->dmi_addr);
+			zd_mc_add_addr(&hash, mclist->dmi_addr);
+			mclist = mclist->next;
+		}
+	}
 
 	spin_lock_irqsave(&mac->lock, flags);
 	mac->pass_failed_fcs = !!(*new_flags & FIF_FCSFAIL);
 	mac->pass_ctrl = !!(*new_flags & FIF_CONTROL);
 	mac->multicast_hash = hash;
 	spin_unlock_irqrestore(&mac->lock, flags);
-
-	/* XXX: these can be called here now, can sleep now! */
 	queue_work(zd_workqueue, &mac->set_multicast_hash_work);
 
 	if (changed_flags & FIF_CONTROL)
@@ -953,7 +939,6 @@ static const struct ieee80211_ops zd_ops = {
 	.add_interface		= zd_op_add_interface,
 	.remove_interface	= zd_op_remove_interface,
 	.config			= zd_op_config,
-	.prepare_multicast	= zd_op_prepare_multicast,
 	.configure_filter	= zd_op_configure_filter,
 	.bss_info_changed	= zd_op_bss_info_changed,
 	.get_tsf		= zd_op_get_tsf,
@@ -1027,7 +1012,7 @@ static void link_led_handler(struct work_struct *work)
 	spin_unlock_irq(&mac->lock);
 
 	r = zd_chip_control_leds(chip,
-		                 is_associated ? ZD_LED_ASSOCIATED : ZD_LED_SCANNING);
+		                 is_associated ? LED_ASSOCIATED : LED_SCANNING);
 	if (r)
 		dev_dbg_f(zd_mac_dev(mac), "zd_chip_control_leds error %d\n", r);
 
@@ -1052,5 +1037,5 @@ static void housekeeping_disable(struct zd_mac *mac)
 	dev_dbg_f(zd_mac_dev(mac), "\n");
 	cancel_rearming_delayed_workqueue(zd_workqueue,
 		&mac->housekeeping.link_led_work);
-	zd_chip_control_leds(&mac->chip, ZD_LED_OFF);
+	zd_chip_control_leds(&mac->chip, LED_OFF);
 }

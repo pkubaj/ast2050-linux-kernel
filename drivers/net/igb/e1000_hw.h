@@ -42,8 +42,6 @@ struct e1000_hw;
 #define E1000_DEV_ID_82576_SERDES             0x10E7
 #define E1000_DEV_ID_82576_QUAD_COPPER        0x10E8
 #define E1000_DEV_ID_82576_NS                 0x150A
-#define E1000_DEV_ID_82576_NS_SERDES          0x1518
-#define E1000_DEV_ID_82576_SERDES_QUAD        0x150D
 #define E1000_DEV_ID_82575EB_COPPER           0x10A7
 #define E1000_DEV_ID_82575EB_FIBER_SERDES     0x10A9
 #define E1000_DEV_ID_82575GB_QUAD_COPPER      0x10D6
@@ -52,8 +50,6 @@ struct e1000_hw;
 #define E1000_REVISION_4 4
 
 #define E1000_FUNC_1     1
-
-#define E1000_ALT_MAC_ADDRESS_OFFSET_LAN1   3
 
 enum e1000_mac_type {
 	e1000_undefined = 0,
@@ -65,7 +61,8 @@ enum e1000_mac_type {
 enum e1000_media_type {
 	e1000_media_type_unknown = 0,
 	e1000_media_type_copper = 1,
-	e1000_media_type_internal_serdes = 2,
+	e1000_media_type_fiber = 2,
+	e1000_media_type_internal_serdes = 3,
 	e1000_num_media_types
 };
 
@@ -140,7 +137,7 @@ enum e1000_rev_polarity {
 	e1000_rev_polarity_undefined = 0xFF
 };
 
-enum e1000_fc_mode {
+enum e1000_fc_type {
 	e1000_fc_none = 0,
 	e1000_fc_rx_pause,
 	e1000_fc_tx_pause,
@@ -342,10 +339,6 @@ struct e1000_mac_info {
 	u16 ifs_ratio;
 	u16 ifs_step_size;
 	u16 mta_reg_count;
-
-	/* Maximum size of the MTA register table in all supported adapters */
-	#define MAX_MTA_REG 128
-	u32 mta_shadow[MAX_MTA_REG];
 	u16 rar_entry_count;
 
 	u8  forced_speed_duplex;
@@ -432,8 +425,8 @@ struct e1000_fc_info {
 	u16 pause_time;     /* Flow control pause timer */
 	bool send_xon;      /* Flow control send XON */
 	bool strict_ieee;   /* Strict IEEE mode */
-	enum e1000_fc_mode current_mode; /* Type of flow control */
-	enum e1000_fc_mode requested_mode;
+	enum e1000_fc_type type; /* Type of flow control */
+	enum e1000_fc_type original_type;
 };
 
 struct e1000_mbx_operations {
@@ -502,7 +495,5 @@ extern char *igb_get_hw_dev_name(struct e1000_hw *hw);
 #else
 #define hw_dbg(format, arg...)
 #endif
+
 #endif
-/* These functions must be implemented by drivers */
-s32  igb_read_pcie_cap_reg(struct e1000_hw *hw, u32 reg, u16 *value);
-s32  igb_write_pcie_cap_reg(struct e1000_hw *hw, u32 reg, u16 *value);

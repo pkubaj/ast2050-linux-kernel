@@ -14,6 +14,7 @@
 
 #include <linux/init.h>
 #include <linux/miscdevice.h>
+#include <linux/utsname.h>
 #include <linux/debugfs.h>
 #include <asm/ipl.h>
 #include <asm/sclp.h>
@@ -274,7 +275,7 @@ struct zcore_header {
 	u32 num_pages;
 	u32 pad1;
 	u64 tod;
-	struct cpuid cpu_id;
+	cpuid_t cpu_id;
 	u32 arch_id;
 	u32 volnr;
 	u32 build_arch;

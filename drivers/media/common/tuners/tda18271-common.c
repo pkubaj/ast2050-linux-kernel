@@ -210,8 +210,7 @@ int tda18271_write_regs(struct dvb_frontend *fe, int idx, int len)
 	tda18271_i2c_gate_ctrl(fe, 0);
 
 	if (ret != 1)
-		tda_err("ERROR: idx = 0x%x, len = %d, "
-			"i2c_transfer returned: %d\n", idx, len, ret);
+		tda_err("ERROR: i2c_transfer returned: %d\n", ret);
 
 	return (ret == 1 ? 0 : ret);
 }

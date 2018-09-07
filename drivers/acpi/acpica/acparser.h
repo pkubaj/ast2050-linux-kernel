@@ -62,8 +62,6 @@
 #define ACPI_PARSE_DEFERRED_OP          0x0100
 #define ACPI_PARSE_DISASSEMBLE          0x0200
 
-#define ACPI_PARSE_MODULE_LEVEL         0x0400
-
 /******************************************************************************
  *
  * Parser interfaces

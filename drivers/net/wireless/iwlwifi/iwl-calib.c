@@ -86,7 +86,7 @@ int iwl_send_calib_results(struct iwl_priv *priv)
 
 	struct iwl_host_cmd hcmd = {
 		.id = REPLY_PHY_CALIBRATION_CMD,
-		.flags = CMD_SIZE_HUGE,
+		.meta.flags = CMD_SIZE_HUGE,
 	};
 
 	for (i = 0; i < IWL_CALIB_MAX; i++) {
@@ -251,7 +251,12 @@ static int iwl_sens_energy_cck(struct iwl_priv *priv,
 
 		/* increase energy threshold (reduce nrg value)
 		 *   to decrease sensitivity */
-		data->nrg_th_cck = data->nrg_th_cck - NRG_STEP_CCK;
+		if (data->nrg_th_cck >
+			(ranges->max_nrg_cck + NRG_STEP_CCK))
+			data->nrg_th_cck = data->nrg_th_cck
+						 - NRG_STEP_CCK;
+		else
+			data->nrg_th_cck = ranges->max_nrg_cck;
 	/* Else if we got fewer than desired, increase sensitivity */
 	} else if (false_alarms < min_false_alarms) {
 		data->nrg_curr_state = IWL_FA_TOO_FEW;
@@ -419,7 +424,7 @@ static int iwl_sensitivity_write(struct iwl_priv *priv)
 	struct iwl_host_cmd cmd_out = {
 		.id = SENSITIVITY_CMD,
 		.len = sizeof(struct iwl_sensitivity_cmd),
-		.flags = CMD_ASYNC,
+		.meta.flags = CMD_ASYNC,
 		.data = &cmd,
 	};
 
@@ -852,7 +857,7 @@ void iwl_chain_noise_calibration(struct iwl_priv *priv,
 		priv->cfg->ops->lib->update_chain_flags(priv);
 
 	data->state = IWL_CHAIN_NOISE_DONE;
-	iwl_power_update_mode(priv, false);
+	iwl_power_update_mode(priv, 0);
 }
 EXPORT_SYMBOL(iwl_chain_noise_calibration);
 

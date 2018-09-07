@@ -48,9 +48,6 @@
 #ifndef PCI_DEVICE_ID_O2_6812
 #define PCI_DEVICE_ID_O2_6812		0x6872
 #endif
-#ifndef PCI_DEVICE_ID_O2_6933
-#define PCI_DEVICE_ID_O2_6933           0x6933
-#endif
 
 /* Additional PCI configuration registers */
 
@@ -157,7 +154,6 @@ static int o2micro_override(struct yenta_socket *socket)
 		case PCI_DEVICE_ID_O2_6812:
 		case PCI_DEVICE_ID_O2_6832:
 		case PCI_DEVICE_ID_O2_6836:
- 		case PCI_DEVICE_ID_O2_6933:
 			dev_printk(KERN_INFO, &socket->dev->dev,
 				   "Yenta O2: old bridge, disabling read "
 				   "prefetch/write burst\n");

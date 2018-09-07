@@ -37,9 +37,6 @@
  * Generic range manager structs
  */
 #include <linux/list.h>
-#ifdef CONFIG_DEBUG_FS
-#include <linux/seq_file.h>
-#endif
 
 struct drm_mm_node {
 	struct list_head fl_entry;
@@ -98,9 +95,5 @@ static inline struct drm_mm *drm_get_mm(struct drm_mm_node *block)
 {
 	return block->mm;
 }
-
-#ifdef CONFIG_DEBUG_FS
-int drm_mm_dump_table(struct seq_file *m, struct drm_mm *mm);
-#endif
 
 #endif

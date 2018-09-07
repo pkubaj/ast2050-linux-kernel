@@ -459,6 +459,7 @@ static struct i2c_algorithm em28xx_algo = {
 static struct i2c_adapter em28xx_adap_template = {
 	.owner = THIS_MODULE,
 	.name = "em28xx",
+	.id = I2C_HW_B_EM28XX,
 	.algo = &em28xx_algo,
 };
 

@@ -970,7 +970,7 @@ toshoboe_probe (struct toshoboe_cb *self)
 /* Netdev style code */
 
 /* Transmit something */
-static netdev_tx_t
+static int
 toshoboe_hard_xmit (struct sk_buff *skb, struct net_device *dev)
 {
   struct toshoboe_cb *self;
@@ -981,7 +981,7 @@ toshoboe_hard_xmit (struct sk_buff *skb, struct net_device *dev)
 
   self = netdev_priv(dev);
 
-  IRDA_ASSERT (self != NULL, return NETDEV_TX_OK; );
+  IRDA_ASSERT (self != NULL, return 0; );
 
   IRDA_DEBUG (1, "%s.tx:%x(%x)%x\n", __func__
       ,skb->len,self->txpending,INB (OBOE_ENABLEH));
@@ -1021,7 +1021,7 @@ toshoboe_hard_xmit (struct sk_buff *skb, struct net_device *dev)
             {
 	      spin_unlock_irqrestore(&self->spinlock, flags);
               dev_kfree_skb (skb);
-              return NETDEV_TX_OK;
+              return 0;
             }
           /* True packet, go on, but */
           /* do not accept anything before change speed execution */
@@ -1036,7 +1036,7 @@ toshoboe_hard_xmit (struct sk_buff *skb, struct net_device *dev)
           toshoboe_setbaud (self);
 	  spin_unlock_irqrestore(&self->spinlock, flags);
           dev_kfree_skb (skb);
-          return NETDEV_TX_OK;
+          return 0;
         }
 
     }
@@ -1143,7 +1143,7 @@ dumpbufs(skb->data,skb->len,'>');
   spin_unlock_irqrestore(&self->spinlock, flags);
   dev_kfree_skb (skb);
 
-  return NETDEV_TX_OK;
+  return 0;
 }
 
 /*interrupt handler */

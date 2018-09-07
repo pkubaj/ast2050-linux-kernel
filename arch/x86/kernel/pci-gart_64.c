@@ -16,7 +16,6 @@
 #include <linux/agp_backend.h>
 #include <linux/init.h>
 #include <linux/mm.h>
-#include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/spinlock.h>
 #include <linux/pci.h>
@@ -191,13 +190,14 @@ static void iommu_full(struct device *dev, size_t size, int dir)
 static inline int
 need_iommu(struct device *dev, unsigned long addr, size_t size)
 {
-	return force_iommu || !dma_capable(dev, addr, size);
+	return force_iommu ||
+		!is_buffer_dma_capable(*dev->dma_mask, addr, size);
 }
 
 static inline int
 nonforced_iommu(struct device *dev, unsigned long addr, size_t size)
 {
-	return !dma_capable(dev, addr, size);
+	return !is_buffer_dma_capable(*dev->dma_mask, addr, size);
 }
 
 /* Map a single continuous physical area into the IOMMU.
@@ -553,9 +553,6 @@ static void enable_gart_translations(void)
 
 		enable_gart_translation(dev, __pa(agp_gatt_table));
 	}
-
-	/* Flush the GART-TLB to remove stale entries */
-	k8_flush_garts();
 }
 
 /*
@@ -720,7 +717,7 @@ void __init gart_iommu_init(void)
 	unsigned long scratch;
 	long i;
 
-	if (num_k8_northbridges == 0)
+	if (cache_k8_northbridges() < 0 || num_k8_northbridges == 0)
 		return;
 
 #ifndef CONFIG_AGP_AMD64

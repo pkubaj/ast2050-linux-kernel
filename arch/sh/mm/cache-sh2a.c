@@ -15,7 +15,7 @@
 #include <asm/cacheflush.h>
 #include <asm/io.h>
 
-static void sh2a__flush_wback_region(void *start, int size)
+void __flush_wback_region(void *start, int size)
 {
 	unsigned long v;
 	unsigned long begin, end;
@@ -44,7 +44,7 @@ static void sh2a__flush_wback_region(void *start, int size)
 	local_irq_restore(flags);
 }
 
-static void sh2a__flush_purge_region(void *start, int size)
+void __flush_purge_region(void *start, int size)
 {
 	unsigned long v;
 	unsigned long begin, end;
@@ -65,7 +65,7 @@ static void sh2a__flush_purge_region(void *start, int size)
 	local_irq_restore(flags);
 }
 
-static void sh2a__flush_invalidate_region(void *start, int size)
+void __flush_invalidate_region(void *start, int size)
 {
 	unsigned long v;
 	unsigned long begin, end;
@@ -97,15 +97,13 @@ static void sh2a__flush_invalidate_region(void *start, int size)
 }
 
 /* WBack O-Cache and flush I-Cache */
-static void sh2a_flush_icache_range(void *args)
+void flush_icache_range(unsigned long start, unsigned long end)
 {
-	struct flusher_data *data = args;
-	unsigned long start, end;
 	unsigned long v;
 	unsigned long flags;
 
-	start = data->addr1 & ~(L1_CACHE_BYTES-1);
-	end = (data->addr2 + L1_CACHE_BYTES-1) & ~(L1_CACHE_BYTES-1);
+	start = start & ~(L1_CACHE_BYTES-1);
+	end = (end + L1_CACHE_BYTES-1) & ~(L1_CACHE_BYTES-1);
 
 	local_irq_save(flags);
 	jump_to_uncached();
@@ -128,13 +126,4 @@ static void sh2a_flush_icache_range(void *args)
 
 	back_to_cached();
 	local_irq_restore(flags);
-}
-
-void __init sh2a_cache_init(void)
-{
-	local_flush_icache_range	= sh2a_flush_icache_range;
-
-	__flush_wback_region		= sh2a__flush_wback_region;
-	__flush_purge_region		= sh2a__flush_purge_region;
-	__flush_invalidate_region	= sh2a__flush_invalidate_region;
 }

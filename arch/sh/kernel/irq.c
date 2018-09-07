@@ -11,7 +11,6 @@
 #include <linux/module.h>
 #include <linux/kernel_stat.h>
 #include <linux/seq_file.h>
-#include <linux/ftrace.h>
 #include <asm/processor.h>
 #include <asm/machvec.h>
 #include <asm/uaccess.h>
@@ -107,7 +106,7 @@ static union irq_ctx *hardirq_ctx[NR_CPUS] __read_mostly;
 static union irq_ctx *softirq_ctx[NR_CPUS] __read_mostly;
 #endif
 
-asmlinkage __irq_entry int do_IRQ(unsigned int irq, struct pt_regs *regs)
+asmlinkage int do_IRQ(unsigned int irq, struct pt_regs *regs)
 {
 	struct pt_regs *old_regs = set_irq_regs(regs);
 #ifdef CONFIG_IRQSTACKS
@@ -115,7 +114,24 @@ asmlinkage __irq_entry int do_IRQ(unsigned int irq, struct pt_regs *regs)
 #endif
 
 	irq_enter();
-	irq = irq_demux(irq);
+
+#ifdef CONFIG_DEBUG_STACKOVERFLOW
+	/* Debugging check for stack overflow: is there less than 1KB free? */
+	{
+		long sp;
+
+		__asm__ __volatile__ ("and r15, %0" :
+					"=r" (sp) : "0" (THREAD_SIZE - 1));
+
+		if (unlikely(sp < (sizeof(struct thread_info) + STACK_WARN))) {
+			printk("do_IRQ: stack overflow: %ld\n",
+			       sp - sizeof(struct thread_info));
+			dump_stack();
+		}
+	}
+#endif
+
+	irq = irq_demux(intc_evt2irq(irq));
 
 #ifdef CONFIG_IRQSTACKS
 	curctx = (union irq_ctx *)current_thread_info();
@@ -166,9 +182,11 @@ asmlinkage __irq_entry int do_IRQ(unsigned int irq, struct pt_regs *regs)
 }
 
 #ifdef CONFIG_IRQSTACKS
-static char softirq_stack[NR_CPUS * THREAD_SIZE] __page_aligned_bss;
+static char softirq_stack[NR_CPUS * THREAD_SIZE]
+		__attribute__((__section__(".bss.page_aligned")));
 
-static char hardirq_stack[NR_CPUS * THREAD_SIZE] __page_aligned_bss;
+static char hardirq_stack[NR_CPUS * THREAD_SIZE]
+		__attribute__((__section__(".bss.page_aligned")));
 
 /*
  * allocate per-cpu stacks for hardirq and for softirq processing

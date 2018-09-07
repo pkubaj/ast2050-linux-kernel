@@ -799,7 +799,8 @@ static int
 cifs_parse_mount_options(char *options, const char *devname,
 			 struct smb_vol *vol)
 {
-	char *value, *data, *end;
+	char *value;
+	char *data;
 	unsigned int  temp_len, i, j;
 	char separator[2];
 	short int override_uid = -1;
@@ -842,7 +843,6 @@ cifs_parse_mount_options(char *options, const char *devname,
 	if (!options)
 		return 1;
 
-	end = options + strlen(options);
 	if (strncmp(options, "sep=", 4) == 0) {
 		if (options[4] != 0) {
 			separator[0] = options[4];
@@ -907,7 +907,6 @@ cifs_parse_mount_options(char *options, const char *devname,
 			the only illegal character in a password is null */
 
 			if ((value[temp_len] == 0) &&
-			    (value + temp_len < end) &&
 			    (value[temp_len+1] == separator[0])) {
 				/* reinsert comma */
 				value[temp_len] = separator[0];
@@ -1378,7 +1377,7 @@ cifs_parse_mount_options(char *options, const char *devname,
 }
 
 static struct TCP_Server_Info *
-cifs_find_tcp_session(struct sockaddr_storage *addr, unsigned short int port)
+cifs_find_tcp_session(struct sockaddr_storage *addr)
 {
 	struct list_head *tmp;
 	struct TCP_Server_Info *server;
@@ -1398,37 +1397,16 @@ cifs_find_tcp_session(struct sockaddr_storage *addr, unsigned short int port)
 		if (server->tcpStatus == CifsNew)
 			continue;
 
-		switch (addr->ss_family) {
-		case AF_INET:
-			if (addr4->sin_addr.s_addr ==
-			    server->addr.sockAddr.sin_addr.s_addr) {
-				addr4->sin_port = htons(port);
-				/* user overrode default port? */
-				if (addr4->sin_port) {
-					if (addr4->sin_port !=
-					    server->addr.sockAddr.sin_port)
-						continue;
-				}
-				break;
-			} else
-				continue;
-
-		case AF_INET6:
-			if (ipv6_addr_equal(&addr6->sin6_addr,
-			    &server->addr.sockAddr6.sin6_addr) &&
-			    (addr6->sin6_scope_id ==
-			    server->addr.sockAddr6.sin6_scope_id)) {
-				addr6->sin6_port = htons(port);
-				/* user overrode default port? */
-				if (addr6->sin6_port) {
-					if (addr6->sin6_port !=
-					   server->addr.sockAddr6.sin6_port)
-						continue;
-				}
-				break;
-			} else
-				continue;
-		}
+		if (addr->ss_family == AF_INET &&
+		    (addr4->sin_addr.s_addr !=
+		     server->addr.sockAddr.sin_addr.s_addr))
+			continue;
+		else if (addr->ss_family == AF_INET6 &&
+			 (!ipv6_addr_equal(&server->addr.sockAddr6.sin6_addr,
+					   &addr6->sin6_addr) ||
+			  server->addr.sockAddr6.sin6_scope_id !=
+					   addr6->sin6_scope_id))
+			continue;
 
 		++server->srv_count;
 		write_unlock(&cifs_tcp_ses_lock);
@@ -1497,7 +1475,7 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	}
 
 	/* see if we already have a matching tcp_ses */
-	tcp_ses = cifs_find_tcp_session(&addr, volume_info->port);
+	tcp_ses = cifs_find_tcp_session(&addr);
 	if (tcp_ses)
 		return tcp_ses;
 
@@ -1588,29 +1566,17 @@ out_err:
 }
 
 static struct cifsSesInfo *
-cifs_find_smb_ses(struct TCP_Server_Info *server, struct smb_vol *vol)
+cifs_find_smb_ses(struct TCP_Server_Info *server, char *username)
 {
+	struct list_head *tmp;
 	struct cifsSesInfo *ses;
 
 	write_lock(&cifs_tcp_ses_lock);
-	list_for_each_entry(ses, &server->smb_ses_list, smb_ses_list) {
-		switch (server->secType) {
-		case Kerberos:
-			if (vol->linux_uid != ses->linux_uid)
-				continue;
-			break;
-		default:
-			/* anything else takes username/password */
-			if (strncmp(ses->userName, vol->username,
-				    MAX_USERNAME_SIZE))
-				continue;
-			if (strlen(vol->username) != 0 &&
-			    ses->password != NULL &&
-			    strncmp(ses->password,
-				    vol->password ? vol->password : "",
-				    MAX_PASSWORD_SIZE))
-				continue;
-		}
+	list_for_each(tmp, &server->smb_ses_list) {
+		ses = list_entry(tmp, struct cifsSesInfo, smb_ses_list);
+		if (strncmp(ses->userName, username, MAX_USERNAME_SIZE))
+			continue;
+
 		++ses->ses_count;
 		write_unlock(&cifs_tcp_ses_lock);
 		return ses;
@@ -1684,6 +1650,7 @@ cifs_put_tcon(struct cifsTconInfo *tcon)
 	CIFSSMBTDis(xid, tcon);
 	_FreeXid(xid);
 
+	DeleteTconOplockQEntries(tcon);
 	tconInfoFree(tcon);
 	cifs_put_smb_ses(ses);
 }
@@ -2243,11 +2210,6 @@ is_path_accessible(int xid, struct cifsTconInfo *tcon,
 			      0 /* not legacy */, cifs_sb->local_nls,
 			      cifs_sb->mnt_cifs_flags &
 				CIFS_MOUNT_MAP_SPECIAL_CHR);
-
-	if (rc == -EOPNOTSUPP || rc == -EINVAL)
-		rc = SMBQueryInformation(xid, tcon, full_path, pfile_info,
-				cifs_sb->local_nls, cifs_sb->mnt_cifs_flags &
-				  CIFS_MOUNT_MAP_SPECIAL_CHR);
 	kfree(pfile_info);
 	return rc;
 }
@@ -2374,7 +2336,7 @@ try_mount_again:
 		goto out;
 	}
 
-	pSesInfo = cifs_find_smb_ses(srvTcp, volume_info);
+	pSesInfo = cifs_find_smb_ses(srvTcp, volume_info->username);
 	if (pSesInfo) {
 		cFYI(1, ("Existing smb sess found (status=%d)",
 			pSesInfo->status));
@@ -2550,7 +2512,7 @@ try_mount_again:
 
 remote_path_check:
 	/* check if a whole path (including prepath) is not remote */
-	if (!rc && tcon) {
+	if (!rc && cifs_sb->prepathlen && tcon) {
 		/* build_path_to_root works only when we have a valid tcon */
 		full_path = cifs_build_path_to_root(cifs_sb);
 		if (full_path == NULL) {
@@ -2672,9 +2634,9 @@ CIFSTCon(unsigned int xid, struct cifsSesInfo *ses,
 		return -EIO;
 
 	smb_buffer = cifs_buf_get();
-	if (smb_buffer == NULL)
+	if (smb_buffer == NULL) {
 		return -ENOMEM;
-
+	}
 	smb_buffer_response = smb_buffer;
 
 	header_assemble(smb_buffer, SMB_COM_TREE_CONNECT_ANDX,

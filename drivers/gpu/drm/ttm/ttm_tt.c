@@ -34,12 +34,75 @@
 #include <linux/pagemap.h>
 #include <linux/file.h>
 #include <linux/swap.h>
-#include "drm_cache.h"
 #include "ttm/ttm_module.h"
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_placement.h"
 
 static int ttm_tt_swapin(struct ttm_tt *ttm);
+
+#if defined(CONFIG_X86)
+static void ttm_tt_clflush_page(struct page *page)
+{
+	uint8_t *page_virtual;
+	unsigned int i;
+
+	if (unlikely(page == NULL))
+		return;
+
+	page_virtual = kmap_atomic(page, KM_USER0);
+
+	for (i = 0; i < PAGE_SIZE; i += boot_cpu_data.x86_clflush_size)
+		clflush(page_virtual + i);
+
+	kunmap_atomic(page_virtual, KM_USER0);
+}
+
+static void ttm_tt_cache_flush_clflush(struct page *pages[],
+				       unsigned long num_pages)
+{
+	unsigned long i;
+
+	mb();
+	for (i = 0; i < num_pages; ++i)
+		ttm_tt_clflush_page(*pages++);
+	mb();
+}
+#elif !defined(__powerpc__)
+static void ttm_tt_ipi_handler(void *null)
+{
+	;
+}
+#endif
+
+void ttm_tt_cache_flush(struct page *pages[], unsigned long num_pages)
+{
+
+#if defined(CONFIG_X86)
+	if (cpu_has_clflush) {
+		ttm_tt_cache_flush_clflush(pages, num_pages);
+		return;
+	}
+#elif defined(__powerpc__)
+	unsigned long i;
+
+	for (i = 0; i < num_pages; ++i) {
+		struct page *page = pages[i];
+		void *page_virtual;
+
+		if (unlikely(page == NULL))
+			continue;
+
+		page_virtual = kmap_atomic(page, KM_USER0);
+		flush_dcache_range((unsigned long) page_virtual,
+				   (unsigned long) page_virtual + PAGE_SIZE);
+		kunmap_atomic(page_virtual, KM_USER0);
+	}
+#else
+	if (on_each_cpu(ttm_tt_ipi_handler, NULL, 1) != 0)
+		printk(KERN_ERR TTM_PFX
+		       "Timed out waiting for drm cache flush.\n");
+#endif
+}
 
 /**
  * Allocates storage for pointers to the pages that back the ttm.
@@ -116,7 +179,7 @@ static void ttm_tt_free_user_pages(struct ttm_tt *ttm)
 			set_page_dirty_lock(page);
 
 		ttm->pages[i] = NULL;
-		ttm_mem_global_free(ttm->glob->mem_glob, PAGE_SIZE);
+		ttm_mem_global_free(ttm->bdev->mem_glob, PAGE_SIZE, false);
 		put_page(page);
 	}
 	ttm->state = tt_unpopulated;
@@ -127,7 +190,8 @@ static void ttm_tt_free_user_pages(struct ttm_tt *ttm)
 static struct page *__ttm_tt_get_page(struct ttm_tt *ttm, int index)
 {
 	struct page *p;
-	struct ttm_mem_global *mem_glob = ttm->glob->mem_glob;
+	struct ttm_bo_device *bdev = ttm->bdev;
+	struct ttm_mem_global *mem_glob = bdev->mem_glob;
 	int ret;
 
 	while (NULL == (p = ttm->pages[index])) {
@@ -136,14 +200,21 @@ static struct page *__ttm_tt_get_page(struct ttm_tt *ttm, int index)
 		if (!p)
 			return NULL;
 
-		ret = ttm_mem_global_alloc_page(mem_glob, p, false, false);
-		if (unlikely(ret != 0))
-			goto out_err;
-
-		if (PageHighMem(p))
+		if (PageHighMem(p)) {
+			ret =
+			    ttm_mem_global_alloc(mem_glob, PAGE_SIZE,
+						 false, false, true);
+			if (unlikely(ret != 0))
+				goto out_err;
 			ttm->pages[--ttm->first_himem_page] = p;
-		else
+		} else {
+			ret =
+			    ttm_mem_global_alloc(mem_glob, PAGE_SIZE,
+						 false, false, false);
+			if (unlikely(ret != 0))
+				goto out_err;
 			ttm->pages[++ttm->last_lomem_page] = p;
+		}
 	}
 	return p;
 out_err:
@@ -239,7 +310,7 @@ static int ttm_tt_set_caching(struct ttm_tt *ttm,
 	}
 
 	if (ttm->caching_state == tt_cached)
-		drm_clflush_pages(ttm->pages, ttm->num_pages);
+		ttm_tt_cache_flush(ttm->pages, ttm->num_pages);
 
 	for (i = 0; i < ttm->num_pages; ++i) {
 		cur_page = ttm->pages[i];
@@ -279,7 +350,6 @@ int ttm_tt_set_placement_caching(struct ttm_tt *ttm, uint32_t placement)
 
 	return ttm_tt_set_caching(ttm, state);
 }
-EXPORT_SYMBOL(ttm_tt_set_placement_caching);
 
 static void ttm_tt_free_alloced_pages(struct ttm_tt *ttm)
 {
@@ -298,8 +368,8 @@ static void ttm_tt_free_alloced_pages(struct ttm_tt *ttm)
 				printk(KERN_ERR TTM_PFX
 				       "Erroneous page count. "
 				       "Leaking pages.\n");
-			ttm_mem_global_free_page(ttm->glob->mem_glob,
-						 cur_page);
+			ttm_mem_global_free(ttm->bdev->mem_glob, PAGE_SIZE,
+					    PageHighMem(cur_page));
 			__free_page(cur_page);
 		}
 	}
@@ -344,7 +414,7 @@ int ttm_tt_set_user(struct ttm_tt *ttm,
 	struct mm_struct *mm = tsk->mm;
 	int ret;
 	int write = (ttm->page_flags & TTM_PAGE_FLAG_WRITE) != 0;
-	struct ttm_mem_global *mem_glob = ttm->glob->mem_glob;
+	struct ttm_mem_global *mem_glob = ttm->bdev->mem_glob;
 
 	BUG_ON(num_pages != ttm->num_pages);
 	BUG_ON((ttm->page_flags & TTM_PAGE_FLAG_USER) == 0);
@@ -354,7 +424,7 @@ int ttm_tt_set_user(struct ttm_tt *ttm,
 	 */
 
 	ret = ttm_mem_global_alloc(mem_glob, num_pages * PAGE_SIZE,
-				   false, false);
+				   false, false, false);
 	if (unlikely(ret != 0))
 		return ret;
 
@@ -365,7 +435,7 @@ int ttm_tt_set_user(struct ttm_tt *ttm,
 
 	if (ret != num_pages && write) {
 		ttm_tt_free_user_pages(ttm);
-		ttm_mem_global_free(mem_glob, num_pages * PAGE_SIZE);
+		ttm_mem_global_free(mem_glob, num_pages * PAGE_SIZE, false);
 		return -ENOMEM;
 	}
 
@@ -389,7 +459,8 @@ struct ttm_tt *ttm_tt_create(struct ttm_bo_device *bdev, unsigned long size,
 	if (!ttm)
 		return NULL;
 
-	ttm->glob = bdev->glob;
+	ttm->bdev = bdev;
+
 	ttm->num_pages = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	ttm->first_himem_page = ttm->num_pages;
 	ttm->last_lomem_page = -1;
@@ -466,7 +537,7 @@ static int ttm_tt_swapin(struct ttm_tt *ttm)
 	void *from_virtual;
 	void *to_virtual;
 	int i;
-	int ret = -ENOMEM;
+	int ret;
 
 	if (ttm->page_flags & TTM_PAGE_FLAG_USER) {
 		ret = ttm_tt_set_user(ttm, ttm->tsk, ttm->start,
@@ -485,10 +556,8 @@ static int ttm_tt_swapin(struct ttm_tt *ttm)
 
 	for (i = 0; i < ttm->num_pages; ++i) {
 		from_page = read_mapping_page(swap_space, i, NULL);
-		if (IS_ERR(from_page)) {
-			ret = PTR_ERR(from_page);
+		if (IS_ERR(from_page))
 			goto out_err;
-		}
 		to_page = __ttm_tt_get_page(ttm, i);
 		if (unlikely(to_page == NULL))
 			goto out_err;
@@ -511,7 +580,7 @@ static int ttm_tt_swapin(struct ttm_tt *ttm)
 	return 0;
 out_err:
 	ttm_tt_free_alloced_pages(ttm);
-	return ret;
+	return -ENOMEM;
 }
 
 int ttm_tt_swapout(struct ttm_tt *ttm, struct file *persistant_swap_storage)
@@ -523,7 +592,6 @@ int ttm_tt_swapout(struct ttm_tt *ttm, struct file *persistant_swap_storage)
 	void *from_virtual;
 	void *to_virtual;
 	int i;
-	int ret = -ENOMEM;
 
 	BUG_ON(ttm->state != tt_unbound && ttm->state != tt_unpopulated);
 	BUG_ON(ttm->caching_state != tt_cached);
@@ -546,7 +614,7 @@ int ttm_tt_swapout(struct ttm_tt *ttm, struct file *persistant_swap_storage)
 						0);
 		if (unlikely(IS_ERR(swap_storage))) {
 			printk(KERN_ERR "Failed allocating swap storage.\n");
-			return PTR_ERR(swap_storage);
+			return -ENOMEM;
 		}
 	} else
 		swap_storage = persistant_swap_storage;
@@ -558,10 +626,9 @@ int ttm_tt_swapout(struct ttm_tt *ttm, struct file *persistant_swap_storage)
 		if (unlikely(from_page == NULL))
 			continue;
 		to_page = read_mapping_page(swap_space, i, NULL);
-		if (unlikely(IS_ERR(to_page))) {
-			ret = PTR_ERR(to_page);
+		if (unlikely(to_page == NULL))
 			goto out_err;
-		}
+
 		preempt_disable();
 		from_virtual = kmap_atomic(from_page, KM_USER0);
 		to_virtual = kmap_atomic(to_page, KM_USER1);
@@ -585,5 +652,5 @@ out_err:
 	if (!persistant_swap_storage)
 		fput(swap_storage);
 
-	return ret;
+	return -ENOMEM;
 }

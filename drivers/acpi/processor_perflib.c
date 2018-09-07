@@ -39,8 +39,6 @@
 #include <acpi/acpi_drivers.h>
 #include <acpi/processor.h>
 
-#define PREFIX "ACPI: "
-
 #define ACPI_PROCESSOR_CLASS		"processor"
 #define ACPI_PROCESSOR_FILE_PERFORMANCE	"performance"
 #define _COMPONENT		ACPI_PROCESSOR_COMPONENT
@@ -356,11 +354,7 @@ static int acpi_processor_get_performance_info(struct acpi_processor *pr)
 	if (result)
 		goto update_bios;
 
-	/* We need to call _PPC once when cpufreq starts */
-	if (ignore_ppc != 1)
-		result = acpi_processor_get_platform_limit(pr);
-
-	return result;
+	return 0;
 
 	/*
 	 * Having _PPC but missing frequencies (_PSS, _PCT) is a very good hint that
@@ -515,7 +509,7 @@ int acpi_processor_preregister_performance(
 	struct acpi_processor *match_pr;
 	struct acpi_psd_package *match_pdomain;
 
-	if (!zalloc_cpumask_var(&covered_cpus, GFP_KERNEL))
+	if (!alloc_cpumask_var(&covered_cpus, GFP_KERNEL))
 		return -ENOMEM;
 
 	mutex_lock(&performance_mutex);
@@ -562,6 +556,7 @@ int acpi_processor_preregister_performance(
 	 * Now that we have _PSD data from all CPUs, lets setup P-state 
 	 * domain info.
 	 */
+	cpumask_clear(covered_cpus);
 	for_each_possible_cpu(i) {
 		pr = per_cpu(processors, i);
 		if (!pr)

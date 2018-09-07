@@ -420,6 +420,19 @@ int saa7134_set_dmabits(struct saa7134_dev *dev)
 		ctrl |= SAA7134_MAIN_CTRL_TE5;
 		irq  |= SAA7134_IRQ1_INTE_RA2_1 |
 			SAA7134_IRQ1_INTE_RA2_0;
+
+		/* dma: setup channel 5 (= TS) */
+
+		saa_writeb(SAA7134_TS_DMA0, (dev->ts.nr_packets - 1) & 0xff);
+		saa_writeb(SAA7134_TS_DMA1,
+			((dev->ts.nr_packets - 1) >> 8) & 0xff);
+		/* TSNOPIT=0, TSCOLAP=0 */
+		saa_writeb(SAA7134_TS_DMA2,
+			(((dev->ts.nr_packets - 1) >> 16) & 0x3f) | 0x00);
+		saa_writel(SAA7134_RS_PITCH(5), TS_PACKET_SIZE);
+		saa_writel(SAA7134_RS_CONTROL(5), SAA7134_RS_CONTROL_BURST_16 |
+						  SAA7134_RS_CONTROL_ME |
+						  (dev->ts.pt_ts.dma >> 12));
 	}
 
 	/* set task conditions + field handling */
@@ -987,7 +1000,7 @@ static int __devinit saa7134_initdev(struct pci_dev *pci_dev,
 		struct v4l2_subdev *sd =
 			v4l2_i2c_new_subdev(&dev->v4l2_dev, &dev->i2c_adap,
 				"saa6752hs", "saa6752hs",
-				saa7134_boards[dev->board].empress_addr, NULL);
+				saa7134_boards[dev->board].empress_addr);
 
 		if (sd)
 			sd->grp_id = GRP_EMPRESS;
@@ -996,13 +1009,11 @@ static int __devinit saa7134_initdev(struct pci_dev *pci_dev,
 	if (saa7134_boards[dev->board].rds_addr) {
 		struct v4l2_subdev *sd;
 
-		sd = v4l2_i2c_new_subdev(&dev->v4l2_dev,
+		sd = v4l2_i2c_new_probed_subdev_addr(&dev->v4l2_dev,
 				&dev->i2c_adap,	"saa6588", "saa6588",
-				0, I2C_ADDRS(saa7134_boards[dev->board].rds_addr));
-		if (sd) {
+				saa7134_boards[dev->board].rds_addr);
+		if (sd)
 			printk(KERN_INFO "%s: found RDS decoder\n", dev->name);
-			dev->has_rds = 1;
-		}
 	}
 
 	request_submodules(dev);

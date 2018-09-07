@@ -174,6 +174,7 @@ static void complete_edac_pci_list_del(struct rcu_head *head)
 
 	pci = container_of(head, struct edac_pci_ctl_info, rcu);
 	INIT_LIST_HEAD(&pci->link);
+	complete(&pci->complete);
 }
 
 /*
@@ -184,8 +185,9 @@ static void complete_edac_pci_list_del(struct rcu_head *head)
 static void del_edac_pci_from_global_list(struct edac_pci_ctl_info *pci)
 {
 	list_del_rcu(&pci->link);
+	init_completion(&pci->complete);
 	call_rcu(&pci->rcu, complete_edac_pci_list_del);
-	rcu_barrier();
+	wait_for_completion(&pci->complete);
 }
 
 #if 0

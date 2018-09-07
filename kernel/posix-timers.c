@@ -242,25 +242,6 @@ static int posix_get_monotonic_raw(clockid_t which_clock, struct timespec *tp)
 	return 0;
 }
 
-
-static int posix_get_realtime_coarse(clockid_t which_clock, struct timespec *tp)
-{
-	*tp = current_kernel_time();
-	return 0;
-}
-
-static int posix_get_monotonic_coarse(clockid_t which_clock,
-						struct timespec *tp)
-{
-	*tp = get_monotonic_coarse();
-	return 0;
-}
-
-int posix_get_coarse_res(const clockid_t which_clock, struct timespec *tp)
-{
-	*tp = ktime_to_timespec(KTIME_LOW_RES);
-	return 0;
-}
 /*
  * Initialize everything, well, just everything in Posix clocks/timers ;)
  */
@@ -281,26 +262,10 @@ static __init int init_posix_timers(void)
 		.timer_create = no_timer_create,
 		.nsleep = no_nsleep,
 	};
-	struct k_clock clock_realtime_coarse = {
-		.clock_getres = posix_get_coarse_res,
-		.clock_get = posix_get_realtime_coarse,
-		.clock_set = do_posix_clock_nosettime,
-		.timer_create = no_timer_create,
-		.nsleep = no_nsleep,
-	};
-	struct k_clock clock_monotonic_coarse = {
-		.clock_getres = posix_get_coarse_res,
-		.clock_get = posix_get_monotonic_coarse,
-		.clock_set = do_posix_clock_nosettime,
-		.timer_create = no_timer_create,
-		.nsleep = no_nsleep,
-	};
 
 	register_posix_clock(CLOCK_REALTIME, &clock_realtime);
 	register_posix_clock(CLOCK_MONOTONIC, &clock_monotonic);
 	register_posix_clock(CLOCK_MONOTONIC_RAW, &clock_monotonic_raw);
-	register_posix_clock(CLOCK_REALTIME_COARSE, &clock_realtime_coarse);
-	register_posix_clock(CLOCK_MONOTONIC_COARSE, &clock_monotonic_coarse);
 
 	posix_timers_cache = kmem_cache_create("posix_timers_cache",
 					sizeof (struct k_itimer), 0, SLAB_PANIC,
@@ -578,7 +543,6 @@ SYSCALL_DEFINE3(timer_create, const clockid_t, which_clock,
 			goto out;
 		}
 	} else {
-		memset(&event.sigev_value, 0, sizeof(event.sigev_value));
 		event.sigev_notify = SIGEV_SIGNAL;
 		event.sigev_signo = SIGALRM;
 		event.sigev_value.sival_int = new_timer->it_id;

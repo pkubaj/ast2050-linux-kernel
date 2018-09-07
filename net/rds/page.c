@@ -39,7 +39,7 @@ struct rds_page_remainder {
 	unsigned long	r_offset;
 };
 
-DEFINE_PER_CPU_SHARED_ALIGNED(struct rds_page_remainder, rds_page_remainders);
+DEFINE_PER_CPU(struct rds_page_remainder, rds_page_remainders) ____cacheline_aligned;
 
 /*
  * returns 0 on success or -errno on failure.
@@ -56,19 +56,31 @@ int rds_page_copy_user(struct page *page, unsigned long offset,
 	unsigned long ret;
 	void *addr;
 
-	addr = kmap(page);
-	if (to_user) {
+	if (to_user)
 		rds_stats_add(s_copy_to_user, bytes);
-		ret = copy_to_user(ptr, addr + offset, bytes);
-	} else {
+	else
 		rds_stats_add(s_copy_from_user, bytes);
-		ret = copy_from_user(addr + offset, ptr, bytes);
-	}
-	kunmap(page);
 
-	return ret ? -EFAULT : 0;
+	addr = kmap_atomic(page, KM_USER0);
+	if (to_user)
+		ret = __copy_to_user_inatomic(ptr, addr + offset, bytes);
+	else
+		ret = __copy_from_user_inatomic(addr + offset, ptr, bytes);
+	kunmap_atomic(addr, KM_USER0);
+
+	if (ret) {
+		addr = kmap(page);
+		if (to_user)
+			ret = copy_to_user(ptr, addr + offset, bytes);
+		else
+			ret = copy_from_user(addr + offset, ptr, bytes);
+		kunmap(page);
+		if (ret)
+			return -EFAULT;
+	}
+
+	return 0;
 }
-EXPORT_SYMBOL_GPL(rds_page_copy_user);
 
 /*
  * Message allocation uses this to build up regions of a message.

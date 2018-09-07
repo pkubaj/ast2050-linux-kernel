@@ -642,7 +642,7 @@ static int dma_fixed_dma_supported(struct device *dev, u64 mask)
 
 static int dma_set_mask_and_switch(struct device *dev, u64 dma_mask);
 
-struct dma_map_ops dma_iommu_fixed_ops = {
+struct dma_mapping_ops dma_iommu_fixed_ops = {
 	.alloc_coherent = dma_fixed_alloc_coherent,
 	.free_coherent  = dma_fixed_free_coherent,
 	.map_sg         = dma_fixed_map_sg,
@@ -657,13 +657,15 @@ static void cell_dma_dev_setup_fixed(struct device *dev);
 
 static void cell_dma_dev_setup(struct device *dev)
 {
+	struct dev_archdata *archdata = &dev->archdata;
+
 	/* Order is important here, these are not mutually exclusive */
 	if (get_dma_ops(dev) == &dma_iommu_fixed_ops)
 		cell_dma_dev_setup_fixed(dev);
 	else if (get_pci_dma_ops() == &dma_iommu_ops)
-		set_iommu_table_base(dev, cell_get_iommu_table(dev));
+		archdata->dma_data = cell_get_iommu_table(dev);
 	else if (get_pci_dma_ops() == &dma_direct_ops)
-		set_dma_offset(dev, cell_dma_direct_offset);
+		archdata->dma_data = (void *)cell_dma_direct_offset;
 	else
 		BUG();
 }
@@ -971,10 +973,11 @@ static int dma_set_mask_and_switch(struct device *dev, u64 dma_mask)
 
 static void cell_dma_dev_setup_fixed(struct device *dev)
 {
+	struct dev_archdata *archdata = &dev->archdata;
 	u64 addr;
 
 	addr = cell_iommu_get_fixed_address(dev) + dma_iommu_fixed_base;
-	set_dma_offset(dev, addr);
+	archdata->dma_data = (void *)addr;
 
 	dev_dbg(dev, "iommu: fixed addr = %llx\n", addr);
 }

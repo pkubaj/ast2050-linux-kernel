@@ -1,4 +1,4 @@
-/* cache.S: cache management routines
+/* cache.S: cache managment routines
  *
  * Copyright (C) 2004 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)

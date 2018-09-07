@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-sa1100/include/mach/hardware.h
  *
- * Copyright (C) 1998 Nicolas Pitre <nico@fluxnic.net>
+ * Copyright (C) 1998 Nicolas Pitre <nico@cam.org>
  *
  * This file contains the hardware definitions for SA1100 architecture
  *

@@ -85,7 +85,6 @@ earlier 3Com products.
 #include <linux/ioport.h>
 #include <linux/ethtool.h>
 #include <linux/bitops.h>
-#include <linux/mii.h>
 
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
@@ -240,8 +239,7 @@ static void tc574_wait_for_completion(struct net_device *dev, int cmd);
 static void tc574_reset(struct net_device *dev);
 static void media_check(unsigned long arg);
 static int el3_open(struct net_device *dev);
-static netdev_tx_t el3_start_xmit(struct sk_buff *skb,
-					struct net_device *dev);
+static int el3_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t el3_interrupt(int irq, void *dev_id);
 static void update_stats(struct net_device *dev);
 static struct net_device_stats *el3_get_stats(struct net_device *dev);
@@ -251,7 +249,6 @@ static void el3_tx_timeout(struct net_device *dev);
 static int el3_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 static const struct ethtool_ops netdev_ethtool_ops;
 static void set_rx_mode(struct net_device *dev);
-static void set_multicast_list(struct net_device *dev);
 
 static void tc574_detach(struct pcmcia_device *p_dev);
 
@@ -267,7 +264,7 @@ static const struct net_device_ops el3_netdev_ops = {
 	.ndo_tx_timeout 	= el3_tx_timeout,
 	.ndo_get_stats		= el3_get_stats,
 	.ndo_do_ioctl		= el3_ioctl,
-	.ndo_set_multicast_list = set_multicast_list,
+	.ndo_set_multicast_list = set_rx_mode,
 	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -781,8 +778,7 @@ static void pop_tx_status(struct net_device *dev)
 	}
 }
 
-static netdev_tx_t el3_start_xmit(struct sk_buff *skb,
-					struct net_device *dev)
+static int el3_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	unsigned int ioaddr = dev->base_addr;
 	struct el3_private *lp = netdev_priv(dev);
@@ -810,7 +806,7 @@ static netdev_tx_t el3_start_xmit(struct sk_buff *skb,
 	pop_tx_status(dev);
 	spin_unlock_irqrestore(&lp->window_lock, flags);
 	dev_kfree_skb(skb);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* The EL3 interrupt handler. */
@@ -1098,16 +1094,16 @@ static int el3_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct el3_private *lp = netdev_priv(dev);
 	unsigned int ioaddr = dev->base_addr;
-	struct mii_ioctl_data *data = if_mii(rq);
+	u16 *data = (u16 *)&rq->ifr_ifru;
 	int phy = lp->phys & 0x1f;
 
 	DEBUG(2, "%s: In ioct(%-.6s, %#4.4x) %4.4x %4.4x %4.4x %4.4x.\n",
 		  dev->name, rq->ifr_ifrn.ifrn_name, cmd,
-		  data->phy_id, data->reg_num, data->val_in, data->val_out);
+		  data[0], data[1], data[2], data[3]);
 
 	switch(cmd) {
 	case SIOCGMIIPHY:		/* Get the address of the PHY in use. */
-		data->phy_id = phy;
+		data[0] = phy;
 	case SIOCGMIIREG:		/* Read the specified MII register. */
 		{
 			int saved_window;
@@ -1116,8 +1112,7 @@ static int el3_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			spin_lock_irqsave(&lp->window_lock, flags);
 			saved_window = inw(ioaddr + EL3_CMD) >> 13;
 			EL3WINDOW(4);
-			data->val_out = mdio_read(ioaddr, data->phy_id & 0x1f,
-						  data->reg_num & 0x1f);
+			data[3] = mdio_read(ioaddr, data[0] & 0x1f, data[1] & 0x1f);
 			EL3WINDOW(saved_window);
 			spin_unlock_irqrestore(&lp->window_lock, flags);
 			return 0;
@@ -1127,11 +1122,12 @@ static int el3_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			int saved_window;
                        unsigned long flags;
 
+			if (!capable(CAP_NET_ADMIN))
+				return -EPERM;
 			spin_lock_irqsave(&lp->window_lock, flags);
 			saved_window = inw(ioaddr + EL3_CMD) >> 13;
 			EL3WINDOW(4);
-			mdio_write(ioaddr, data->phy_id & 0x1f,
-				   data->reg_num & 0x1f, data->val_in);
+			mdio_write(ioaddr, data[0] & 0x1f, data[1] & 0x1f, data[2]);
 			EL3WINDOW(saved_window);
 			spin_unlock_irqrestore(&lp->window_lock, flags);
 			return 0;
@@ -1160,16 +1156,6 @@ static void set_rx_mode(struct net_device *dev)
 		outw(SetRxFilter|RxStation|RxMulticast|RxBroadcast, ioaddr + EL3_CMD);
 	else
 		outw(SetRxFilter | RxStation | RxBroadcast, ioaddr + EL3_CMD);
-}
-
-static void set_multicast_list(struct net_device *dev)
-{
-	struct el3_private *lp = netdev_priv(dev);
-	unsigned long flags;
-
-	spin_lock_irqsave(&lp->window_lock, flags);
-	set_rx_mode(dev);
-	spin_unlock_irqrestore(&lp->window_lock, flags);
 }
 
 static int el3_close(struct net_device *dev)

@@ -289,7 +289,7 @@ static void	TLan_EisaProbe( void );
 static void	TLan_Eisa_Cleanup( void );
 static int      TLan_Init( struct net_device * );
 static int	TLan_Open( struct net_device *dev );
-static netdev_tx_t TLan_StartTx( struct sk_buff *, struct net_device *);
+static int	TLan_StartTx( struct sk_buff *, struct net_device *);
 static irqreturn_t TLan_HandleInterrupt( int, void *);
 static int	TLan_Close( struct net_device *);
 static struct	net_device_stats *TLan_GetStats( struct net_device *);
@@ -1004,6 +1004,8 @@ static int TLan_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 
 	case SIOCSMIIREG:		/* Write MII PHY register. */
+			if (!capable(CAP_NET_ADMIN))
+				return -EPERM;
 			TLan_MiiWriteReg(dev, data->phy_id & 0x1f,
 					 data->reg_num & 0x1f, data->val_in);
 			return 0;
@@ -1081,7 +1083,7 @@ static void TLan_tx_timeout_work(struct work_struct *work)
 	 *
 	 **************************************************************/
 
-static netdev_tx_t TLan_StartTx( struct sk_buff *skb, struct net_device *dev )
+static int TLan_StartTx( struct sk_buff *skb, struct net_device *dev )
 {
 	TLanPrivateInfo *priv = netdev_priv(dev);
 	dma_addr_t	tail_list_phys;
@@ -1093,11 +1095,11 @@ static netdev_tx_t TLan_StartTx( struct sk_buff *skb, struct net_device *dev )
 		TLAN_DBG( TLAN_DEBUG_TX, "TRANSMIT:  %s PHY is not ready\n",
 			  dev->name );
 		dev_kfree_skb_any(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	if (skb_padto(skb, TLAN_MIN_FRAME_SIZE))
-		return NETDEV_TX_OK;
+		return 0;
 	txlen = max(skb->len, (unsigned int)TLAN_MIN_FRAME_SIZE);
 
 	tail_list = priv->txList + priv->txTail;
@@ -1148,7 +1150,7 @@ static netdev_tx_t TLan_StartTx( struct sk_buff *skb, struct net_device *dev )
 	CIRC_INC( priv->txTail, TLAN_NUM_TX_LISTS );
 
 	dev->trans_start = jiffies;
-	return NETDEV_TX_OK;
+	return 0;
 
 } /* TLan_StartTx */
 

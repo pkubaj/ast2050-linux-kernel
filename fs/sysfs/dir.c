@@ -21,7 +21,6 @@
 #include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#include <linux/security.h>
 #include "sysfs.h"
 
 DEFINE_MUTEX(sysfs_mutex);
@@ -286,9 +285,6 @@ void release_sysfs_dirent(struct sysfs_dirent * sd)
 		sysfs_put(sd->s_symlink.target_sd);
 	if (sysfs_type(sd) & SYSFS_COPY_NAME)
 		kfree(sd->s_name);
-	if (sd->s_iattr && sd->s_iattr->ia_secdata)
-		security_release_secctx(sd->s_iattr->ia_secdata,
-					sd->s_iattr->ia_secdata_len);
 	kfree(sd->s_iattr);
 	sysfs_free_ino(sd->s_ino);
 	kmem_cache_free(sysfs_dir_cachep, sd);
@@ -440,18 +436,20 @@ int __sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
 /**
  *	sysfs_pathname - return full path to sysfs dirent
  *	@sd: sysfs_dirent whose path we want
- *	@path: caller allocated buffer of size PATH_MAX
+ *	@path: caller allocated buffer
  *
  *	Gives the name "/" to the sysfs_root entry; any path returned
  *	is relative to wherever sysfs is mounted.
+ *
+ *	XXX: does no error checking on @path size
  */
 static char *sysfs_pathname(struct sysfs_dirent *sd, char *path)
 {
 	if (sd->s_parent) {
 		sysfs_pathname(sd->s_parent, path);
-		strlcat(path, "/", PATH_MAX);
+		strcat(path, "/");
 	}
-	strlcat(path, sd->s_name, PATH_MAX);
+	strcat(path, sd->s_name);
 	return path;
 }
 
@@ -484,11 +482,9 @@ int sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
 		char *path = kzalloc(PATH_MAX, GFP_KERNEL);
 		WARN(1, KERN_WARNING
 		     "sysfs: cannot create duplicate filename '%s'\n",
-		     (path == NULL) ? sd->s_name
-				    : (sysfs_pathname(acxt->parent_sd, path),
-				       strlcat(path, "/", PATH_MAX),
-				       strlcat(path, sd->s_name, PATH_MAX),
-				       path));
+		     (path == NULL) ? sd->s_name :
+		     strcat(strcat(sysfs_pathname(acxt->parent_sd, path), "/"),
+		            sd->s_name));
 		kfree(path);
 	}
 
@@ -764,7 +760,6 @@ static struct dentry * sysfs_lookup(struct inode *dir, struct dentry *dentry,
 const struct inode_operations sysfs_dir_inode_operations = {
 	.lookup		= sysfs_lookup,
 	.setattr	= sysfs_setattr,
-	.setxattr	= sysfs_setxattr,
 };
 
 static void remove_dir(struct sysfs_dirent *sd)
@@ -898,8 +893,7 @@ int sysfs_move_dir(struct kobject *kobj, struct kobject *new_parent_kobj)
 
 	mutex_lock(&sysfs_rename_mutex);
 	BUG_ON(!sd->s_parent);
-	new_parent_sd = (new_parent_kobj && new_parent_kobj->sd) ?
-		new_parent_kobj->sd : &sysfs_root;
+	new_parent_sd = new_parent_kobj->sd ? new_parent_kobj->sd : &sysfs_root;
 
 	error = 0;
 	if (sd->s_parent == new_parent_sd)

@@ -29,23 +29,6 @@
 static struct mxc_gpio_port *mxc_gpio_ports;
 static int gpio_table_size;
 
-#define cpu_is_mx1_mx2()	(cpu_is_mx1() || cpu_is_mx2())
-
-#define GPIO_DR		(cpu_is_mx1_mx2() ? 0x1c : 0x00)
-#define GPIO_GDIR	(cpu_is_mx1_mx2() ? 0x00 : 0x04)
-#define GPIO_PSR	(cpu_is_mx1_mx2() ? 0x24 : 0x08)
-#define GPIO_ICR1	(cpu_is_mx1_mx2() ? 0x28 : 0x0C)
-#define GPIO_ICR2	(cpu_is_mx1_mx2() ? 0x2C : 0x10)
-#define GPIO_IMR	(cpu_is_mx1_mx2() ? 0x30 : 0x14)
-#define GPIO_ISR	(cpu_is_mx1_mx2() ? 0x34 : 0x18)
-#define GPIO_ISR	(cpu_is_mx1_mx2() ? 0x34 : 0x18)
-
-#define GPIO_INT_LOW_LEV	(cpu_is_mx1_mx2() ? 0x3 : 0x0)
-#define GPIO_INT_HIGH_LEV	(cpu_is_mx1_mx2() ? 0x2 : 0x1)
-#define GPIO_INT_RISE_EDGE	(cpu_is_mx1_mx2() ? 0x0 : 0x2)
-#define GPIO_INT_FALL_EDGE	(cpu_is_mx1_mx2() ? 0x1 : 0x3)
-#define GPIO_INT_NONE		0x4
-
 /* Note: This driver assumes 32 GPIOs are handled in one register */
 
 static void _clear_gpio_irqstatus(struct mxc_gpio_port *port, u32 index)
@@ -179,6 +162,7 @@ static void mxc_gpio_irq_handler(struct mxc_gpio_port *port, u32 irq_stat)
 	}
 }
 
+#if defined(CONFIG_ARCH_MX3) || defined(CONFIG_ARCH_MX1)
 /* MX1 and MX3 has one interrupt *per* gpio port */
 static void mx3_gpio_irq_handler(u32 irq, struct irq_desc *desc)
 {
@@ -190,7 +174,9 @@ static void mx3_gpio_irq_handler(u32 irq, struct irq_desc *desc)
 
 	mxc_gpio_irq_handler(port, irq_stat);
 }
+#endif
 
+#ifdef CONFIG_ARCH_MX2
 /* MX2 has one interrupt *for all* gpio ports */
 static void mx2_gpio_irq_handler(u32 irq, struct irq_desc *desc)
 {
@@ -209,6 +195,7 @@ static void mx2_gpio_irq_handler(u32 irq, struct irq_desc *desc)
 			mxc_gpio_irq_handler(&port[i], irq_stat);
 	}
 }
+#endif
 
 static struct irq_chip gpio_irq_chip = {
 	.ack = gpio_ack_irq,
@@ -223,16 +210,13 @@ static void _set_gpio_direction(struct gpio_chip *chip, unsigned offset,
 	struct mxc_gpio_port *port =
 		container_of(chip, struct mxc_gpio_port, chip);
 	u32 l;
-	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
 	l = __raw_readl(port->base + GPIO_GDIR);
 	if (dir)
 		l |= 1 << offset;
 	else
 		l &= ~(1 << offset);
 	__raw_writel(l, port->base + GPIO_GDIR);
-	spin_unlock_irqrestore(&port->lock, flags);
 }
 
 static void mxc_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
@@ -241,12 +225,9 @@ static void mxc_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 		container_of(chip, struct mxc_gpio_port, chip);
 	void __iomem *reg = port->base + GPIO_DR;
 	u32 l;
-	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
 	l = (__raw_readl(reg) & (~(1 << offset))) | (value << offset);
 	__raw_writel(l, reg);
-	spin_unlock_irqrestore(&port->lock, flags);
 }
 
 static int mxc_gpio_get(struct gpio_chip *chip, unsigned offset)
@@ -300,23 +281,20 @@ int __init mxc_gpio_init(struct mxc_gpio_port *port, int cnt)
 		port[i].chip.base = i * 32;
 		port[i].chip.ngpio = 32;
 
-		spin_lock_init(&port[i].lock);
-
 		/* its a serious configuration bug when it fails */
 		BUG_ON( gpiochip_add(&port[i].chip) < 0 );
 
-		if (cpu_is_mx1() || cpu_is_mx3() || cpu_is_mx25()) {
-			/* setup one handler for each entry */
-			set_irq_chained_handler(port[i].irq, mx3_gpio_irq_handler);
-			set_irq_data(port[i].irq, &port[i]);
-		}
+#if defined(CONFIG_ARCH_MX3) || defined(CONFIG_ARCH_MX1)
+		/* setup one handler for each entry */
+		set_irq_chained_handler(port[i].irq, mx3_gpio_irq_handler);
+		set_irq_data(port[i].irq, &port[i]);
+#endif
 	}
 
-	if (cpu_is_mx2()) {
-		/* setup one handler for all GPIO interrupts */
-		set_irq_chained_handler(port[0].irq, mx2_gpio_irq_handler);
-		set_irq_data(port[0].irq, port);
-	}
-
+#ifdef CONFIG_ARCH_MX2
+	/* setup one handler for all GPIO interrupts */
+	set_irq_chained_handler(port[0].irq, mx2_gpio_irq_handler);
+	set_irq_data(port[0].irq, port);
+#endif
 	return 0;
 }

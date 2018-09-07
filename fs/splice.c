@@ -30,7 +30,6 @@
 #include <linux/syscalls.h>
 #include <linux/uio.h>
 #include <linux/security.h>
-#include <linux/socket.h>
 
 /*
  * Attempt to steal a page from a pipe buffer. This should perhaps go into
@@ -366,7 +365,17 @@ __generic_file_splice_read(struct file *in, loff_t *ppos,
 		 * If the page isn't uptodate, we may need to start io on it
 		 */
 		if (!PageUptodate(page)) {
-			lock_page(page);
+			/*
+			 * If in nonblock mode then dont block on waiting
+			 * for an in-flight io page
+			 */
+			if (flags & SPLICE_F_NONBLOCK) {
+				if (!trylock_page(page)) {
+					error = -EAGAIN;
+					break;
+				}
+			} else
+				lock_page(page);
 
 			/*
 			 * Page was truncated, or invalidated by the
@@ -493,10 +502,8 @@ ssize_t generic_file_splice_read(struct file *in, loff_t *ppos,
 		len = left;
 
 	ret = __generic_file_splice_read(in, ppos, pipe, len, flags);
-	if (ret > 0) {
+	if (ret > 0)
 		*ppos += ret;
-		file_accessed(in);
-	}
 
 	return ret;
 }
@@ -638,16 +645,10 @@ static int pipe_to_sendpage(struct pipe_inode_info *pipe,
 
 	ret = buf->ops->confirm(pipe, buf);
 	if (!ret) {
-		more = (sd->flags & SPLICE_F_MORE) ? MSG_MORE : 0;
+		more = (sd->flags & SPLICE_F_MORE) || sd->len < sd->total_len;
 
-		if (sd->len < sd->total_len && pipe->nrbufs > 1)
-			more |= MSG_SENDPAGE_NOTLAST;
-
-		if (file->f_op && file->f_op->sendpage)
-			ret = file->f_op->sendpage(file, buf->page, buf->offset,
-						   sd->len, &pos, more);
-		else
-			ret = -EINVAL;
+		ret = file->f_op->sendpage(file, buf->page, buf->offset,
+					   sd->len, &pos, more);
 	}
 
 	return ret;
@@ -882,7 +883,6 @@ ssize_t __splice_from_pipe(struct pipe_inode_info *pipe, struct splice_desc *sd,
 
 	splice_from_pipe_begin(sd);
 	do {
-		cond_resched();
 		ret = splice_from_pipe_next(pipe, sd);
 		if (ret > 0)
 			ret = splice_from_pipe_feed(pipe, sd, actor);
@@ -946,16 +946,12 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 	struct address_space *mapping = out->f_mapping;
 	struct inode *inode = mapping->host;
 	struct splice_desc sd = {
+		.total_len = len,
 		.flags = flags,
+		.pos = *ppos,
 		.u.file = out,
 	};
 	ssize_t ret;
-
-	ret = generic_write_checks(out, ppos, &len, S_ISBLK(inode->i_mode));
-	if (ret)
-		return ret;
-	sd.total_len = len;
-	sd.pos = *ppos;
 
 	pipe_lock(pipe);
 
@@ -967,10 +963,8 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 		mutex_lock_nested(&inode->i_mutex, I_MUTEX_CHILD);
 		ret = file_remove_suid(out);
-		if (!ret) {
-			file_update_time(out);
+		if (!ret)
 			ret = splice_from_pipe_feed(pipe, &sd, pipe_to_file);
-		}
 		mutex_unlock(&inode->i_mutex);
 	} while (ret > 0);
 	splice_from_pipe_end(pipe, &sd);
@@ -982,15 +976,25 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 	if (ret > 0) {
 		unsigned long nr_pages;
-		int err;
 
+		*ppos += ret;
 		nr_pages = (ret + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
 
-		err = generic_write_sync(out, *ppos, ret);
-		if (err)
-			ret = err;
-		else
-			*ppos += ret;
+		/*
+		 * If file or inode is SYNC and we actually wrote some data,
+		 * sync it.
+		 */
+		if (unlikely((out->f_flags & O_SYNC) || IS_SYNC(inode))) {
+			int err;
+
+			mutex_lock(&inode->i_mutex);
+			err = generic_osync_inode(inode, mapping,
+						  OSYNC_METADATA|OSYNC_DATA);
+			mutex_unlock(&inode->i_mutex);
+
+			if (err)
+				ret = err;
+		}
 		balance_dirty_pages_ratelimited_nr(mapping, nr_pages);
 	}
 
@@ -1070,9 +1074,8 @@ long vfs_splice_from(struct pipe_inode_info *pipe, struct file *out,
 	if (unlikely(ret < 0))
 		return ret;
 
-	if (out->f_op && out->f_op->splice_write)
-		splice_write = out->f_op->splice_write;
-	else
+	splice_write = out->f_op->splice_write;
+	if (!splice_write)
 		splice_write = default_file_splice_write;
 
 	return splice_write(pipe, out, ppos, len, flags);
@@ -1097,9 +1100,8 @@ long vfs_splice_to(struct file *in, loff_t *ppos,
 	if (unlikely(ret < 0))
 		return ret;
 
-	if (in->f_op && in->f_op->splice_read)
-		splice_read = in->f_op->splice_read;
-	else
+	splice_read = in->f_op->splice_read;
+	if (!splice_read)
 		splice_read = default_file_splice_read;
 
 	return splice_read(in, ppos, pipe, len, flags);
@@ -1126,7 +1128,7 @@ ssize_t splice_direct_to_actor(struct file *in, struct splice_desc *sd,
 	long ret, bytes;
 	umode_t i_mode;
 	size_t len;
-	int i, flags, more;
+	int i, flags;
 
 	/*
 	 * We require the input being a regular file, as we don't want to
@@ -1169,7 +1171,6 @@ ssize_t splice_direct_to_actor(struct file *in, struct splice_desc *sd,
 	 * Don't block on output, we have to drain the direct pipe.
 	 */
 	sd->flags &= ~SPLICE_F_NONBLOCK;
-	more = sd->flags & SPLICE_F_MORE;
 
 	while (len) {
 		size_t read_len;
@@ -1182,15 +1183,6 @@ ssize_t splice_direct_to_actor(struct file *in, struct splice_desc *sd,
 		read_len = ret;
 		sd->total_len = read_len;
 
-		/*
-		 * If more data is pending, set SPLICE_F_MORE
-		 * If this is the last data and SPLICE_F_MORE was not set
-		 * initially, clears it.
-		 */
-		if (read_len < len)
-			sd->flags |= SPLICE_F_MORE;
-		else if (!more)
-			sd->flags &= ~SPLICE_F_MORE;
 		/*
 		 * NOTE: nonblocking mode only applies to the input. We
 		 * must not do the output in nonblocking mode as then we
@@ -1243,8 +1235,7 @@ static int direct_splice_actor(struct pipe_inode_info *pipe,
 {
 	struct file *file = sd->u.file;
 
-	return vfs_splice_from(pipe, file, &file->f_pos, sd->total_len,
-			      sd->flags);
+	return vfs_splice_from(pipe, file, &sd->pos, sd->total_len, sd->flags);
 }
 
 /**
@@ -1333,8 +1324,7 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		if (off_in)
 			return -ESPIPE;
 		if (off_out) {
-			if (!out->f_op || !out->f_op->llseek ||
-			    out->f_op->llseek == no_llseek)
+			if (out->f_op->llseek == no_llseek)
 				return -EINVAL;
 			if (copy_from_user(&offset, off_out, sizeof(loff_t)))
 				return -EFAULT;
@@ -1354,8 +1344,7 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		if (off_out)
 			return -ESPIPE;
 		if (off_in) {
-			if (!in->f_op || !in->f_op->llseek ||
-			    in->f_op->llseek == no_llseek)
+			if (in->f_op->llseek == no_llseek)
 				return -EINVAL;
 			if (copy_from_user(&offset, off_in, sizeof(loff_t)))
 				return -EFAULT;

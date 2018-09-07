@@ -72,6 +72,7 @@
 #include <asm/irq.h>
 #include <asm/gpio.h>
 
+#include <asm/mach/mmc.h>
 #include <mach/board.h>
 #include <mach/cpu.h>
 #include <mach/at91_mci.h>

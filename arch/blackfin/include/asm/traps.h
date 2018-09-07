@@ -1,10 +1,13 @@
 /*
- *  Copyright 2004-2009 Analog Devices Inc.
- *                 2001 Lineo, Inc
- *                        Tony Kou
- *                 1993 Hamish Macdonald
+ *  linux/include/asm/traps.h
  *
- * Licensed under the GPL-2
+ *  Copyright (C) 1993        Hamish Macdonald
+ *
+ *  Lineo, Inc    Jul 2001    Tony Kou
+ *
+ * This file is subject to the terms and conditions of the GNU General Public
+ * License.  See the file COPYING in the main directory of this archive
+ * for more details.
  */
 
 #ifndef _BFIN_TRAPS_H

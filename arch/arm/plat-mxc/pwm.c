@@ -31,11 +31,7 @@
 #define MX3_PWMSAR                0x0C    /* PWM Sample Register */
 #define MX3_PWMPR                 0x10    /* PWM Period Register */
 #define MX3_PWMCR_PRESCALER(x)    (((x - 1) & 0xFFF) << 4)
-#define MX3_PWMCR_DOZEEN                (1 << 24)
-#define MX3_PWMCR_WAITEN                (1 << 23)
-#define MX3_PWMCR_DBGEN			(1 << 22)
 #define MX3_PWMCR_CLKSRC_IPG_HIGH (2 << 16)
-#define MX3_PWMCR_CLKSRC_IPG      (1 << 16)
 #define MX3_PWMCR_EN              (1 << 0)
 
 
@@ -59,11 +55,9 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
 	if (pwm == NULL || period_ns == 0 || duty_ns > period_ns)
 		return -EINVAL;
 
-	if (cpu_is_mx27() || cpu_is_mx3() || cpu_is_mx25()) {
+	if (cpu_is_mx27() || cpu_is_mx3()) {
 		unsigned long long c;
 		unsigned long period_cycles, duty_cycles, prescale;
-		u32 cr;
-
 		c = clk_get_rate(pwm->clk);
 		c = c * period_ns;
 		do_div(c, 1000000000);
@@ -76,28 +70,11 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
 		do_div(c, period_ns);
 		duty_cycles = c;
 
-		/*
-		 * according to imx pwm RM, the real period value should be
-		 * PERIOD value in PWMPR plus 2.
-		 */
-		if (period_cycles > 2)
-			period_cycles -= 2;
-		else
-			period_cycles = 0;
-
 		writel(duty_cycles, pwm->mmio_base + MX3_PWMSAR);
 		writel(period_cycles, pwm->mmio_base + MX3_PWMPR);
-
-		cr = MX3_PWMCR_PRESCALER(prescale) |
-			MX3_PWMCR_DOZEEN | MX3_PWMCR_WAITEN |
-			MX3_PWMCR_DBGEN | MX3_PWMCR_EN;
-
-		if (cpu_is_mx25())
-			cr |= MX3_PWMCR_CLKSRC_IPG;
-		else
-			cr |= MX3_PWMCR_CLKSRC_IPG_HIGH;
-
-		writel(cr, pwm->mmio_base + MX3_PWMCR);
+		writel(MX3_PWMCR_PRESCALER(prescale - 1) |
+			MX3_PWMCR_CLKSRC_IPG_HIGH | MX3_PWMCR_EN,
+			pwm->mmio_base + MX3_PWMCR);
 	} else if (cpu_is_mx1() || cpu_is_mx21()) {
 		/* The PWM subsystem allows for exact frequencies. However,
 		 * I cannot connect a scope on my device to the PWM line and
@@ -141,8 +118,6 @@ EXPORT_SYMBOL(pwm_enable);
 
 void pwm_disable(struct pwm_device *pwm)
 {
-	writel(0, pwm->mmio_base + MX3_PWMCR);
-
 	if (pwm->clk_enabled) {
 		clk_disable(pwm->clk);
 		pwm->clk_enabled = 0;

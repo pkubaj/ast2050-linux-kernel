@@ -13,8 +13,6 @@
 #include <asm/lppaca.h>
 #include <asm/paca.h>
 #include <asm/sections.h>
-#include <asm/pgtable.h>
-#include <asm/kexec.h>
 
 /* This symbol is provided by the linker - let it fill in the paca
  * field correctly */
@@ -89,8 +87,6 @@ void __init initialise_pacas(void)
 
 #ifdef CONFIG_PPC_BOOK3S
 		new_paca->lppaca_ptr = &lppaca[cpu];
-#else
-		new_paca->kernel_pgd = swapper_pg_dir;
 #endif
 		new_paca->lock_token = 0x8000;
 		new_paca->paca_index = cpu;
@@ -98,7 +94,6 @@ void __init initialise_pacas(void)
 		new_paca->kernelbase = (unsigned long) _stext;
 		new_paca->kernel_msr = MSR_KERNEL;
 		new_paca->hw_cpu_id = 0xffff;
-		new_paca->kexec_state = KEXEC_STATE_NONE;
 		new_paca->__current = &init_task;
 #ifdef CONFIG_PPC_STD_MMU_64
 		new_paca->slb_shadow_ptr = &slb_shadow[cpu];

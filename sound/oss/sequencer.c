@@ -241,7 +241,7 @@ int sequencer_write(int dev, struct file *file, const char __user *buf, int coun
 				return -ENXIO;
 
 			fmt = (*(short *) &event_rec[0]) & 0xffff;
-			err = synth_devs[dev]->load_patch(dev, fmt, buf + p, c, 0);
+			err = synth_devs[dev]->load_patch(dev, fmt, buf, p + 4, c, 0);
 			if (err < 0)
 				return err;
 
@@ -677,8 +677,13 @@ static int seq_timing_event(unsigned char *event_rec)
 			break;
 
 		case TMR_ECHO:
-			parm = (parm << 8 | SEQ_ECHO);
-			seq_copy_to_input((unsigned char *) &parm, 4);
+			if (seq_mode == SEQ_2)
+				seq_copy_to_input(event_rec, 8);
+			else
+			{
+				parm = (parm << 8 | SEQ_ECHO);
+				seq_copy_to_input((unsigned char *) &parm, 4);
+			}
 			break;
 
 		default:;
@@ -1321,6 +1326,7 @@ int sequencer_ioctl(int dev, struct file *file, unsigned int cmd, void __user *a
 	int mode = translate_mode(file);
 	struct synth_info inf;
 	struct seq_event_rec event_rec;
+	unsigned long flags;
 	int __user *p = arg;
 
 	orig_dev = dev = dev >> 4;
@@ -1475,7 +1481,9 @@ int sequencer_ioctl(int dev, struct file *file, unsigned int cmd, void __user *a
 		case SNDCTL_SEQ_OUTOFBAND:
 			if (copy_from_user(&event_rec, arg, sizeof(event_rec)))
 				return -EFAULT;
+			spin_lock_irqsave(&lock,flags);
 			play_event(event_rec.arr);
+			spin_unlock_irqrestore(&lock,flags);
 			return 0;
 
 		case SNDCTL_MIDI_INFO:

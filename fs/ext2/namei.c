@@ -70,7 +70,7 @@ static struct dentry *ext2_lookup(struct inode * dir, struct dentry *dentry, str
 			if (PTR_ERR(inode) == -ESTALE) {
 				ext2_error(dir->i_sb, __func__,
 						"deleted inode referenced: %lu",
-						(unsigned long) ino);
+						ino);
 				return ERR_PTR(-EIO);
 			} else {
 				return ERR_CAST(inode);
@@ -327,6 +327,7 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 		new_de = ext2_find_entry (new_dir, &new_dentry->d_name, &new_page);
 		if (!new_de)
 			goto out_dir;
+		inode_inc_link_count(old_inode);
 		ext2_set_link(new_dir, new_de, new_page, old_inode, 1);
 		new_inode->i_ctime = CURRENT_TIME_SEC;
 		if (dir_de)
@@ -338,9 +339,12 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 			if (new_dir->i_nlink >= EXT2_LINK_MAX)
 				goto out_dir;
 		}
+		inode_inc_link_count(old_inode);
 		err = ext2_add_link(new_dentry, old_inode);
-		if (err)
+		if (err) {
+			inode_dec_link_count(old_inode);
 			goto out_dir;
+		}
 		if (dir_de)
 			inode_inc_link_count(new_dir);
 	}
@@ -348,11 +352,12 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 	/*
 	 * Like most other Unix systems, set the ctime for inodes on a
  	 * rename.
+	 * inode_dec_link_count() will mark the inode dirty.
 	 */
 	old_inode->i_ctime = CURRENT_TIME_SEC;
-	mark_inode_dirty(old_inode);
 
 	ext2_delete_entry (old_de, old_page);
+	inode_dec_link_count(old_inode);
 
 	if (dir_de) {
 		if (old_dir != new_dir)
@@ -395,7 +400,7 @@ const struct inode_operations ext2_dir_inode_operations = {
 	.removexattr	= generic_removexattr,
 #endif
 	.setattr	= ext2_setattr,
-	.check_acl	= ext2_check_acl,
+	.permission	= ext2_permission,
 };
 
 const struct inode_operations ext2_special_inode_operations = {
@@ -406,5 +411,5 @@ const struct inode_operations ext2_special_inode_operations = {
 	.removexattr	= generic_removexattr,
 #endif
 	.setattr	= ext2_setattr,
-	.check_acl	= ext2_check_acl,
+	.permission	= ext2_permission,
 };

@@ -191,6 +191,9 @@ static void usb_release_dev(struct device *dev)
 	hcd = bus_to_hcd(udev->bus);
 
 	usb_destroy_configuration(udev);
+	/* Root hubs aren't real devices, so don't free HCD resources */
+	if (hcd->driver->free_dev && udev->parent)
+		hcd->driver->free_dev(hcd, udev);
 	usb_put_hcd(hcd);
 	kfree(udev->product);
 	kfree(udev->manufacturer);
@@ -309,7 +312,7 @@ static struct dev_pm_ops usb_device_pm_ops = {
 #endif	/* CONFIG_PM */
 
 
-static char *usb_devnode(struct device *dev, mode_t *mode)
+static char *usb_nodename(struct device *dev)
 {
 	struct usb_device *usb_dev;
 
@@ -322,7 +325,7 @@ struct device_type usb_device_type = {
 	.name =		"usb_device",
 	.release =	usb_release_dev,
 	.uevent =	usb_dev_uevent,
-	.devnode = 	usb_devnode,
+	.nodename = 	usb_nodename,
 	.pm =		&usb_device_pm_ops,
 };
 
@@ -411,13 +414,8 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 		} else {
 			snprintf(dev->devpath, sizeof dev->devpath,
 				"%s.%d", parent->devpath, port1);
-			/* Route string assumes hubs have less than 16 ports */
-			if (port1 < 15)
-				dev->route = parent->route +
-					(port1 << ((parent->level - 1)*4));
-			else
-				dev->route = parent->route +
-					(15 << ((parent->level - 1)*4));
+			dev->route = parent->route +
+				(port1 << ((parent->level - 1)*4));
 		}
 
 		dev->dev.parent = &parent->dev;
@@ -917,11 +915,11 @@ int usb_buffer_map_sg(const struct usb_device *dev, int is_in,
 			|| !(bus = dev->bus)
 			|| !(controller = bus->controller)
 			|| !controller->dma_mask)
-		return -EINVAL;
+		return -1;
 
 	/* FIXME generic api broken like pci, can't report errors */
 	return dma_map_sg(controller, sg, nents,
-			is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE) ? : -ENOMEM;
+			is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
 }
 EXPORT_SYMBOL_GPL(usb_buffer_map_sg);
 

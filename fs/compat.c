@@ -100,6 +100,13 @@ asmlinkage long compat_sys_utimensat(unsigned int dfd, char __user *filename, st
 		    get_compat_timespec(&tv[1], &t[1]))
 			return -EFAULT;
 
+		if ((tv[0].tv_nsec == UTIME_OMIT || tv[0].tv_nsec == UTIME_NOW)
+		    && tv[0].tv_sec != 0)
+			return -EINVAL;
+		if ((tv[1].tv_nsec == UTIME_OMIT || tv[1].tv_nsec == UTIME_NOW)
+		    && tv[1].tv_sec != 0)
+			return -EINVAL;
+
 		if (tv[0].tv_nsec == UTIME_OMIT && tv[1].tv_nsec == UTIME_OMIT)
 			return 0;
 	}
@@ -768,13 +775,13 @@ asmlinkage long compat_sys_mount(char __user * dev_name, char __user * dir_name,
 				 char __user * type, unsigned long flags,
 				 void __user * data)
 {
-	char *kernel_type;
+	unsigned long type_page;
 	unsigned long data_page;
-	char *kernel_dev;
+	unsigned long dev_page;
 	char *dir_page;
 	int retval;
 
-	retval = copy_mount_string(type, &kernel_type);
+	retval = copy_mount_options (type, &type_page);
 	if (retval < 0)
 		goto out;
 
@@ -783,38 +790,38 @@ asmlinkage long compat_sys_mount(char __user * dev_name, char __user * dir_name,
 	if (IS_ERR(dir_page))
 		goto out1;
 
-	retval = copy_mount_string(dev_name, &kernel_dev);
+	retval = copy_mount_options (dev_name, &dev_page);
 	if (retval < 0)
 		goto out2;
 
-	retval = copy_mount_options(data, &data_page);
+	retval = copy_mount_options (data, &data_page);
 	if (retval < 0)
 		goto out3;
 
 	retval = -EINVAL;
 
-	if (kernel_type && data_page) {
-		if (!strcmp(kernel_type, SMBFS_NAME)) {
+	if (type_page && data_page) {
+		if (!strcmp((char *)type_page, SMBFS_NAME)) {
 			do_smb_super_data_conv((void *)data_page);
-		} else if (!strcmp(kernel_type, NCPFS_NAME)) {
+		} else if (!strcmp((char *)type_page, NCPFS_NAME)) {
 			do_ncp_super_data_conv((void *)data_page);
-		} else if (!strcmp(kernel_type, NFS4_NAME)) {
+		} else if (!strcmp((char *)type_page, NFS4_NAME)) {
 			if (do_nfs4_super_data_conv((void *) data_page))
 				goto out4;
 		}
 	}
 
-	retval = do_mount(kernel_dev, dir_page, kernel_type,
+	retval = do_mount((char*)dev_page, dir_page, (char*)type_page,
 			flags, (void*)data_page);
 
  out4:
 	free_page(data_page);
  out3:
-	kfree(kernel_dev);
+	free_page(dev_page);
  out2:
 	putname(dir_page);
  out1:
-	kfree(kernel_type);
+	free_page(type_page);
  out:
 	return retval;
 }
@@ -1208,14 +1215,11 @@ compat_sys_readv(unsigned long fd, const struct compat_iovec __user *vec,
 	struct file *file;
 	int fput_needed;
 	ssize_t ret;
-	loff_t pos;
 
 	file = fget_light(fd, &fput_needed);
 	if (!file)
 		return -EBADF;
-	pos = file->f_pos;
-	ret = compat_readv(file, vec, vlen, &pos);
-	file->f_pos = pos;
+	ret = compat_readv(file, vec, vlen, &file->f_pos);
 	fput_light(file, fput_needed);
 	return ret;
 }
@@ -1268,14 +1272,11 @@ compat_sys_writev(unsigned long fd, const struct compat_iovec __user *vec,
 	struct file *file;
 	int fput_needed;
 	ssize_t ret;
-	loff_t pos;
 
 	file = fget_light(fd, &fput_needed);
 	if (!file)
 		return -EBADF;
-	pos = file->f_pos;
-	ret = compat_writev(file, vec, vlen, &pos);
-	file->f_pos = pos;
+	ret = compat_writev(file, vec, vlen, &file->f_pos);
 	fput_light(file, fput_needed);
 	return ret;
 }
@@ -1359,10 +1360,6 @@ static int compat_count(compat_uptr_t __user *argv, int max)
 			argv++;
 			if (i++ >= max)
 				return -E2BIG;
-
-			if (fatal_signal_pending(current))
-				return -ERESTARTNOHAND;
-			cond_resched();
 		}
 	}
 	return i;
@@ -1404,12 +1401,6 @@ static int compat_copy_strings(int argc, compat_uptr_t __user *argv,
 		while (len > 0) {
 			int offset, bytes_to_copy;
 
-			if (fatal_signal_pending(current)) {
-				ret = -ERESTARTNOHAND;
-				goto out;
-			}
-			cond_resched();
-
 			offset = pos % PAGE_SIZE;
 			if (offset == 0)
 				offset = PAGE_SIZE;
@@ -1426,8 +1417,18 @@ static int compat_copy_strings(int argc, compat_uptr_t __user *argv,
 			if (!kmapped_page || kpos != (pos & PAGE_MASK)) {
 				struct page *page;
 
-				page = get_arg_page(bprm, pos, 1);
-				if (!page) {
+#ifdef CONFIG_STACK_GROWSUP
+				ret = expand_stack_downwards(bprm->vma, pos);
+				if (ret < 0) {
+					/* We've exceed the stack rlimit. */
+					ret = -E2BIG;
+					goto out;
+				}
+#endif
+				ret = get_user_pages(current, bprm->mm, pos,
+						     1, 1, 1, &page, NULL);
+				if (ret <= 0) {
+					/* We've exceed the stack rlimit. */
 					ret = -E2BIG;
 					goto out;
 				}
@@ -1548,10 +1549,8 @@ int compat_do_execve(char * filename,
 	return retval;
 
 out:
-	if (bprm->mm) {
-		acct_arg_size(bprm, 0);
+	if (bprm->mm)
 		mmput(bprm->mm);
-	}
 
 out_file:
 	if (bprm->file) {

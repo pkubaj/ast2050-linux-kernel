@@ -75,7 +75,7 @@ extern unsigned long mktime(const unsigned int year, const unsigned int mon,
 			    const unsigned int day, const unsigned int hour,
 			    const unsigned int min, const unsigned int sec);
 
-extern void set_normalized_timespec(struct timespec *ts, time_t sec, s64 nsec);
+extern void set_normalized_timespec(struct timespec *ts, time_t sec, long nsec);
 extern struct timespec timespec_add_safe(const struct timespec lhs,
 					 const struct timespec rhs);
 
@@ -91,43 +91,17 @@ static inline struct timespec timespec_sub(struct timespec lhs,
 	return ts_delta;
 }
 
-#define KTIME_MAX			((s64)~((u64)1 << 63))
-#if (BITS_PER_LONG == 64)
-# define KTIME_SEC_MAX			(KTIME_MAX / NSEC_PER_SEC)
-#else
-# define KTIME_SEC_MAX			LONG_MAX
-#endif
-
 /*
  * Returns true if the timespec is norm, false if denorm:
  */
-static inline bool timespec_valid(const struct timespec *ts)
-{
-	/* Dates before 1970 are bogus */
-	if (ts->tv_sec < 0)
-		return false;
-	/* Can't have more nanoseconds then a second */
-	if ((unsigned long)ts->tv_nsec >= NSEC_PER_SEC)
-		return false;
-	return true;
-}
-
-static inline bool timespec_valid_strict(const struct timespec *ts)
-{
-	if (!timespec_valid(ts))
-		return false;
-	/* Disallow values that could overflow ktime_t */
-	if ((unsigned long long)ts->tv_sec >= KTIME_SEC_MAX)
-		return false;
-	return true;
-}
+#define timespec_valid(ts) \
+	(((ts)->tv_sec >= 0) && (((unsigned long) (ts)->tv_nsec) < NSEC_PER_SEC))
 
 extern struct timespec xtime;
 extern struct timespec wall_to_monotonic;
 extern seqlock_t xtime_lock;
 
-extern void read_persistent_clock(struct timespec *ts);
-extern void read_boot_clock(struct timespec *ts);
+extern unsigned long read_persistent_clock(void);
 extern int update_persistent_clock(struct timespec now);
 extern int no_sync_cmos_clock __read_mostly;
 void timekeeping_init(void);
@@ -135,8 +109,6 @@ extern int timekeeping_suspended;
 
 unsigned long get_seconds(void);
 struct timespec current_kernel_time(void);
-struct timespec __current_kernel_time(void); /* does not hold xtime_lock */
-struct timespec get_monotonic_coarse(void);
 
 #define CURRENT_TIME		(current_kernel_time())
 #define CURRENT_TIME_SEC	((struct timespec) { get_seconds(), 0 })
@@ -173,41 +145,11 @@ extern void monotonic_to_bootbased(struct timespec *ts);
 
 extern struct timespec timespec_trunc(struct timespec t, unsigned gran);
 extern int timekeeping_valid_for_hres(void);
-extern u64 timekeeping_max_deferment(void);
 extern void update_wall_time(void);
 extern void update_xtime_cache(u64 nsec);
-extern void timekeeping_leap_insert(int leapsecond);
 
 struct tms;
 extern void do_sys_times(struct tms *);
-
-/*
- * Similar to the struct tm in userspace <time.h>, but it needs to be here so
- * that the kernel source is self contained.
- */
-struct tm {
-	/*
-	 * the number of seconds after the minute, normally in the range
-	 * 0 to 59, but can be up to 60 to allow for leap seconds
-	 */
-	int tm_sec;
-	/* the number of minutes after the hour, in the range 0 to 59*/
-	int tm_min;
-	/* the number of hours past midnight, in the range 0 to 23 */
-	int tm_hour;
-	/* the day of the month, in the range 1 to 31 */
-	int tm_mday;
-	/* the number of months since January, in the range 0 to 11 */
-	int tm_mon;
-	/* the number of years since 1900 */
-	long tm_year;
-	/* the number of days since Sunday, in the range 0 to 6 */
-	int tm_wday;
-	/* the number of days since January 1, in the range 0 to 365 */
-	int tm_yday;
-};
-
-void time_to_tm(time_t totalsecs, int offset, struct tm *result);
 
 /**
  * timespec_to_ns - Convert timespec to nanoseconds
@@ -299,8 +241,6 @@ struct itimerval {
 #define CLOCK_PROCESS_CPUTIME_ID	2
 #define CLOCK_THREAD_CPUTIME_ID		3
 #define CLOCK_MONOTONIC_RAW		4
-#define CLOCK_REALTIME_COARSE		5
-#define CLOCK_MONOTONIC_COARSE		6
 
 /*
  * The IDs of various hardware clocks:

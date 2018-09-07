@@ -17,7 +17,7 @@
  *
  * 2001 Sep 08:
  *	Completely revisited, many important fixes
- *	Nicolas Pitre <nico@fluxnic.net>
+ *	Nicolas Pitre <nico@cam.org>
  */
 
 #include <linux/linkage.h>
@@ -511,7 +511,7 @@ xscale_crval:
 	.type	xscale_processor_functions, #object
 ENTRY(xscale_processor_functions)
 	.word	v5t_early_abort
-	.word	legacy_pabort
+	.word	pabort_noifar
 	.word	cpu_xscale_proc_init
 	.word	cpu_xscale_proc_fin
 	.word	cpu_xscale_reset

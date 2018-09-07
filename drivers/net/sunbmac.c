@@ -984,7 +984,7 @@ static int bigmac_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev->trans_start = jiffies;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static struct net_device_stats *bigmac_get_stats(struct net_device *dev)

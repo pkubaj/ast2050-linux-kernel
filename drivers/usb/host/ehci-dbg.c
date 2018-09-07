@@ -134,11 +134,10 @@ dbg_qtd (const char *label, struct ehci_hcd *ehci, struct ehci_qtd *qtd)
 static void __maybe_unused
 dbg_qh (const char *label, struct ehci_hcd *ehci, struct ehci_qh *qh)
 {
-	struct ehci_qh_hw *hw = qh->hw;
-
 	ehci_dbg (ehci, "%s qh %p n%08x info %x %x qtd %x\n", label,
-		qh, hw->hw_next, hw->hw_info1, hw->hw_info2, hw->hw_current);
-	dbg_qtd("overlay", ehci, (struct ehci_qtd *) &hw->hw_qtd_next);
+		qh, qh->hw_next, qh->hw_info1, qh->hw_info2,
+		qh->hw_current);
+	dbg_qtd ("overlay", ehci, (struct ehci_qtd *) &qh->hw_qtd_next);
 }
 
 static void __maybe_unused
@@ -401,32 +400,31 @@ static void qh_lines (
 	char			*next = *nextp;
 	char			mark;
 	__le32			list_end = EHCI_LIST_END(ehci);
-	struct ehci_qh_hw	*hw = qh->hw;
 
-	if (hw->hw_qtd_next == list_end)	/* NEC does this */
+	if (qh->hw_qtd_next == list_end)	/* NEC does this */
 		mark = '@';
 	else
-		mark = token_mark(ehci, hw->hw_token);
+		mark = token_mark(ehci, qh->hw_token);
 	if (mark == '/') {	/* qh_alt_next controls qh advance? */
-		if ((hw->hw_alt_next & QTD_MASK(ehci))
-				== ehci->async->hw->hw_alt_next)
+		if ((qh->hw_alt_next & QTD_MASK(ehci))
+				== ehci->async->hw_alt_next)
 			mark = '#';	/* blocked */
-		else if (hw->hw_alt_next == list_end)
+		else if (qh->hw_alt_next == list_end)
 			mark = '.';	/* use hw_qtd_next */
 		/* else alt_next points to some other qtd */
 	}
-	scratch = hc32_to_cpup(ehci, &hw->hw_info1);
-	hw_curr = (mark == '*') ? hc32_to_cpup(ehci, &hw->hw_current) : 0;
+	scratch = hc32_to_cpup(ehci, &qh->hw_info1);
+	hw_curr = (mark == '*') ? hc32_to_cpup(ehci, &qh->hw_current) : 0;
 	temp = scnprintf (next, size,
 			"qh/%p dev%d %cs ep%d %08x %08x (%08x%c %s nak%d)",
 			qh, scratch & 0x007f,
 			speed_char (scratch),
 			(scratch >> 8) & 0x000f,
-			scratch, hc32_to_cpup(ehci, &hw->hw_info2),
-			hc32_to_cpup(ehci, &hw->hw_token), mark,
-			(cpu_to_hc32(ehci, QTD_TOGGLE) & hw->hw_token)
+			scratch, hc32_to_cpup(ehci, &qh->hw_info2),
+			hc32_to_cpup(ehci, &qh->hw_token), mark,
+			(cpu_to_hc32(ehci, QTD_TOGGLE) & qh->hw_token)
 				? "data1" : "data0",
-			(hc32_to_cpup(ehci, &hw->hw_alt_next) >> 1) & 0x0f);
+			(hc32_to_cpup(ehci, &qh->hw_alt_next) >> 1) & 0x0f);
 	size -= temp;
 	next += temp;
 
@@ -437,10 +435,10 @@ static void qh_lines (
 		mark = ' ';
 		if (hw_curr == td->qtd_dma)
 			mark = '*';
-		else if (hw->hw_qtd_next == cpu_to_hc32(ehci, td->qtd_dma))
+		else if (qh->hw_qtd_next == cpu_to_hc32(ehci, td->qtd_dma))
 			mark = '+';
 		else if (QTD_LENGTH (scratch)) {
-			if (td->hw_alt_next == ehci->async->hw->hw_alt_next)
+			if (td->hw_alt_next == ehci->async->hw_alt_next)
 				mark = '#';
 			else if (td->hw_alt_next != list_end)
 				mark = '/';
@@ -552,15 +550,12 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 		next += temp;
 
 		do {
-			struct ehci_qh_hw *hw;
-
 			switch (hc32_to_cpu(ehci, tag)) {
 			case Q_TYPE_QH:
-				hw = p.qh->hw;
 				temp = scnprintf (next, size, " qh%d-%04x/%p",
 						p.qh->period,
 						hc32_to_cpup(ehci,
-							&hw->hw_info2)
+								&p.qh->hw_info2)
 							/* uframe masks */
 							& (QH_CMASK | QH_SMASK),
 						p.qh);
@@ -581,7 +576,7 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 				/* show more info the first time around */
 				if (temp == seen_count) {
 					u32	scratch = hc32_to_cpup(ehci,
-							&hw->hw_info1);
+							&p.qh->hw_info1);
 					struct ehci_qtd	*qtd;
 					char		*type = "";
 
@@ -614,7 +609,7 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 				} else
 					temp = 0;
 				if (p.qh) {
-					tag = Q_NEXT_TYPE(ehci, hw->hw_next);
+					tag = Q_NEXT_TYPE(ehci, p.qh->hw_next);
 					p = p.qh->qh_next;
 				}
 				break;
@@ -884,7 +879,8 @@ static int debug_close(struct inode *inode, struct file *file)
 	struct debug_buffer *buf = file->private_data;
 
 	if (buf) {
-		vfree(buf->output_buf);
+		if (buf->output_buf)
+			vfree(buf->output_buf);
 		kfree(buf);
 	}
 

@@ -14,6 +14,7 @@
  */
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
 #include <linux/kdev_t.h>
 #include <linux/cdev.h>
 #include <linux/fs.h>
@@ -34,7 +35,7 @@ static int gio_open(struct inode *inode, struct file *filp)
 	int minor;
 	int ret = -ENOENT;
 
-	preempt_disable();
+	lock_kernel();
 	minor = MINOR(inode->i_rdev);
 	if (minor < DEVCOUNT) {
 		if (openCnt > 0) {
@@ -44,7 +45,7 @@ static int gio_open(struct inode *inode, struct file *filp)
 			ret = 0;
 		}
 	}
-	preempt_enable();
+	unlock_kernel();
 	return ret;
 }
 
@@ -59,7 +60,8 @@ static int gio_close(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static long gio_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+static int gio_ioctl(struct inode *inode, struct file *filp,
+			     unsigned int cmd, unsigned long arg)
 {
 	unsigned int data;
 	static unsigned int addr = 0;
@@ -127,7 +129,7 @@ static const struct file_operations gio_fops = {
 	.owner = THIS_MODULE,
 	.open = gio_open,	/* open */
 	.release = gio_close,	/* release */
-	.unlocked_ioctl = gio_ioctl,
+	.ioctl = gio_ioctl,	/* ioctl */
 };
 
 static int __init gio_init(void)

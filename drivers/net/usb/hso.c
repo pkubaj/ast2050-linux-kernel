@@ -378,7 +378,7 @@ static void dbg_dump(int line_count, const char *func_name, unsigned char *buf,
 }
 
 #define DUMP(buf_, len_)	\
-	dbg_dump(__LINE__, __func__, (unsigned char *)buf_, len_)
+	dbg_dump(__LINE__, __func__, buf_, len_)
 
 #define DUMP1(buf_, len_)			\
 	do {					\
@@ -771,8 +771,7 @@ static void write_bulk_callback(struct urb *urb)
 }
 
 /* called by kernel when we need to transmit a packet */
-static netdev_tx_t hso_net_start_xmit(struct sk_buff *skb,
-					    struct net_device *net)
+static int hso_net_start_xmit(struct sk_buff *skb, struct net_device *net)
 {
 	struct hso_net *odev = netdev_priv(net);
 	int result;
@@ -781,7 +780,7 @@ static netdev_tx_t hso_net_start_xmit(struct sk_buff *skb,
 	netif_stop_queue(net);
 	if (hso_get_activity(odev->parent) == -EAGAIN) {
 		odev->skb_tx_buf = skb;
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	/* log if asked */
@@ -829,7 +828,7 @@ static void hso_get_drvinfo(struct net_device *net, struct ethtool_drvinfo *info
 	usb_make_path(odev->parent->usb, info->bus_info, sizeof info->bus_info);
 }
 
-static const struct ethtool_ops ops = {
+static struct ethtool_ops ops = {
 	.get_drvinfo = hso_get_drvinfo,
 	.get_link = ethtool_op_get_link
 };
@@ -1529,7 +1528,7 @@ static void tiocmget_intr_callback(struct urb *urb)
 		dev_warn(&usb->dev,
 			 "hso received invalid serial state notification\n");
 		DUMP(serial_state_notification,
-		     sizeof(struct hso_serial_state_notification));
+		     sizeof(hso_serial_state_notifation))
 	} else {
 
 		UART_state_bitmap = le16_to_cpu(serial_state_notification->
@@ -1633,8 +1632,6 @@ static int hso_get_count(struct hso_serial *serial,
 	struct serial_icounter_struct icount;
 	struct uart_icount cnow;
 	struct hso_tiocmget  *tiocmget = serial->tiocmget;
-
-	memset(&icount, 0, sizeof(struct serial_icounter_struct));
 
 	if (!tiocmget)
 		 return -ENOENT;
@@ -2539,10 +2536,6 @@ static void hso_create_rfkill(struct hso_device *hso_dev,
 	}
 }
 
-static struct device_type hso_type = {
-	.name	= "wwan",
-};
-
 /* Creates our network device */
 static struct hso_device *hso_create_net_device(struct usb_interface *interface,
 						int port_spec)
@@ -2583,7 +2576,6 @@ static struct hso_device *hso_create_net_device(struct usb_interface *interface,
 		goto exit;
 	}
 	SET_NETDEV_DEV(net, &interface->dev);
-	SET_NETDEV_DEVTYPE(net, &hso_type);
 
 	/* registering our net device */
 	result = register_netdev(net);

@@ -30,8 +30,6 @@
 #endif
 
 struct kconf_id;
-
-static struct kconf_id *kconf_id_lookup(register const char *str, register unsigned int len);
 /* maximum key range = 47, duplicates = 0 */
 
 #ifdef __GNUC__

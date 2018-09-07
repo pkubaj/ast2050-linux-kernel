@@ -369,7 +369,6 @@ stall:
 					ctrlrequest->wIndex & 0x0f;
 				struct musb_ep		*musb_ep;
 				struct musb_hw_ep	*ep;
-				struct musb_request	*request;
 				void __iomem		*regs;
 				int			is_in;
 				u16			csr;
@@ -410,14 +409,6 @@ stall:
 						| MUSB_RXCSR_P_WZC_BITS;
 					musb_writew(regs, MUSB_RXCSR,
 							csr);
-				}
-
-				/* Maybe start the first request in the queue */
-				request = to_musb_request(
-						next_request(musb_ep));
-				if (!musb_ep->busy && request) {
-					DBG(3, "restarting the request\n");
-					musb_ep_restart(musb, request);
 				}
 
 				/* select ep0 again */
@@ -519,8 +510,7 @@ static void ep0_txstate(struct musb *musb)
 
 	/* update the flags */
 	if (fifo_count < MUSB_MAX_END0_PACKET
-			|| (request->actual == request->length
-				&& !request->zero)) {
+			|| request->actual == request->length) {
 		musb->ep0_state = MUSB_EP0_STAGE_STATUSOUT;
 		csr |= MUSB_CSR0_P_DATAEND;
 	} else

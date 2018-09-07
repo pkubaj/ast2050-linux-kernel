@@ -1276,8 +1276,7 @@ static void enc28j60_hw_tx(struct enc28j60_net *priv)
 	locked_reg_bfset(priv, ECON1, ECON1_TXRTS);
 }
 
-static netdev_tx_t enc28j60_send_packet(struct sk_buff *skb,
-					struct net_device *dev)
+static int enc28j60_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
 	struct enc28j60_net *priv = netdev_priv(dev);
 
@@ -1300,7 +1299,7 @@ static netdev_tx_t enc28j60_send_packet(struct sk_buff *skb,
 	priv->tx_skb = skb;
 	schedule_work(&priv->tx_work);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void enc28j60_tx_work_handler(struct work_struct *work)
@@ -1666,4 +1665,3 @@ MODULE_AUTHOR("Claudio Lanconelli <lanconelli.claudio@eptar.com>");
 MODULE_LICENSE("GPL");
 module_param_named(debug, debug.msg_enable, int, 0);
 MODULE_PARM_DESC(debug, "Debug verbosity level (0=none, ..., ffff=all)");
-MODULE_ALIAS("spi:" DRV_NAME);

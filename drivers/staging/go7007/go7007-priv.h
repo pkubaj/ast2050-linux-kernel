@@ -132,7 +132,7 @@ struct go7007_buffer {
 
 struct go7007_file {
 	struct go7007 *go;
-	struct mutex lock;
+	struct semaphore lock;
 	int buf_count;
 	struct go7007_buffer *bufs;
 };
@@ -170,7 +170,7 @@ struct go7007 {
 	int ref_count;
 	enum { STATUS_INIT, STATUS_ONLINE, STATUS_SHUTDOWN } status;
 	spinlock_t spinlock;
-	struct mutex hw_lock;
+	struct semaphore hw_lock;
 	int streaming;
 	int in_use;
 	int audio_enabled;
@@ -240,7 +240,7 @@ struct go7007 {
 	unsigned short interrupt_data;
 };
 
-/* All of these must be called with the hpi_lock mutex held! */
+/* All of these must be called with the hpi_lock semaphore held! */
 #define go7007_interface_reset(go) \
 			((go)->hpi_ops->interface_reset(go))
 #define	go7007_write_interrupt(go, x, y) \

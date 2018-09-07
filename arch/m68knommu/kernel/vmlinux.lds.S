@@ -184,6 +184,12 @@ SECTIONS {
 		__init_end = .;
 	} > INIT
 
+	/DISCARD/ : {
+		EXIT_TEXT
+		EXIT_DATA
+		*(.exitcall.exit)
+	}
+
 	.bss : {
 		. = ALIGN(4);
 		_sbss = . ;
@@ -194,6 +200,5 @@ SECTIONS {
 	 	_end = . ;
 	} > BSS
 
-	DISCARDS
 }
 

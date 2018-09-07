@@ -161,8 +161,7 @@ static int discard_swap(struct swap_info_struct *si)
 		}
 
 		err = blkdev_issue_discard(si->bdev, start_block,
-						nr_blocks, GFP_KERNEL,
-						DISCARD_FL_BARRIER);
+						nr_blocks, GFP_KERNEL);
 		if (err)
 			break;
 
@@ -201,8 +200,7 @@ static void discard_swap_cluster(struct swap_info_struct *si,
 			start_block <<= PAGE_SHIFT - 9;
 			nr_blocks <<= PAGE_SHIFT - 9;
 			if (blkdev_issue_discard(si->bdev, start_block,
-							nr_blocks, GFP_NOIO,
-							DISCARD_FL_BARRIER))
+							nr_blocks, GFP_NOIO))
 				break;
 		}
 
@@ -330,10 +328,8 @@ checks:
 	if (offset > si->highest_bit)
 		scan_base = offset = si->lowest_bit;
 
-	/* reuse swap entry of cache-only swap if not hibernation. */
-	if (vm_swap_full()
-		&& cache == SWAP_CACHE
-		&& si->swap_map[offset] == SWAP_HAS_CACHE) {
+	/* reuse swap entry of cache-only swap if not busy. */
+	if (vm_swap_full() && si->swap_map[offset] == SWAP_HAS_CACHE) {
 		int swap_was_freed;
 		spin_unlock(&swap_lock);
 		swap_was_freed = __try_to_reclaim_swap(si, offset);
@@ -701,7 +697,7 @@ int free_swap_and_cache(swp_entry_t entry)
 	struct swap_info_struct *p;
 	struct page *page = NULL;
 
-	if (non_swap_entry(entry))
+	if (is_migration_entry(entry))
 		return 1;
 
 	p = swap_info_get(entry);
@@ -1576,9 +1572,9 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	p->flags &= ~SWP_WRITEOK;
 	spin_unlock(&swap_lock);
 
-	current->flags |= PF_OOM_ORIGIN;
+	current->flags |= PF_SWAPOFF;
 	err = try_to_unuse(type);
-	current->flags &= ~PF_OOM_ORIGIN;
+	current->flags &= ~PF_SWAPOFF;
 
 	if (err) {
 		/* re-insert swap space back into swap_list */
@@ -1975,14 +1971,12 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		goto bad_swap;
 	}
 
-	if (p->bdev) {
-		if (blk_queue_nonrot(bdev_get_queue(p->bdev))) {
-			p->flags |= SWP_SOLIDSTATE;
-			p->cluster_next = 1 + (random32() % p->highest_bit);
-		}
-		if (discard_swap(p) == 0)
-			p->flags |= SWP_DISCARDABLE;
+	if (blk_queue_nonrot(bdev_get_queue(p->bdev))) {
+		p->flags |= SWP_SOLIDSTATE;
+		p->cluster_next = 1 + (random32() % p->highest_bit);
 	}
+	if (discard_swap(p) == 0)
+		p->flags |= SWP_DISCARDABLE;
 
 	mutex_lock(&swapon_mutex);
 	spin_lock(&swap_lock);
@@ -2088,7 +2082,7 @@ static int __swap_duplicate(swp_entry_t entry, bool cache)
 	int count;
 	bool has_cache;
 
-	if (non_swap_entry(entry))
+	if (is_migration_entry(entry))
 		return -EINVAL;
 
 	type = swp_type(entry);

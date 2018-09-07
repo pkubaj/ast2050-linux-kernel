@@ -13,6 +13,7 @@
 
 #include <linux/module.h>
 #include <linux/file.h>
+#include <linux/utsname.h>
 #include <linux/delay.h>
 #include <linux/bitops.h>
 #include <linux/genhd.h>
@@ -314,6 +315,7 @@ static int save_image(struct swap_map_handle *handle,
 {
 	unsigned int m;
 	int ret;
+	int error = 0;
 	int nr_pages;
 	int err2;
 	struct bio *bio;
@@ -328,27 +330,26 @@ static int save_image(struct swap_map_handle *handle,
 	nr_pages = 0;
 	bio = NULL;
 	do_gettimeofday(&start);
-	while (1) {
+	do {
 		ret = snapshot_read_next(snapshot, PAGE_SIZE);
-		if (ret <= 0)
-			break;
-		ret = swap_write_page(handle, data_of(*snapshot), &bio);
-		if (ret)
-			break;
-		if (!(nr_pages % m))
-			printk("\b\b\b\b%3d%%", nr_pages / m);
-		nr_pages++;
-	}
+		if (ret > 0) {
+			error = swap_write_page(handle, data_of(*snapshot),
+						&bio);
+			if (error)
+				break;
+			if (!(nr_pages % m))
+				printk("\b\b\b\b%3d%%", nr_pages / m);
+			nr_pages++;
+		}
+	} while (ret > 0);
 	err2 = wait_on_bio_chain(&bio);
 	do_gettimeofday(&stop);
-	if (!ret)
-		ret = err2;
-	if (!ret)
+	if (!error)
+		error = err2;
+	if (!error)
 		printk("\b\b\b\bdone\n");
-	else
-		printk("\n");
 	swsusp_show_speed(&start, &stop, nr_to_write, "Wrote");
-	return ret;
+	return error;
 }
 
 /**
@@ -536,8 +537,7 @@ static int load_image(struct swap_map_handle *handle,
 		snapshot_write_finalize(snapshot);
 		if (!snapshot_image_loaded(snapshot))
 			error = -ENODATA;
-	} else
-		printk("\n");
+	}
 	swsusp_show_speed(&start, &stop, nr_to_read, "Read");
 	return error;
 }
@@ -573,6 +573,8 @@ int swsusp_read(unsigned int *flags_p)
 		error = load_image(&handle, &snapshot, header->pages - 1);
 	release_swap_reader(&handle);
 
+	blkdev_put(resume_bdev, FMODE_READ);
+
 	if (!error)
 		pr_debug("PM: Image successfully loaded\n");
 	else
@@ -595,7 +597,7 @@ int swsusp_check(void)
 		error = bio_read_page(swsusp_resume_block,
 					swsusp_header, NULL);
 		if (error)
-			goto put;
+			return error;
 
 		if (!memcmp(SWSUSP_SIG, swsusp_header->sig, 10)) {
 			memcpy(swsusp_header->sig, swsusp_header->orig_sig, 10);
@@ -603,10 +605,8 @@ int swsusp_check(void)
 			error = bio_write_page(swsusp_resume_block,
 						swsusp_header, NULL);
 		} else {
-			error = -EINVAL;
+			return -EINVAL;
 		}
-
-put:
 		if (error)
 			blkdev_put(resume_bdev, FMODE_READ);
 		else

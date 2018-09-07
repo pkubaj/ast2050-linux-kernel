@@ -39,9 +39,6 @@
  * me to write this module.
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/ip.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -202,7 +199,7 @@ ip_vs_lblc_new(struct ip_vs_lblc_table *tbl, const union nf_inet_addr *daddr,
 	if (!en) {
 		en = kmalloc(sizeof(*en), GFP_ATOMIC);
 		if (!en) {
-			pr_err("%s(): no memory\n", __func__);
+			IP_VS_ERR("ip_vs_lblc_new(): no memory\n");
 			return NULL;
 		}
 
@@ -335,7 +332,7 @@ static int ip_vs_lblc_init_svc(struct ip_vs_service *svc)
 	 */
 	tbl = kmalloc(sizeof(*tbl), GFP_ATOMIC);
 	if (tbl == NULL) {
-		pr_err("%s(): no memory\n", __func__);
+		IP_VS_ERR("ip_vs_lblc_init_svc(): no memory\n");
 		return -ENOMEM;
 	}
 	svc->sched_data = tbl;
@@ -480,7 +477,7 @@ ip_vs_lblc_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
 
 	ip_vs_fill_iphdr(svc->af, skb_network_header(skb), &iph);
 
-	IP_VS_DBG(6, "%s(): Scheduling...\n", __func__);
+	IP_VS_DBG(6, "ip_vs_lblc_schedule(): Scheduling...\n");
 
 	/* First look in our cache */
 	read_lock(&svc->sched_lock);

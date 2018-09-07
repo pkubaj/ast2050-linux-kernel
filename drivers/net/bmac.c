@@ -1489,7 +1489,7 @@ bmac_output(struct sk_buff *skb, struct net_device *dev)
 	struct bmac_data *bp = netdev_priv(dev);
 	skb_queue_tail(bp->queue, skb);
 	bmac_start(dev);
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static void bmac_tx_timeout(unsigned long data)

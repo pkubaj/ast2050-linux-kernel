@@ -41,8 +41,7 @@
 #define NFULNL_NLBUFSIZ_DEFAULT	NLMSG_GOODSIZE
 #define NFULNL_TIMEOUT_DEFAULT 	100	/* every second */
 #define NFULNL_QTHRESH_DEFAULT 	100	/* 100 packets */
-/* max packet size is limited by 16-bit struct nfattr nfa_len field */
-#define NFULNL_COPY_RANGE_MAX	(0xFFFF - NLA_HDRLEN)
+#define NFULNL_COPY_RANGE_MAX	0xFFFF	/* max packet size is limited by 16-bit struct nfattr nfa_len field */
 
 #define PRINTR(x, args...)	do { if (net_ratelimit()) \
 				     printk(x, ## args); } while (0);
@@ -222,8 +221,6 @@ nfulnl_set_mode(struct nfulnl_instance *inst, u_int8_t mode,
 
 	case NFULNL_COPY_PACKET:
 		inst->copy_mode = mode;
-		if (range == 0)
-			range = NFULNL_COPY_RANGE_MAX;
 		inst->copy_range = min_t(unsigned int,
 					 range, NFULNL_COPY_RANGE_MAX);
 		break;
@@ -582,8 +579,7 @@ nfulnl_log_packet(u_int8_t pf,
 		+ nla_total_size(sizeof(u_int32_t))	/* gid */
 		+ nla_total_size(plen)			/* prefix */
 		+ nla_total_size(sizeof(struct nfulnl_msg_packet_hw))
-		+ nla_total_size(sizeof(struct nfulnl_msg_packet_timestamp))
-		+ nla_total_size(sizeof(struct nfgenmsg));	/* NLMSG_DONE */
+		+ nla_total_size(sizeof(struct nfulnl_msg_packet_timestamp));
 
 	if (in && skb_mac_header_was_set(skb)) {
 		size +=   nla_total_size(skb->dev->hard_header_len)
@@ -612,7 +608,8 @@ nfulnl_log_packet(u_int8_t pf,
 		break;
 
 	case NFULNL_COPY_PACKET:
-		if (inst->copy_range > skb->len)
+		if (inst->copy_range == 0
+		    || inst->copy_range > skb->len)
 			data_len = skb->len;
 		else
 			data_len = inst->copy_range;
@@ -624,7 +621,8 @@ nfulnl_log_packet(u_int8_t pf,
 		goto unlock_and_release;
 	}
 
-	if (inst->skb && size > skb_tailroom(inst->skb)) {
+	if (inst->skb &&
+	    size > skb_tailroom(inst->skb) - sizeof(struct nfgenmsg)) {
 		/* either the queue len is too high or we don't have
 		 * enough room in the skb left. flush to userspace. */
 		__nfulnl_flush(inst);
@@ -696,8 +694,7 @@ static struct notifier_block nfulnl_rtnl_notifier = {
 
 static int
 nfulnl_recv_unsupp(struct sock *ctnl, struct sk_buff *skb,
-		   const struct nlmsghdr *nlh,
-		   const struct nlattr * const nfqa[])
+		  struct nlmsghdr *nlh, struct nlattr *nfqa[])
 {
 	return -ENOTSUPP;
 }
@@ -719,8 +716,7 @@ static const struct nla_policy nfula_cfg_policy[NFULA_CFG_MAX+1] = {
 
 static int
 nfulnl_recv_config(struct sock *ctnl, struct sk_buff *skb,
-		   const struct nlmsghdr *nlh,
-		   const struct nlattr * const nfula[])
+		   struct nlmsghdr *nlh, struct nlattr *nfula[])
 {
 	struct nfgenmsg *nfmsg = NLMSG_DATA(nlh);
 	u_int16_t group_num = ntohs(nfmsg->res_id);

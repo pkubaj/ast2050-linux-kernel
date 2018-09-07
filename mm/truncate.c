@@ -93,11 +93,11 @@ EXPORT_SYMBOL(cancel_dirty_page);
  * its lock, b) when a concurrent invalidate_mapping_pages got there first and
  * c) when tmpfs swizzles a page between a tmpfs inode and swapper_space.
  */
-static int
+static void
 truncate_complete_page(struct address_space *mapping, struct page *page)
 {
 	if (page->mapping != mapping)
-		return -EIO;
+		return;
 
 	if (page_has_private(page))
 		do_invalidatepage(page, 0);
@@ -108,7 +108,6 @@ truncate_complete_page(struct address_space *mapping, struct page *page)
 	remove_from_page_cache(page);
 	ClearPageMappedToDisk(page);
 	page_cache_release(page);	/* pagecache ref */
-	return 0;
 }
 
 /*
@@ -134,51 +133,6 @@ invalidate_complete_page(struct address_space *mapping, struct page *page)
 	ret = remove_mapping(mapping, page);
 
 	return ret;
-}
-
-int truncate_inode_page(struct address_space *mapping, struct page *page)
-{
-	if (page_mapped(page)) {
-		unmap_mapping_range(mapping,
-				   (loff_t)page->index << PAGE_CACHE_SHIFT,
-				   PAGE_CACHE_SIZE, 0);
-	}
-	return truncate_complete_page(mapping, page);
-}
-
-/*
- * Used to get rid of pages on hardware memory corruption.
- */
-int generic_error_remove_page(struct address_space *mapping, struct page *page)
-{
-	if (!mapping)
-		return -EINVAL;
-	/*
-	 * Only punch for normal data pages for now.
-	 * Handling other types like directories would need more auditing.
-	 */
-	if (!S_ISREG(mapping->host->i_mode))
-		return -EIO;
-	return truncate_inode_page(mapping, page);
-}
-EXPORT_SYMBOL(generic_error_remove_page);
-
-/*
- * Safely invalidate one page from its pagecache mapping.
- * It only drops clean, unused pages. The page must be locked.
- *
- * Returns 1 if the page is successfully invalidated, otherwise 0.
- */
-int invalidate_inode_page(struct page *page)
-{
-	struct address_space *mapping = page_mapping(page);
-	if (!mapping)
-		return 0;
-	if (PageDirty(page) || PageWriteback(page))
-		return 0;
-	if (page_mapped(page))
-		return 0;
-	return invalidate_complete_page(mapping, page);
 }
 
 /**
@@ -242,7 +196,12 @@ void truncate_inode_pages_range(struct address_space *mapping,
 				unlock_page(page);
 				continue;
 			}
-			truncate_inode_page(mapping, page);
+			if (page_mapped(page)) {
+				unmap_mapping_range(mapping,
+				  (loff_t)page_index<<PAGE_CACHE_SHIFT,
+				  PAGE_CACHE_SIZE, 0);
+			}
+			truncate_complete_page(mapping, page);
 			unlock_page(page);
 		}
 		pagevec_release(&pvec);
@@ -279,10 +238,15 @@ void truncate_inode_pages_range(struct address_space *mapping,
 				break;
 			lock_page(page);
 			wait_on_page_writeback(page);
-			truncate_inode_page(mapping, page);
+			if (page_mapped(page)) {
+				unmap_mapping_range(mapping,
+				  (loff_t)page->index<<PAGE_CACHE_SHIFT,
+				  PAGE_CACHE_SIZE, 0);
+			}
 			if (page->index > next)
 				next = page->index;
 			next++;
+			truncate_complete_page(mapping, page);
 			unlock_page(page);
 		}
 		pagevec_release(&pvec);
@@ -347,8 +311,12 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 			if (lock_failed)
 				continue;
 
-			ret += invalidate_inode_page(page);
-
+			if (PageDirty(page) || PageWriteback(page))
+				goto unlock;
+			if (page_mapped(page))
+				goto unlock;
+			ret += invalidate_complete_page(mapping, page);
+unlock:
 			unlock_page(page);
 			if (next > end)
 				break;
@@ -376,12 +344,11 @@ invalidate_complete_page2(struct address_space *mapping, struct page *page)
 	if (page_has_private(page) && !try_to_release_page(page, GFP_KERNEL))
 		return 0;
 
-	clear_page_mlock(page);
-
 	spin_lock_irq(&mapping->tree_lock);
 	if (PageDirty(page))
 		goto failed;
 
+	clear_page_mlock(page);
 	BUG_ON(page_has_private(page));
 	__remove_from_page_cache(page);
 	spin_unlock_irq(&mapping->tree_lock);
@@ -498,65 +465,3 @@ int invalidate_inode_pages2(struct address_space *mapping)
 	return invalidate_inode_pages2_range(mapping, 0, -1);
 }
 EXPORT_SYMBOL_GPL(invalidate_inode_pages2);
-
-/**
- * truncate_pagecache - unmap and remove pagecache that has been truncated
- * @inode: inode
- * @old: old file offset
- * @new: new file offset
- *
- * inode's new i_size must already be written before truncate_pagecache
- * is called.
- *
- * This function should typically be called before the filesystem
- * releases resources associated with the freed range (eg. deallocates
- * blocks). This way, pagecache will always stay logically coherent
- * with on-disk format, and the filesystem would not have to deal with
- * situations such as writepage being called for a page that has already
- * had its underlying blocks deallocated.
- */
-void truncate_pagecache(struct inode *inode, loff_t old, loff_t new)
-{
-	struct address_space *mapping = inode->i_mapping;
-
-	/*
-	 * unmap_mapping_range is called twice, first simply for
-	 * efficiency so that truncate_inode_pages does fewer
-	 * single-page unmaps.  However after this first call, and
-	 * before truncate_inode_pages finishes, it is possible for
-	 * private pages to be COWed, which remain after
-	 * truncate_inode_pages finishes, hence the second
-	 * unmap_mapping_range call must be made for correctness.
-	 */
-	unmap_mapping_range(mapping, new + PAGE_SIZE - 1, 0, 1);
-	truncate_inode_pages(mapping, new);
-	unmap_mapping_range(mapping, new + PAGE_SIZE - 1, 0, 1);
-}
-EXPORT_SYMBOL(truncate_pagecache);
-
-/**
- * vmtruncate - unmap mappings "freed" by truncate() syscall
- * @inode: inode of the file used
- * @offset: file offset to start truncating
- *
- * NOTE! We have to be ready to update the memory sharing
- * between the file and the memory map for a potential last
- * incomplete page.  Ugly, but necessary.
- */
-int vmtruncate(struct inode *inode, loff_t offset)
-{
-	loff_t oldsize;
-	int error;
-
-	error = inode_newsize_ok(inode, offset);
-	if (error)
-		return error;
-	oldsize = inode->i_size;
-	i_size_write(inode, offset);
-	truncate_pagecache(inode, oldsize, offset);
-	if (inode->i_op->truncate)
-		inode->i_op->truncate(inode);
-
-	return error;
-}
-EXPORT_SYMBOL(vmtruncate);

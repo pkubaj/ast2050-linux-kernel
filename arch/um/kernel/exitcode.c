@@ -42,11 +42,9 @@ static int write_proc_exitcode(struct file *file, const char __user *buffer,
 			       unsigned long count, void *data)
 {
 	char *end, buf[sizeof("nnnnn\0")];
-	size_t size;
 	int tmp;
 
-	size = min(count, sizeof(buf));
-	if (copy_from_user(buf, buffer, size))
+	if (copy_from_user(buf, buffer, count))
 		return -EFAULT;
 
 	tmp = simple_strtol(buf, &end, 0);

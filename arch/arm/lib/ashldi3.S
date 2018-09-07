@@ -43,9 +43,7 @@ ENTRY(__aeabi_llsl)
 	rsb	ip, r2, #32
 	movmi	ah, ah, lsl r2
 	movpl	ah, al, lsl r3
- ARM(	orrmi	ah, ah, al, lsr ip	)
- THUMB(	lsrmi	r3, al, ip		)
- THUMB(	orrmi	ah, ah, r3		)
+	orrmi	ah, ah, al, lsr ip
 	mov	al, al, lsl r2
 	mov	pc, lr
 

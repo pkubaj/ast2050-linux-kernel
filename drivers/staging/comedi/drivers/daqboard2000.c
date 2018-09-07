@@ -107,9 +107,12 @@ Configuration options:
 		  |    	   +---------------- Unipolar
 		  +------------------------- Correction gain high
 
+
+
    999. The card seems to have an incredible amount of capabilities, but
         trying to reverse engineer them from the Windows source is beyond my
 	patience.
+
 
  */
 
@@ -144,32 +147,25 @@ Configuration options:
 
 /* Available ranges */
 static const struct comedi_lrange range_daqboard2000_ai = { 13, {
-								 RANGE(-10, 10),
-								 RANGE(-5, 5),
-								 RANGE(-2.5,
-								       2.5),
-								 RANGE(-1.25,
-								       1.25),
-								 RANGE(-0.625,
-								       0.625),
-								 RANGE(-0.3125,
-								       0.3125),
-								 RANGE(-0.156,
-								       0.156),
-								 RANGE(0, 10),
-								 RANGE(0, 5),
-								 RANGE(0, 2.5),
-								 RANGE(0, 1.25),
-								 RANGE(0,
-								       0.625),
-								 RANGE(0,
-								       0.3125)
-								 }
+			RANGE(-10, 10),
+			RANGE(-5, 5),
+			RANGE(-2.5, 2.5),
+			RANGE(-1.25, 1.25),
+			RANGE(-0.625, 0.625),
+			RANGE(-0.3125, 0.3125),
+			RANGE(-0.156, 0.156),
+			RANGE(0, 10),
+			RANGE(0, 5),
+			RANGE(0, 2.5),
+			RANGE(0, 1.25),
+			RANGE(0, 0.625),
+			RANGE(0, 0.3125)
+	}
 };
 
 static const struct comedi_lrange range_daqboard2000_ao = { 1, {
-								RANGE(-10, 10)
-								}
+			RANGE(-10, 10)
+	}
 };
 
 struct daqboard2000_hw {
@@ -301,8 +297,7 @@ struct daqboard2000_hw {
 #define DAQBOARD2000_PosRefDacSelect             0x0100
 #define DAQBOARD2000_NegRefDacSelect             0x0000
 
-static int daqboard2000_attach(struct comedi_device *dev,
-			       struct comedi_devconfig *it);
+static int daqboard2000_attach(struct comedi_device *dev, struct comedi_devconfig *it);
 static int daqboard2000_detach(struct comedi_device *dev);
 
 static struct comedi_driver driver_daqboard2000 = {
@@ -325,9 +320,8 @@ static const struct daq200_boardtype boardtypes[] = {
 #define this_board ((const struct daq200_boardtype *)dev->board_ptr)
 
 static DEFINE_PCI_DEVICE_TABLE(daqboard2000_pci_table) = {
-	{
-	0x1616, 0x0409, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0}, {
-	0}
+	{0x1616, 0x0409, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{0}
 };
 
 MODULE_DEVICE_TABLE(pci, daqboard2000_pci_table);
@@ -400,18 +394,17 @@ static void setup_sampling(struct comedi_device *dev, int chan, int gain)
 	writeAcqScanListEntry(dev, word3);
 }
 
-static int daqboard2000_ai_insn_read(struct comedi_device *dev,
-				     struct comedi_subdevice *s,
-				     struct comedi_insn *insn,
-				     unsigned int *data)
+static int daqboard2000_ai_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	struct daqboard2000_hw *fpga = devpriv->daq;
 	int gain, chan, timeout;
 
 	fpga->acqControl =
-	    DAQBOARD2000_AcqResetScanListFifo |
-	    DAQBOARD2000_AcqResetResultsFifo | DAQBOARD2000_AcqResetConfigPipe;
+		DAQBOARD2000_AcqResetScanListFifo |
+		DAQBOARD2000_AcqResetResultsFifo |
+		DAQBOARD2000_AcqResetConfigPipe;
 
 	/* If pacer clock is not set to some high value (> 10 us), we
 	   risk multiple samples to be put into the result FIFO. */
@@ -443,8 +436,9 @@ static int daqboard2000_ai_insn_read(struct comedi_device *dev,
 			/* udelay(2); */
 		}
 		for (timeout = 0; timeout < 20; timeout++) {
-			if (fpga->acqControl &
-			    DAQBOARD2000_AcqResultsFIFOHasValidData) {
+			if (fpga->
+				acqControl &
+				DAQBOARD2000_AcqResultsFIFOHasValidData) {
 				break;
 			}
 			/* udelay(2); */
@@ -457,10 +451,8 @@ static int daqboard2000_ai_insn_read(struct comedi_device *dev,
 	return i;
 }
 
-static int daqboard2000_ao_insn_read(struct comedi_device *dev,
-				     struct comedi_subdevice *s,
-				     struct comedi_insn *insn,
-				     unsigned int *data)
+static int daqboard2000_ao_insn_read(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -472,10 +464,8 @@ static int daqboard2000_ao_insn_read(struct comedi_device *dev,
 	return i;
 }
 
-static int daqboard2000_ao_insn_write(struct comedi_device *dev,
-				      struct comedi_subdevice *s,
-				      struct comedi_insn *insn,
-				      unsigned int *data)
+static int daqboard2000_ao_insn_write(struct comedi_device *dev, struct comedi_subdevice *s,
+	struct comedi_insn *insn, unsigned int *data)
 {
 	int i;
 	int chan = CR_CHAN(insn->chanspec);
@@ -531,7 +521,7 @@ static void daqboard2000_pulseProgPin(struct comedi_device *dev)
 	writel(DAQBOARD2000_SECRProgPinHi, devpriv->plx + 0x6c);
 	udelay(10000);
 	writel(DAQBOARD2000_SECRProgPinLo, devpriv->plx + 0x6c);
-	udelay(10000);		/* Not in the original code, but I like symmetry... */
+	udelay(10000);	/* Not in the original code, but I like symmetry... */
 }
 
 static int daqboard2000_pollCPLD(struct comedi_device *dev, int mask)
@@ -560,14 +550,14 @@ static int daqboard2000_writeCPLD(struct comedi_device *dev, int data)
 	udelay(10);
 	writew(data, devpriv->daq + 0x1000);
 	if ((readw(devpriv->daq + 0x1000) & DAQBOARD2000_CPLD_INIT) ==
-	    DAQBOARD2000_CPLD_INIT) {
+		DAQBOARD2000_CPLD_INIT) {
 		result = 1;
 	}
 	return result;
 }
 
 static int initialize_daqboard2000(struct comedi_device *dev,
-				   unsigned char *cpld_array, int len)
+	unsigned char *cpld_array, int len)
 {
 	int result = -EIO;
 	/* Read the serial EEPROM control register */
@@ -595,7 +585,7 @@ static int initialize_daqboard2000(struct comedi_device *dev,
 		if (daqboard2000_pollCPLD(dev, DAQBOARD2000_CPLD_INIT)) {
 			for (i = 0; i < len; i++) {
 				if (cpld_array[i] == 0xff
-				    && cpld_array[i + 1] == 0x20) {
+					&& cpld_array[i + 1] == 0x20) {
 #ifdef DEBUG_EEPROM
 					printk("Preamble found at %d\n", i);
 #endif
@@ -604,7 +594,8 @@ static int initialize_daqboard2000(struct comedi_device *dev,
 			}
 			for (; i < len; i += 2) {
 				int data =
-				    (cpld_array[i] << 8) + cpld_array[i + 1];
+					(cpld_array[i] << 8) + cpld_array[i +
+					1];
 				if (!daqboard2000_writeCPLD(dev, data)) {
 					break;
 				}
@@ -711,7 +702,7 @@ rmmod daqboard2000 ; rmmod comedi; make install ; modprobe daqboard2000; /usr/sb
 */
 
 static int daqboard2000_8255_cb(int dir, int port, int data,
-				unsigned long ioaddr)
+	unsigned long ioaddr)
 {
 	int result = 0;
 	if (dir) {
@@ -727,8 +718,7 @@ static int daqboard2000_8255_cb(int dir, int port, int data,
 	return result;
 }
 
-static int daqboard2000_attach(struct comedi_device *dev,
-			       struct comedi_devconfig *it)
+static int daqboard2000_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	int result = 0;
 	struct comedi_subdevice *s;
@@ -747,20 +737,21 @@ static int daqboard2000_attach(struct comedi_device *dev,
 		return -ENOMEM;
 	}
 	for (card = pci_get_device(0x1616, 0x0409, NULL);
-	     card != NULL; card = pci_get_device(0x1616, 0x0409, card)) {
+		card != NULL;
+		card = pci_get_device(0x1616, 0x0409, card)) {
 		if (bus || slot) {
 			/* requested particular bus/slot */
 			if (card->bus->number != bus ||
-			    PCI_SLOT(card->devfn) != slot) {
+				PCI_SLOT(card->devfn) != slot) {
 				continue;
 			}
 		}
-		break;		/* found one */
+		break;  /* found one */
 	}
 	if (!card) {
 		if (bus || slot)
 			printk(" no daqboard2000 found at bus/slot: %d/%d\n",
-			       bus, slot);
+				bus, slot);
 		else
 			printk(" no daqboard2000 found\n");
 		return -EIO;
@@ -768,8 +759,8 @@ static int daqboard2000_attach(struct comedi_device *dev,
 		u32 id;
 		int i;
 		devpriv->pci_dev = card;
-		id = ((u32) card->
-		      subsystem_device << 16) | card->subsystem_vendor;
+		id = ((u32) card->subsystem_device << 16) | card->
+			subsystem_vendor;
 		for (i = 0; i < n_boardtypes; i++) {
 			if (boardtypes[i].id == id) {
 				printk(" %s", boardtypes[i].name);
@@ -777,9 +768,7 @@ static int daqboard2000_attach(struct comedi_device *dev,
 			}
 		}
 		if (!dev->board_ptr) {
-			printk
-			    (" unknown subsystem id %08x (pretend it is an ids2)",
-			     id);
+			printk(" unknown subsystem id %08x (pretend it is an ids2)", id);
 			dev->board_ptr = boardtypes;
 		}
 	}
@@ -791,9 +780,9 @@ static int daqboard2000_attach(struct comedi_device *dev,
 	}
 	devpriv->got_regions = 1;
 	devpriv->plx =
-	    ioremap(pci_resource_start(card, 0), DAQBOARD2000_PLX_SIZE);
+		ioremap(pci_resource_start(card, 0), DAQBOARD2000_PLX_SIZE);
 	devpriv->daq =
-	    ioremap(pci_resource_start(card, 2), DAQBOARD2000_DAQ_SIZE);
+		ioremap(pci_resource_start(card, 2), DAQBOARD2000_DAQ_SIZE);
 	if (!devpriv->plx || !devpriv->daq) {
 		return -ENOMEM;
 	}
@@ -855,10 +844,10 @@ static int daqboard2000_attach(struct comedi_device *dev,
 
 	s = dev->subdevices + 2;
 	result = subdev_8255_init(dev, s, daqboard2000_8255_cb,
-				  (unsigned long)(dev->iobase + 0x40));
+		(unsigned long)(dev->iobase + 0x40));
 
 	printk("\n");
-out:
+      out:
 	return result;
 }
 

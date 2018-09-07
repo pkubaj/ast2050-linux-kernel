@@ -31,6 +31,7 @@
  */
 
 #include <rdma/ib_cm.h>
+#include <rdma/ib_cache.h>
 #include <net/dst.h>
 #include <net/icmp.h>
 #include <linux/icmpv6.h>
@@ -662,6 +663,7 @@ copied:
 	skb_reset_mac_header(skb);
 	skb_pull(skb, IPOIB_ENCAP_LEN);
 
+	dev->last_rx = jiffies;
 	++dev->stats.rx_packets;
 	dev->stats.rx_bytes += skb->len;
 
@@ -752,8 +754,6 @@ void ipoib_cm_send(struct net_device *dev, struct sk_buff *skb, struct ipoib_cm_
 		if (++priv->tx_outstanding == ipoib_sendq_size) {
 			ipoib_dbg(priv, "TX ring 0x%x full, stopping kernel net queue\n",
 				  tx->qp->qp_num);
-			if (ib_req_notify_cq(priv->send_cq, IB_CQ_NEXT_COMP))
-				ipoib_warn(priv, "request notify on send CQ failed\n");
 			netif_stop_queue(dev);
 		}
 	}

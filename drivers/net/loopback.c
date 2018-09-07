@@ -69,8 +69,7 @@ struct pcpu_lstats {
  * The higher levels take care of making this non-reentrant (it's
  * called with bh's disabled).
  */
-static netdev_tx_t loopback_xmit(struct sk_buff *skb,
-				 struct net_device *dev)
+static int loopback_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct pcpu_lstats *pcpu_lstats, *lb_stats;
 	int len;
@@ -90,7 +89,7 @@ static netdev_tx_t loopback_xmit(struct sk_buff *skb,
 	} else
 		lb_stats->drops++;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static struct net_device_stats *loopback_get_stats(struct net_device *dev)

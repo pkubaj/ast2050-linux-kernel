@@ -707,17 +707,34 @@ static unsigned int sata_fsl_dev_classify(struct ata_port *ap)
 	return ata_dev_classify(&tf);
 }
 
-static int sata_fsl_hardreset(struct ata_link *link, unsigned int *class,
+static int sata_fsl_prereset(struct ata_link *link, unsigned long deadline)
+{
+	/* FIXME: Never skip softreset, sata_fsl_softreset() is
+	 * combination of soft and hard resets.  sata_fsl_softreset()
+	 * needs to be splitted into soft and hard resets.
+	 */
+	return 0;
+}
+
+static int sata_fsl_softreset(struct ata_link *link, unsigned int *class,
 					unsigned long deadline)
 {
 	struct ata_port *ap = link->ap;
+	struct sata_fsl_port_priv *pp = ap->private_data;
 	struct sata_fsl_host_priv *host_priv = ap->host->private_data;
 	void __iomem *hcr_base = host_priv->hcr_base;
+	int pmp = sata_srst_pmp(link);
 	u32 temp;
+	struct ata_taskfile tf;
+	u8 *cfis;
+	u32 Serror;
 	int i = 0;
 	unsigned long start_jiffies;
 
-	DPRINTK("in xx_hardreset\n");
+	DPRINTK("in xx_softreset\n");
+
+	if (pmp != SATA_PMP_CTRL_PORT)
+		goto issue_srst;
 
 try_offline_again:
 	/*
@@ -732,7 +749,7 @@ try_offline_again:
 
 	if (temp & ONLINE) {
 		ata_port_printk(ap, KERN_ERR,
-				"Hardreset failed, not off-lined %d\n", i);
+				"Softreset failed, not off-lined %d\n", i);
 
 		/*
 		 * Try to offline controller atleast twice
@@ -744,7 +761,7 @@ try_offline_again:
 			goto try_offline_again;
 	}
 
-	DPRINTK("hardreset, controller off-lined\n");
+	DPRINTK("softreset, controller off-lined\n");
 	VPRINTK("HStatus = 0x%x\n", ioread32(hcr_base + HSTATUS));
 	VPRINTK("HControl = 0x%x\n", ioread32(hcr_base + HCONTROL));
 
@@ -769,11 +786,11 @@ try_offline_again:
 
 	if (!(temp & ONLINE)) {
 		ata_port_printk(ap, KERN_ERR,
-				"Hardreset failed, not on-lined\n");
+				"Softreset failed, not on-lined\n");
 		goto err;
 	}
 
-	DPRINTK("hardreset, controller off-lined & on-lined\n");
+	DPRINTK("softreset, controller off-lined & on-lined\n");
 	VPRINTK("HStatus = 0x%x\n", ioread32(hcr_base + HSTATUS));
 	VPRINTK("HControl = 0x%x\n", ioread32(hcr_base + HCONTROL));
 
@@ -789,7 +806,7 @@ try_offline_again:
 				"No Device OR PHYRDY change,Hstatus = 0x%x\n",
 				ioread32(hcr_base + HSTATUS));
 		*class = ATA_DEV_NONE;
-		return 0;
+		goto out;
 	}
 
 	/*
@@ -802,44 +819,11 @@ try_offline_again:
 	if ((temp & 0xFF) != 0x18) {
 		ata_port_printk(ap, KERN_WARNING, "No Signature Update\n");
 		*class = ATA_DEV_NONE;
-		goto do_followup_srst;
+		goto out;
 	} else {
 		ata_port_printk(ap, KERN_INFO,
 				"Signature Update detected @ %d msecs\n",
 				jiffies_to_msecs(jiffies - start_jiffies));
-		*class = sata_fsl_dev_classify(ap);
-		return 0;
-	}
-
-do_followup_srst:
-	/*
-	 * request libATA to perform follow-up softreset
-	 */
-	return -EAGAIN;
-
-err:
-	return -EIO;
-}
-
-static int sata_fsl_softreset(struct ata_link *link, unsigned int *class,
-					unsigned long deadline)
-{
-	struct ata_port *ap = link->ap;
-	struct sata_fsl_port_priv *pp = ap->private_data;
-	struct sata_fsl_host_priv *host_priv = ap->host->private_data;
-	void __iomem *hcr_base = host_priv->hcr_base;
-	int pmp = sata_srst_pmp(link);
-	u32 temp;
-	struct ata_taskfile tf;
-	u8 *cfis;
-	u32 Serror;
-
-	DPRINTK("in xx_softreset\n");
-
-	if (ata_link_offline(link)) {
-		DPRINTK("PHY reports no device\n");
-		*class = ATA_DEV_NONE;
-		return 0;
 	}
 
 	/*
@@ -850,6 +834,7 @@ static int sata_fsl_softreset(struct ata_link *link, unsigned int *class,
 	 * reached here, we can send a command to the target device
 	 */
 
+issue_srst:
 	DPRINTK("Sending SRST/device reset\n");
 
 	ata_tf_init(link->device, &tf);
@@ -875,8 +860,6 @@ static int sata_fsl_softreset(struct ata_link *link, unsigned int *class,
 		ioread32(CA + hcr_base), ioread32(CC + hcr_base));
 
 	iowrite32(0xFFFF, CC + hcr_base);
-	if (pmp != SATA_PMP_CTRL_PORT)
-		iowrite32(pmp, CQPMP + hcr_base);
 	iowrite32(1, CQ + hcr_base);
 
 	temp = ata_wait_register(CQ + hcr_base, 0x1, 0x1, 1, 5000);
@@ -943,6 +926,7 @@ static int sata_fsl_softreset(struct ata_link *link, unsigned int *class,
 		VPRINTK("cereg = 0x%x\n", ioread32(hcr_base + CE));
 	}
 
+out:
 	return 0;
 
 err:
@@ -1003,6 +987,18 @@ static void sata_fsl_error_intr(struct ata_port *ap)
 	if (hstatus & FATAL_ERROR_DECODE) {
 		ehi->err_mask |= AC_ERR_ATA_BUS;
 		ehi->action |= ATA_EH_SOFTRESET;
+
+		/*
+		 * Ignore serror in case of fatal errors as we always want
+		 * to do a soft-reset of the FSL SATA controller. Analyzing
+		 * serror may cause libata to schedule a hard-reset action,
+		 * and hard-reset currently does not do controller
+		 * offline/online, causing command timeouts and leads to an
+		 * un-recoverable state, hence make libATA ignore
+		 * autopsy in case of fatal errors.
+		 */
+
+		ehi->flags |= ATA_EHI_NO_AUTOPSY;
 
 		freeze = 1;
 	}
@@ -1261,7 +1257,6 @@ static struct scsi_host_template sata_fsl_sht = {
 static struct ata_port_operations sata_fsl_ops = {
 	.inherits		= &sata_pmp_port_ops,
 
-	.qc_defer = ata_std_qc_defer,
 	.qc_prep = sata_fsl_qc_prep,
 	.qc_issue = sata_fsl_qc_issue,
 	.qc_fill_rtf = sata_fsl_qc_fill_rtf,
@@ -1271,8 +1266,8 @@ static struct ata_port_operations sata_fsl_ops = {
 
 	.freeze = sata_fsl_freeze,
 	.thaw = sata_fsl_thaw,
+	.prereset = sata_fsl_prereset,
 	.softreset = sata_fsl_softreset,
-	.hardreset = sata_fsl_hardreset,
 	.pmp_softreset = sata_fsl_softreset,
 	.error_handler = sata_fsl_error_handler,
 	.post_internal_cmd = sata_fsl_post_internal_cmd,

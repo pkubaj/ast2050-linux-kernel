@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/list.h>
+#include <linux/clk.h>
 #include <linux/gpio.h>
 #include <linux/io.h>
 
@@ -248,10 +249,8 @@ int __init musb_platform_init(struct musb *musb)
 
 	usb_nop_xceiv_register();
 	musb->xceiv = otg_get_transceiver();
-	if (!musb->xceiv) {
-		gpio_free(musb->config->gpio_vrsel);
+	if (!musb->xceiv)
 		return -ENODEV;
-	}
 
 	if (ANOMALY_05000346) {
 		bfin_write_USB_APHY_CALIB(ANOMALY_05000346_value);

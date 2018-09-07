@@ -512,13 +512,16 @@ static void ath_beacon_config_ap(struct ath_softc *sc,
 {
 	u32 nexttbtt, intval;
 
+	/* Configure the timers only when the TSF has to be reset */
+
+	if (!(sc->sc_flags & SC_OP_TSF_RESET))
+		return;
+
 	/* NB: the beacon interval is kept internally in TU's */
 	intval = conf->beacon_interval & ATH9K_BEACON_PERIOD;
 	intval /= ATH_BCBUF;    /* for staggered beacons */
 	nexttbtt = intval;
-
-	if (sc->sc_flags & SC_OP_TSF_RESET)
-		intval |= ATH9K_BEACON_RESET_TSF;
+	intval |= ATH9K_BEACON_RESET_TSF;
 
 	/*
 	 * In AP mode we enable the beacon timers and SWBA interrupts to
@@ -671,6 +674,13 @@ static void ath_beacon_config_adhoc(struct ath_softc *sc,
 
 	intval = conf->beacon_interval & ATH9K_BEACON_PERIOD;
 
+	/*
+	 * It looks like mac80211 may end up using beacon interval of zero in
+	 * some cases (at least for mesh point). Avoid getting into an
+	 * infinite loop by using a bit safer value instead..
+	 */
+	if (intval == 0)
+		intval = 100;
 
 	/* Pull nexttbtt forward to reflect the current TSF */
 
@@ -735,14 +745,6 @@ void ath_beacon_config(struct ath_softc *sc, struct ieee80211_vif *vif)
 		iftype = sc->sc_ah->opmode;
 	}
 
-	/*
-	 * It looks like mac80211 may end up using beacon interval of zero in
-	 * some cases (at least for mesh point). Avoid getting into an
-	 * infinite loop by using a bit safer value instead. To be safe,
-	 * do sanity check on beacon interval for all operating modes.
-	 */
-	if (cur_conf->beacon_interval == 0)
-		cur_conf->beacon_interval = 100;
 
 	switch (iftype) {
 	case NL80211_IFTYPE_AP:

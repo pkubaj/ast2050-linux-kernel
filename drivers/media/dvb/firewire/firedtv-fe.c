@@ -141,12 +141,18 @@ static int fdtv_read_uncorrected_blocks(struct dvb_frontend *fe, u32 *ucblocks)
 	return -EOPNOTSUPP;
 }
 
+#define ACCEPTED 0x9
+
 static int fdtv_set_frontend(struct dvb_frontend *fe,
 			     struct dvb_frontend_parameters *params)
 {
 	struct firedtv *fdtv = fe->sec_priv;
 
-	return avc_tuner_dsd(fdtv, params);
+	/* FIXME: avc_tuner_dsd never returns ACCEPTED. Check status? */
+	if (avc_tuner_dsd(fdtv, params) != ACCEPTED)
+		return -EINVAL;
+	else
+		return 0; /* not sure of this... */
 }
 
 static int fdtv_get_frontend(struct dvb_frontend *fe,

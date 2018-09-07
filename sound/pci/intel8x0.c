@@ -1776,12 +1776,6 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
         },
 	{
 		.subvendor = 0x1014,
-		.subdevice = 0x0534,
-		.name = "ThinkPad X31",
-		.type = AC97_TUNE_INV_EAPD
-	},
-	{
-		.subvendor = 0x1014,
 		.subdevice = 0x1f00,
 		.name = "MS-9128",
 		.type = AC97_TUNE_ALC_JACK
@@ -1862,12 +1856,6 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 		.subvendor = 0x1028,
 		.subdevice = 0x016a,
 		.name = "Dell Inspiron 8600",	/* STAC9750/51 */
-		.type = AC97_TUNE_HP_ONLY
-	},
-	{
-		.subvendor = 0x1028,
-		.subdevice = 0x0182,
-		.name = "Dell Latitude D610",	/* STAC9750/51 */
 		.type = AC97_TUNE_HP_ONLY
 	},
 	{
@@ -1962,26 +1950,8 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 	},
 	{
 		.subvendor = 0x104d,
-		.subdevice = 0x8144,
-		.name = "Sony",
-		.type = AC97_TUNE_INV_EAPD
-	},
-	{
-		.subvendor = 0x104d,
 		.subdevice = 0x8197,
 		.name = "Sony S1XP",
-		.type = AC97_TUNE_INV_EAPD
-	},
-	{
-		.subvendor = 0x104d,
-		.subdevice = 0x81c0,
-		.name = "Sony VAIO VGN-T350P", /*AD1981B*/
-		.type = AC97_TUNE_INV_EAPD
-	},
-	{
-		.subvendor = 0x104d,
-		.subdevice = 0x81c5,
-		.name = "Sony VAIO VGN-B1VP", /*AD1981B*/
 		.type = AC97_TUNE_INV_EAPD
 	},
  	{

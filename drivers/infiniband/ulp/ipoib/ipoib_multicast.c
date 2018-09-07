@@ -188,9 +188,7 @@ static int ipoib_mcast_join_finish(struct ipoib_mcast *mcast,
 
 	mcast->mcmember = *mcmember;
 
-	/* Set the multicast MTU and cached Q_Key before we attach if it's
-	 * the broadcast group.
-	 */
+	/* Set the cached Q_Key before we attach if it's the broadcast group */
 	if (!memcmp(mcast->mcmember.mgid.raw, priv->dev->broadcast + 4,
 		    sizeof (union ib_gid))) {
 		spin_lock_irq(&priv->lock);
@@ -198,17 +196,10 @@ static int ipoib_mcast_join_finish(struct ipoib_mcast *mcast,
 			spin_unlock_irq(&priv->lock);
 			return -EAGAIN;
 		}
-		priv->mcast_mtu = IPOIB_UD_MTU(ib_mtu_enum_to_int(priv->broadcast->mcmember.mtu));
 		priv->qkey = be32_to_cpu(priv->broadcast->mcmember.qkey);
 		spin_unlock_irq(&priv->lock);
 		priv->tx_wr.wr.ud.remote_qkey = priv->qkey;
 		set_qkey = 1;
-
-		if (!ipoib_cm_admin_enabled(dev)) {
-			rtnl_lock();
-			dev_set_mtu(dev, min(priv->mcast_mtu, priv->admin_mtu));
-			rtnl_unlock();
-		}
 	}
 
 	if (!test_bit(IPOIB_MCAST_FLAG_SENDONLY, &mcast->flags)) {
@@ -371,19 +362,12 @@ void ipoib_mcast_carrier_on_task(struct work_struct *work)
 {
 	struct ipoib_dev_priv *priv = container_of(work, struct ipoib_dev_priv,
 						   carrier_on_task);
-	struct ib_port_attr attr;
 
 	/*
 	 * Take rtnl_lock to avoid racing with ipoib_stop() and
 	 * turning the carrier back on while a device is being
 	 * removed.
 	 */
-	if (ib_query_port(priv->ca, priv->port, &attr) ||
-	    attr.state != IB_PORT_ACTIVE) {
-		ipoib_dbg(priv, "Keeping carrier off until IB port is active\n");
-		return;
-	}
-
 	rtnl_lock();
 	netif_carrier_on(priv->dev);
 	rtnl_unlock();
@@ -597,6 +581,14 @@ void ipoib_mcast_join_task(struct work_struct *work)
 		return;
 	}
 
+	priv->mcast_mtu = IPOIB_UD_MTU(ib_mtu_enum_to_int(priv->broadcast->mcmember.mtu));
+
+	if (!ipoib_cm_admin_enabled(dev)) {
+		rtnl_lock();
+		dev_set_mtu(dev, min(priv->mcast_mtu, priv->admin_mtu));
+		rtnl_unlock();
+	}
+
 	ipoib_dbg_mcast(priv, "successfully joined all multicast groups\n");
 
 	clear_bit(IPOIB_MCAST_RUN, &priv->flags);
@@ -728,9 +720,7 @@ out:
 			}
 		}
 
-		spin_unlock_irqrestore(&priv->lock, flags);
 		ipoib_send(dev, skb, mcast->ah, IB_MULTICAST_QPN);
-		return;
 	}
 
 unlock:
@@ -768,20 +758,6 @@ void ipoib_mcast_dev_flush(struct net_device *dev)
 	}
 }
 
-static int ipoib_mcast_addr_is_valid(const u8 *addr, unsigned int addrlen,
-				     const u8 *broadcast)
-{
-	if (addrlen != INFINIBAND_ALEN)
-		return 0;
-	/* reserved QPN, prefix, scope */
-	if (memcmp(addr, broadcast, 6))
-		return 0;
-	/* signature lower, pkey */
-	if (memcmp(addr + 7, broadcast + 7, 3))
-		return 0;
-	return 1;
-}
-
 void ipoib_mcast_restart_task(struct work_struct *work)
 {
 	struct ipoib_dev_priv *priv =
@@ -814,11 +790,6 @@ void ipoib_mcast_restart_task(struct work_struct *work)
 	/* Mark all of the entries that are found or don't exist */
 	for (mclist = dev->mc_list; mclist; mclist = mclist->next) {
 		union ib_gid mgid;
-
-		if (!ipoib_mcast_addr_is_valid(mclist->dmi_addr,
-					       mclist->dmi_addrlen,
-					       dev->broadcast))
-			continue;
 
 		memcpy(mgid.raw, mclist->dmi_addr + 4, sizeof mgid);
 

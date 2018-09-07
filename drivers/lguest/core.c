@@ -67,11 +67,12 @@ static __init int map_switcher(void)
 	 * so we make sure they're zeroed.
 	 */
 	for (i = 0; i < TOTAL_SWITCHER_PAGES; i++) {
-		switcher_page[i] = alloc_page(GFP_KERNEL|__GFP_ZERO);
-		if (!switcher_page[i]) {
+		unsigned long addr = get_zeroed_page(GFP_KERNEL);
+		if (!addr) {
 			err = -ENOMEM;
 			goto free_some_pages;
 		}
+		switcher_page[i] = virt_to_page(addr);
 	}
 
 	/*
@@ -170,7 +171,7 @@ static void unmap_switcher(void)
 bool lguest_address_ok(const struct lguest *lg,
 		       unsigned long addr, unsigned long len)
 {
-	return addr+len <= lg->pfn_limit * PAGE_SIZE && (addr+len >= addr);
+	return (addr+len) / PAGE_SIZE < lg->pfn_limit && (addr+len >= addr);
 }
 
 /*

@@ -35,7 +35,7 @@
  *
  * contributors:
  * 	Daris A Nevil <dnevil@snmc.com>
- *      Nicolas Pitre <nico@fluxnic.net>
+ *      Nicolas Pitre <nico@cam.org>
  *	Russell King <rmk@arm.linux.org.uk>
  *
  * History:
@@ -58,7 +58,7 @@
  *   22/09/04  Nicolas Pitre      big update (see commit log for details)
  */
 static const char version[] =
-	"smc91x.c: v1.1, sep 22 2004 by Nicolas Pitre <nico@fluxnic.net>\n";
+	"smc91x.c: v1.1, sep 22 2004 by Nicolas Pitre <nico@cam.org>\n";
 
 /* Debugging level */
 #ifndef SMC_DEBUG
@@ -659,7 +659,7 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		dev->stats.tx_errors++;
 		dev->stats.tx_dropped++;
 		dev_kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return 0;
 	}
 
 	smc_special_lock(&lp->lock, flags);
@@ -696,7 +696,7 @@ static int smc_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		smc_hardware_send_pkt((unsigned long)dev);
 	}
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /*

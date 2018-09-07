@@ -50,7 +50,7 @@ static int tapeblock_ioctl(struct block_device *, fmode_t, unsigned int,
 static int tapeblock_medium_changed(struct gendisk *);
 static int tapeblock_revalidate_disk(struct gendisk *);
 
-static const struct block_device_operations tapeblock_fops = {
+static struct block_device_operations tapeblock_fops = {
 	.owner		 = THIS_MODULE,
 	.open		 = tapeblock_open,
 	.release	 = tapeblock_release,
@@ -162,10 +162,9 @@ tapeblock_requeue(struct work_struct *work) {
 	spin_lock_irq(&device->blk_data.request_queue_lock);
 	while (
 		!blk_queue_plugged(queue) &&
-		blk_peek_request(queue) &&
+		(req = blk_fetch_request(queue)) &&
 		nr_queued < TAPEBLOCK_MIN_REQUEUE
 	) {
-		req = blk_fetch_request(queue);
 		if (rq_data_dir(req) == WRITE) {
 			DBF_EVENT(1, "TBLOCK: Rejecting write request\n");
 			spin_unlock_irq(&device->blk_data.request_queue_lock);
@@ -303,6 +302,8 @@ tapeblock_revalidate_disk(struct gendisk *disk)
 	if (!device->blk_data.medium_changed)
 		return 0;
 
+	dev_info(&device->cdev->dev, "Determining the size of the recorded "
+		"area...\n");
 	rc = tape_mtop(device, MTFSFM, 1);
 	if (rc)
 		return rc;
@@ -311,8 +312,6 @@ tapeblock_revalidate_disk(struct gendisk *disk)
 	if (rc < 0)
 		return rc;
 
-	pr_info("%s: Determining the size of the recorded area...\n",
-		dev_name(&device->cdev->dev));
 	DBF_LH(3, "Image file ends at %d\n", rc);
 	nr_of_blks = rc;
 
@@ -331,8 +330,8 @@ tapeblock_revalidate_disk(struct gendisk *disk)
 	device->bof = rc;
 	nr_of_blks -= rc;
 
-	pr_info("%s: The size of the recorded area is %i blocks\n",
-		dev_name(&device->cdev->dev), nr_of_blks);
+	dev_info(&device->cdev->dev, "The size of the recorded area is %i "
+		"blocks\n", nr_of_blks);
 	set_capacity(device->blk_data.disk,
 		nr_of_blks*(TAPEBLOCK_HSEC_SIZE/512));
 
@@ -367,8 +366,8 @@ tapeblock_open(struct block_device *bdev, fmode_t mode)
 
 	if (device->required_tapemarks) {
 		DBF_EVENT(2, "TBLOCK: missing tapemarks\n");
-		pr_warning("%s: Opening the tape failed because of missing "
-			   "end-of-file marks\n", dev_name(&device->cdev->dev));
+		dev_warn(&device->cdev->dev, "Opening the tape failed because"
+			" of missing end-of-file marks\n");
 		rc = -EPERM;
 		goto put_device;
 	}

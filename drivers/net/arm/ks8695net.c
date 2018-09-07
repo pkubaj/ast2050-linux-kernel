@@ -467,6 +467,7 @@ ks8695_rx_irq(int irq, void *dev_id)
 			netif_rx(skb);
 
 			/* Record stats */
+			ndev->last_rx = jiffies;
 			ndev->stats.rx_packets++;
 			ndev->stats.rx_bytes += pktlen;
 			goto rx_finished;
@@ -1062,7 +1063,7 @@ ks8695_get_drvinfo(struct net_device *ndev, struct ethtool_drvinfo *info)
 		sizeof(info->bus_info));
 }
 
-static const struct ethtool_ops ks8695_ethtool_ops = {
+static struct ethtool_ops ks8695_ethtool_ops = {
 	.get_msglevel	= ks8695_get_msglevel,
 	.set_msglevel	= ks8695_set_msglevel,
 	.get_settings	= ks8695_get_settings,

@@ -10,6 +10,7 @@
 #include <linux/irqreturn.h>
 #include <linux/irqnr.h>
 #include <linux/hardirq.h>
+#include <linux/sched.h>
 #include <linux/irqflags.h>
 #include <linux/smp.h>
 #include <linux/percpu.h>
@@ -49,28 +50,15 @@
  * IRQF_IRQPOLL - Interrupt is used for polling (only the interrupt that is
  *                registered first in an shared interrupt is considered for
  *                performance reasons)
- * IRQF_ONESHOT - Interrupt is not reenabled after the hardirq handler finished.
- *                Used by threaded interrupts which need to keep the
- *                irq line disabled until the threaded handler has been run.
- * IRQF_NO_SUSPEND - Do not disable this IRQ during suspend
- * IRQF_FORCE_RESUME - Force enable it on resume even if IRQF_NO_SUSPEND is set
- * IRQF_EARLY_RESUME - Resume IRQ early during syscore instead of at device
- *                resume time.
  */
 #define IRQF_DISABLED		0x00000020
 #define IRQF_SAMPLE_RANDOM	0x00000040
 #define IRQF_SHARED		0x00000080
 #define IRQF_PROBE_SHARED	0x00000100
-#define __IRQF_TIMER		0x00000200
+#define IRQF_TIMER		0x00000200
 #define IRQF_PERCPU		0x00000400
 #define IRQF_NOBALANCING	0x00000800
 #define IRQF_IRQPOLL		0x00001000
-#define IRQF_ONESHOT		0x00002000
-#define IRQF_NO_SUSPEND		0x00004000
-#define IRQF_FORCE_RESUME	0x00008000
-#define IRQF_EARLY_RESUME	0x00020000
-
-#define IRQF_TIMER		(__IRQF_TIMER | IRQF_NO_SUSPEND)
 
 /*
  * Bits used by threaded handlers:
@@ -92,6 +80,7 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
  * struct irqaction - per interrupt action descriptor
  * @handler:	interrupt handler function
  * @flags:	flags (see IRQF_* above)
+ * @mask:	no comment as it is useless and about to be removed
  * @name:	name of the device
  * @dev_id:	cookie to identify the device
  * @next:	pointer to the next irqaction for shared interrupts
@@ -104,6 +93,7 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
 struct irqaction {
 	irq_handler_t handler;
 	unsigned long flags;
+	cpumask_t mask;
 	const char *name;
 	void *dev_id;
 	struct irqaction *next;
@@ -201,16 +191,13 @@ extern void suspend_device_irqs(void);
 extern void resume_device_irqs(void);
 #ifdef CONFIG_PM_SLEEP
 extern int check_wakeup_irqs(void);
-extern void irq_pm_syscore_resume(void);
 #else
 static inline int check_wakeup_irqs(void) { return 0; }
-static inline void irq_pm_syscore_resume(void) { };
 #endif
 #else
 static inline void suspend_device_irqs(void) { };
 static inline void resume_device_irqs(void) { };
 static inline int check_wakeup_irqs(void) { return 0; }
-static inline void irq_pm_syscore_resume(void) { };
 #endif
 
 #if defined(CONFIG_SMP) && defined(CONFIG_GENERIC_HARDIRQS)
@@ -357,7 +344,6 @@ enum
 	NET_TX_SOFTIRQ,
 	NET_RX_SOFTIRQ,
 	BLOCK_SOFTIRQ,
-	BLOCK_IOPOLL_SOFTIRQ,
 	TASKLET_SOFTIRQ,
 	SCHED_SOFTIRQ,
 	HRTIMER_SOFTIRQ,
@@ -621,7 +607,6 @@ extern void debug_poll_all_shared_irqs(void);
 static inline void debug_poll_all_shared_irqs(void) { }
 #endif
 
-struct seq_file;
 int show_interrupts(struct seq_file *p, void *v);
 
 struct irq_desc;

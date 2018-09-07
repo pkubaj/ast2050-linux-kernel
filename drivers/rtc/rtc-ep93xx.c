@@ -128,16 +128,12 @@ static int __init ep93xx_rtc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (res == NULL) {
-		err = -ENXIO;
-		goto fail_free;
-	}
+	if (res == NULL)
+		return -ENXIO;
 
 	res = request_mem_region(res->start, resource_size(res), pdev->name);
-	if (res == NULL) {
-		err = -EBUSY;
-		goto fail_free;
-	}
+	if (res == NULL)
+		return -EBUSY;
 
 	ep93xx_rtc->mmio_base = ioremap(res->start, resource_size(res));
 	if (ep93xx_rtc->mmio_base == NULL) {
@@ -173,8 +169,6 @@ fail:
 		pdev->dev.platform_data = NULL;
 	}
 	release_mem_region(res->start, resource_size(res));
-fail_free:
-	kfree(ep93xx_rtc);
 	return err;
 }
 

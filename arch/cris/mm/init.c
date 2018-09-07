@@ -54,7 +54,7 @@ mem_init(void)
         printk(KERN_INFO
                "Memory: %luk/%luk available (%dk kernel code, %dk reserved, %dk data, "
 	       "%dk init)\n" ,
-	       nr_free_pages() << (PAGE_SHIFT-10),
+	       (unsigned long) nr_free_pages() << (PAGE_SHIFT-10),
 	       max_mapnr << (PAGE_SHIFT-10),
 	       codesize >> 10,
 	       reservedpages << (PAGE_SHIFT-10),

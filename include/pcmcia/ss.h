@@ -90,14 +90,14 @@ typedef struct pccard_io_map {
 	u_char	map;
 	u_char	flags;
 	u_short	speed;
-	phys_addr_t start, stop;
+	u_int	start, stop;
 } pccard_io_map;
 
 typedef struct pccard_mem_map {
 	u_char		map;
 	u_char		flags;
 	u_short		speed;
-	phys_addr_t	static_start;
+	u_long		static_start;
 	u_int		card_start;
 	struct resource	*res;
 } pccard_mem_map;

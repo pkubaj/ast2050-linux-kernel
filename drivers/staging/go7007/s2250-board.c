@@ -21,9 +21,11 @@
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-common.h>
-#include "s2250-loader.h"
 #include "go7007-priv.h"
 #include "wis-i2c.h"
+
+extern int s2250loader_init(void);
+extern void s2250loader_cleanup(void);
 
 #define TLV320_ADDRESS      0x34
 #define VPX322_ADDR_ANALOGCONTROL1	0x02
@@ -32,7 +34,7 @@
 #define VPX322_ADDR_CONTRAST0		0x0128
 #define VPX322_ADDR_CONTRAST1		0x0132
 #define VPX322_ADDR_HUE			0x00dc
-#define VPX322_ADDR_SAT			0x0030
+#define VPX322_ADDR_SAT	 	        0x0030
 
 struct go7007_usb_board {
 	unsigned int flags;
@@ -41,7 +43,7 @@ struct go7007_usb_board {
 
 struct go7007_usb {
 	struct go7007_usb_board *board;
-	struct mutex i2c_lock;
+	struct semaphore i2c_lock;
 	struct usb_device *usbdev;
 	struct urb *video_urbs[8];
 	struct urb *audio_urbs[8];
@@ -112,7 +114,7 @@ static u16 vid_regs_fp_pal[] =
 };
 
 struct s2250 {
-	v4l2_std_id std;
+	int std;
 	int input;
 	int brightness;
 	int contrast;
@@ -163,7 +165,7 @@ static int write_reg(struct i2c_client *client, u8 reg, u8 value)
 		return -ENOMEM;
 
 	usb = go->hpi_context;
-	if (mutex_lock_interruptible(&usb->i2c_lock) != 0) {
+	if (down_interruptible(&usb->i2c_lock) != 0) {
 		printk(KERN_INFO "i2c lock failed\n");
 		kfree(buf);
 		return -EINTR;
@@ -173,7 +175,7 @@ static int write_reg(struct i2c_client *client, u8 reg, u8 value)
 				       buf,
 				       16, 1);
 
-	mutex_unlock(&usb->i2c_lock);
+	up(&usb->i2c_lock);
 	kfree(buf);
 	return rc;
 }
@@ -201,23 +203,19 @@ static int write_reg_fp(struct i2c_client *client, u16 addr, u16 val)
 	memset(buf, 0xcd, 6);
 
 	usb = go->hpi_context;
-	if (mutex_lock_interruptible(&usb->i2c_lock) != 0) {
+	if (down_interruptible(&usb->i2c_lock) != 0) {
 		printk(KERN_INFO "i2c lock failed\n");
-		kfree(buf);
 		return -EINTR;
 	}
-	if (go7007_usb_vendor_request(go, 0x57, addr, val, buf, 16, 1) < 0) {
-		kfree(buf);
+	if (go7007_usb_vendor_request(go, 0x57, addr, val, buf, 16, 1) < 0)
 		return -EFAULT;
-	}
 
-	mutex_unlock(&usb->i2c_lock);
+	up(&usb->i2c_lock);
 	if (buf[0] == 0) {
 		unsigned int subaddr, val_read;
 
 		subaddr = (buf[4] << 8) + buf[5];
 		val_read = (buf[2] << 8) + buf[3];
-		kfree(buf);
 		if (val_read != val) {
 			printk(KERN_INFO "invalid fp write %x %x\n",
 			       val_read, val);
@@ -228,10 +226,8 @@ static int write_reg_fp(struct i2c_client *client, u16 addr, u16 val)
 			       subaddr, addr);
 			return -EFAULT;
 		}
-	} else {
-		kfree(buf);
+	} else
 		return -EFAULT;
-	}
 
 	/* save last 12b value */
 	if (addr == 0x12b)
@@ -239,45 +235,6 @@ static int write_reg_fp(struct i2c_client *client, u16 addr, u16 val)
 
 	return 0;
 }
-
-static int read_reg_fp(struct i2c_client *client, u16 addr, u16 *val)
-{
-	struct go7007 *go = i2c_get_adapdata(client->adapter);
-	struct go7007_usb *usb;
-	u8 *buf;
-
-	if (go == NULL)
-		return -ENODEV;
-
-	if (go->status == STATUS_SHUTDOWN)
-		return -EBUSY;
-
-	buf = kzalloc(16, GFP_KERNEL);
-
-	if (buf == NULL)
-		return -ENOMEM;
-
-
-
-	memset(buf, 0xcd, 6);
-	usb = go->hpi_context;
-	if (mutex_lock_interruptible(&usb->i2c_lock) != 0) {
-		printk(KERN_INFO "i2c lock failed\n");
-		kfree(buf);
-		return -EINTR;
-	}
-	if (go7007_usb_vendor_request(go, 0x58, addr, 0, buf, 16, 1) < 0) {
-		kfree(buf);
-		return -EFAULT;
-	}
-	mutex_unlock(&usb->i2c_lock);
-
-	*val = (buf[0] << 8) | buf[1];
-	kfree(buf);
-
-	return 0;
-}
-
 
 static int write_regs(struct i2c_client *client, u8 *regs)
 {
@@ -393,42 +350,14 @@ static int s2250_command(struct i2c_client *client,
 	{
 		struct v4l2_control *ctrl = arg;
 		int value1;
-		u16 oldvalue;
 
 		switch (ctrl->id) {
 		case V4L2_CID_BRIGHTNESS:
-			if (ctrl->value > 100)
-				dec->brightness = 100;
-			else if (ctrl->value < 0)
-				dec->brightness = 0;
-			else
-				dec->brightness = ctrl->value;
-			value1 = (dec->brightness - 50) * 255 / 100;
-			read_reg_fp(client, VPX322_ADDR_BRIGHTNESS0, &oldvalue);
-			write_reg_fp(client, VPX322_ADDR_BRIGHTNESS0,
-				     value1 | (oldvalue & ~0xff));
-			read_reg_fp(client, VPX322_ADDR_BRIGHTNESS1, &oldvalue);
-			write_reg_fp(client, VPX322_ADDR_BRIGHTNESS1,
-				     value1 | (oldvalue & ~0xff));
-			write_reg_fp(client, 0x140, 0x60);
-			break;
+			printk(KERN_INFO "s2250: future setting\n");
+			return -EINVAL;
 		case V4L2_CID_CONTRAST:
-			if (ctrl->value > 100)
-				dec->contrast = 100;
-			else if (ctrl->value < 0)
-				dec->contrast = 0;
-			else
-				dec->contrast = ctrl->value;
-			value1 = dec->contrast * 0x40 / 100;
-			if (value1 > 0x3f)
-				value1 = 0x3f; /* max */
-			read_reg_fp(client, VPX322_ADDR_CONTRAST0, &oldvalue);
-			write_reg_fp(client, VPX322_ADDR_CONTRAST0,
-				     value1 | (oldvalue & ~0x3f));
-			read_reg_fp(client, VPX322_ADDR_CONTRAST1, &oldvalue);
-			write_reg_fp(client, VPX322_ADDR_CONTRAST1,
-				     value1 | (oldvalue & ~0x3f));
-			write_reg_fp(client, 0x140, 0x60);
+			printk(KERN_INFO "s2250: future setting\n");
+			return -EINVAL;
 			break;
 		case V4L2_CID_SATURATION:
 			if (ctrl->value > 127)
@@ -612,7 +541,7 @@ static int s2250_probe(struct i2c_client *client,
 	dec->audio_input = 0;
 	write_reg(client, 0x08, 0x02); /* Line In */
 
-	if (mutex_lock_interruptible(&usb->i2c_lock) == 0) {
+	if (down_interruptible(&usb->i2c_lock) == 0) {
 		data = kzalloc(16, GFP_KERNEL);
 		if (data != NULL) {
 			int rc;
@@ -631,7 +560,7 @@ static int s2250_probe(struct i2c_client *client,
 			}
 			kfree(data);
 		}
-		mutex_unlock(&usb->i2c_lock);
+		up(&usb->i2c_lock);
 	}
 
 	printk("s2250: initialized successfully\n");

@@ -456,8 +456,11 @@ static int rawv6_recvmsg(struct kiocb *iocb, struct sock *sk,
 	if (flags & MSG_OOB)
 		return -EOPNOTSUPP;
 
+	if (addr_len)
+		*addr_len=sizeof(*sin6);
+
 	if (flags & MSG_ERRQUEUE)
-		return ipv6_recv_error(sk, msg, len, addr_len);
+		return ipv6_recv_error(sk, msg, len);
 
 	skb = skb_recv_datagram(sk, flags, noblock, &err);
 	if (!skb)
@@ -492,7 +495,6 @@ static int rawv6_recvmsg(struct kiocb *iocb, struct sock *sk,
 		sin6->sin6_scope_id = 0;
 		if (ipv6_addr_type(&sin6->sin6_addr) & IPV6_ADDR_LINKLOCAL)
 			sin6->sin6_scope_id = IP6CB(skb)->iif;
-		*addr_len = sizeof(*sin6);
 	}
 
 	sock_recv_timestamp(msg, sk, skb);
@@ -640,7 +642,7 @@ static int rawv6_send_hdrinc(struct sock *sk, void *from, int length,
 	err = NF_HOOK(PF_INET6, NF_INET_LOCAL_OUT, skb, NULL, rt->u.dst.dev,
 		      dst_output);
 	if (err > 0)
-		err = net_xmit_errno(err);
+		err = np->recverr ? net_xmit_errno(err) : 0;
 	if (err)
 		goto error;
 out:
@@ -651,8 +653,6 @@ error_fault:
 	kfree_skb(skb);
 error:
 	IP6_INC_STATS(sock_net(sk), rt->rt6i_idev, IPSTATS_MIB_OUTDISCARDS);
-	if (err == -ENOBUFS && !np->recverr)
-		err = 0;
 	return err;
 }
 
@@ -877,8 +877,11 @@ static int rawv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 			hlimit = ip6_dst_hoplimit(dst);
 	}
 
-	if (tclass < 0)
+	if (tclass < 0) {
 		tclass = np->tclass;
+		if (tclass < 0)
+			tclass = 0;
+	}
 
 	if (msg->msg_flags&MSG_CONFIRM)
 		goto do_confirm;
@@ -955,7 +958,7 @@ static int rawv6_geticmpfilter(struct sock *sk, int level, int optname,
 
 
 static int do_rawv6_setsockopt(struct sock *sk, int level, int optname,
-			    char __user *optval, unsigned int optlen)
+			    char __user *optval, int optlen)
 {
 	struct raw6_sock *rp = raw6_sk(sk);
 	int val;
@@ -998,7 +1001,7 @@ static int do_rawv6_setsockopt(struct sock *sk, int level, int optname,
 }
 
 static int rawv6_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  char __user *optval, int optlen)
 {
 	switch(level) {
 		case SOL_RAW:
@@ -1022,7 +1025,7 @@ static int rawv6_setsockopt(struct sock *sk, int level, int optname,
 
 #ifdef CONFIG_COMPAT
 static int compat_rawv6_setsockopt(struct sock *sk, int level, int optname,
-				   char __user *optval, unsigned int optlen)
+				   char __user *optval, int optlen)
 {
 	switch (level) {
 	case SOL_RAW:

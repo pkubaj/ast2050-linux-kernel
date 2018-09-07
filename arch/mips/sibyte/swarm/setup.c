@@ -87,26 +87,19 @@ enum swarm_rtc_type {
 
 enum swarm_rtc_type swarm_rtc_type;
 
-void read_persistent_clock(struct timespec *ts)
+unsigned long read_persistent_clock(void)
 {
-	unsigned long sec;
-
 	switch (swarm_rtc_type) {
 	case RTC_XICOR:
-		sec = xicor_get_time();
-		break;
+		return xicor_get_time();
 
 	case RTC_M4LT81:
-		sec = m41t81_get_time();
-		break;
+		return m41t81_get_time();
 
 	case RTC_NONE:
 	default:
-		sec = mktime(2000, 1, 1, 0, 0, 0);
-		break;
+		return mktime(2000, 1, 1, 0, 0, 0);
 	}
-	ts->tv_sec = sec;
-	ts->tv_nsec = 0;
 }
 
 int rtc_mips_set_time(unsigned long sec)

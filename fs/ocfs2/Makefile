@@ -28,7 +28,6 @@ ocfs2-objs := \
 	locks.o			\
 	mmap.o 			\
 	namei.o 		\
-	refcounttree.o		\
 	resize.o		\
 	slot_map.o 		\
 	suballoc.o 		\

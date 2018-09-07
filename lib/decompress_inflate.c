@@ -27,11 +27,6 @@
 
 #define GZIP_IOBUF_SIZE (16*1024)
 
-static int nofill(void *buffer, unsigned int len)
-{
-	return -1;
-}
-
 /* Included from initramfs et al code */
 STATIC int INIT gunzip(unsigned char *buf, int len,
 		       int(*fill)(void*, unsigned int),
@@ -80,9 +75,6 @@ STATIC int INIT gunzip(unsigned char *buf, int len,
 		error("Out of memory while allocating workspace");
 		goto gunzip_nomem4;
 	}
-
-	if (!fill)
-		fill = nofill;
 
 	if (len == 0)
 		len = fill(zbuf, GZIP_IOBUF_SIZE);

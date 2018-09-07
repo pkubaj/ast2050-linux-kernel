@@ -220,8 +220,9 @@ static void mon_free_buff(struct mon_pgmap *map, int npages);
 
 /*
  * This is a "chunked memcpy". It does not manipulate any counters.
+ * But it returns the new offset for repeated application.
  */
-static void mon_copy_to_buff(const struct mon_reader_bin *this,
+unsigned int mon_copy_to_buff(const struct mon_reader_bin *this,
     unsigned int off, const unsigned char *from, unsigned int length)
 {
 	unsigned int step_len;
@@ -246,6 +247,7 @@ static void mon_copy_to_buff(const struct mon_reader_bin *this,
 		from += step_len;
 		length -= step_len;
 	}
+	return off;
 }
 
 /*
@@ -398,8 +400,15 @@ static char mon_bin_get_data(const struct mon_reader_bin *rp,
     unsigned int offset, struct urb *urb, unsigned int length)
 {
 
+	if (urb->dev->bus->uses_dma &&
+	    (urb->transfer_flags & URB_NO_TRANSFER_DMA_MAP)) {
+		mon_dmapeek_vec(rp, offset, urb->transfer_dma, length);
+		return 0;
+	}
+
 	if (urb->transfer_buffer == NULL)
 		return 'Z';
+
 	mon_copy_to_buff(rp, offset, urb->transfer_buffer, length);
 	return 0;
 }
@@ -629,6 +638,7 @@ static int mon_bin_open(struct inode *inode, struct file *file)
 	spin_lock_init(&rp->b_lock);
 	init_waitqueue_head(&rp->b_wait);
 	mutex_init(&rp->fetch_lock);
+
 	rp->b_size = BUFF_DFL;
 
 	size = sizeof(struct mon_pgmap) * (rp->b_size/CHUNK_SIZE);
@@ -971,7 +981,7 @@ static int mon_bin_ioctl(struct inode *inode, struct file *file,
 
 		mutex_lock(&rp->fetch_lock);
 		spin_lock_irqsave(&rp->b_lock, flags);
-		mon_free_buff(rp->b_vec, rp->b_size/CHUNK_SIZE);
+		mon_free_buff(rp->b_vec, size/CHUNK_SIZE);
 		kfree(rp->b_vec);
 		rp->b_vec  = vec;
 		rp->b_size = size;
@@ -1041,7 +1051,7 @@ static int mon_bin_ioctl(struct inode *inode, struct file *file,
 		nevents = mon_bin_queued(rp);
 
 		sp = (struct mon_bin_stats __user *)arg;
-		if (put_user(ndropped, &sp->dropped))
+		if (put_user(rp->cnt_lost, &sp->dropped))
 			return -EFAULT;
 		if (put_user(nevents, &sp->queued))
 			return -EFAULT;
@@ -1177,7 +1187,7 @@ static int mon_bin_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return 0;
 }
 
-static const struct vm_operations_struct mon_bin_vm_ops = {
+static struct vm_operations_struct mon_bin_vm_ops = {
 	.open =     mon_bin_vma_open,
 	.close =    mon_bin_vma_close,
 	.fault =    mon_bin_vma_fault,

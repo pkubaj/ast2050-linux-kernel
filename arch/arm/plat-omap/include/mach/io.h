@@ -54,33 +54,17 @@
  * ----------------------------------------------------------------------------
  */
 
-#ifdef __ASSEMBLER__
-#define IOMEM(x)		(x)
-#else
-#define IOMEM(x)		((void __force __iomem *)(x))
-#endif
+#if defined(CONFIG_ARCH_OMAP1)
 
-#define OMAP1_IO_OFFSET		0x01000000	/* Virtual IO = 0xfefb0000 */
-#define OMAP1_IO_ADDRESS(pa)	IOMEM((pa) - OMAP1_IO_OFFSET)
+#define IO_PHYS			0xFFFB0000
+#define IO_OFFSET		0x01000000	/* Virtual IO = 0xfefb0000 */
+#define IO_SIZE			0x40000
+#define IO_VIRT			(IO_PHYS - IO_OFFSET)
+#define __IO_ADDRESS(pa)	((pa) - IO_OFFSET)
+#define __OMAP1_IO_ADDRESS(pa)	((pa) - IO_OFFSET)
+#define io_v2p(va)		((va) + IO_OFFSET)
 
-#define OMAP2_IO_OFFSET		0x90000000
-#define OMAP2_IO_ADDRESS(pa)	IOMEM((pa) + OMAP2_IO_OFFSET) /* L3 and L4 */
-
-/*
- * ----------------------------------------------------------------------------
- * Omap1 specific IO mapping
- * ----------------------------------------------------------------------------
- */
-
-#define OMAP1_IO_PHYS		0xFFFB0000
-#define OMAP1_IO_SIZE		0x40000
-#define OMAP1_IO_VIRT		(OMAP1_IO_PHYS - OMAP1_IO_OFFSET)
-
-/*
- * ----------------------------------------------------------------------------
- * Omap2 specific IO mapping
- * ----------------------------------------------------------------------------
- */
+#elif defined(CONFIG_ARCH_OMAP2)
 
 /* We map both L3 and L4 on OMAP2 */
 #define L3_24XX_PHYS	L3_24XX_BASE	/* 0x68000000 */
@@ -103,6 +87,11 @@
 #define OMAP243X_SMS_VIRT	0xFC000000
 #define OMAP243X_SMS_SIZE	SZ_1M
 
+#define IO_OFFSET		0x90000000
+#define __IO_ADDRESS(pa)	((pa) + IO_OFFSET)	/* Works for L3 and L4 */
+#define __OMAP2_IO_ADDRESS(pa)	((pa) + IO_OFFSET)	/* Works for L3 and L4 */
+#define io_v2p(va)		((va) - IO_OFFSET)	/* Works for L3 and L4 */
+
 /* DSP */
 #define DSP_MEM_24XX_PHYS	OMAP2420_DSP_MEM_BASE	/* 0x58000000 */
 #define DSP_MEM_24XX_VIRT	0xe0000000
@@ -114,11 +103,7 @@
 #define DSP_MMU_24XX_VIRT	0xe2000000
 #define DSP_MMU_24XX_SIZE	SZ_4K
 
-/*
- * ----------------------------------------------------------------------------
- * Omap3 specific IO mapping
- * ----------------------------------------------------------------------------
- */
+#elif defined(CONFIG_ARCH_OMAP3)
 
 /* We map both L3 and L4 on OMAP3 */
 #define L3_34XX_PHYS		L3_34XX_BASE	/* 0x68000000 */
@@ -158,6 +143,12 @@
 #define OMAP343X_SDRC_VIRT	0xFD000000
 #define OMAP343X_SDRC_SIZE	SZ_1M
 
+
+#define IO_OFFSET		0x90000000
+#define __IO_ADDRESS(pa)	((pa) + IO_OFFSET)/* Works for L3 and L4 */
+#define __OMAP2_IO_ADDRESS(pa)	((pa) + IO_OFFSET)/* Works for L3 and L4 */
+#define io_v2p(va)		((va) - IO_OFFSET)/* Works for L3 and L4 */
+
 /* DSP */
 #define DSP_MEM_34XX_PHYS	OMAP34XX_DSP_MEM_BASE	/* 0x58000000 */
 #define DSP_MEM_34XX_VIRT	0xe0000000
@@ -169,12 +160,8 @@
 #define DSP_MMU_34XX_VIRT	0xe2000000
 #define DSP_MMU_34XX_SIZE	SZ_4K
 
-/*
- * ----------------------------------------------------------------------------
- * Omap4 specific IO mapping
- * ----------------------------------------------------------------------------
- */
 
+#elif defined(CONFIG_ARCH_OMAP4)
 /* We map both L3 and L4 on OMAP4 */
 #define L3_44XX_PHYS		L3_44XX_BASE
 #define L3_44XX_VIRT		0xd4000000
@@ -202,24 +189,38 @@
 #define OMAP44XX_GPMC_SIZE	SZ_1M
 
 
+#define IO_OFFSET		0x90000000
+#define __IO_ADDRESS(pa)	((pa) + IO_OFFSET)/* Works for L3 and L4 */
+#define __OMAP2_IO_ADDRESS(pa)	((pa) + IO_OFFSET)/* Works for L3 and L4 */
+#define io_v2p(va)		((va) - IO_OFFSET)/* Works for L3 and L4 */
+
+#endif
+
+#define IO_ADDRESS(pa)		IOMEM(__IO_ADDRESS(pa))
+#define OMAP1_IO_ADDRESS(pa)	IOMEM(__OMAP1_IO_ADDRESS(pa))
+#define OMAP2_IO_ADDRESS(pa)	IOMEM(__OMAP2_IO_ADDRESS(pa))
+
+#ifdef __ASSEMBLER__
+#define IOMEM(x)		(x)
+#else
+#define IOMEM(x)		((void __force __iomem *)(x))
+
 /*
- * ----------------------------------------------------------------------------
- * Omap specific register access
- * ----------------------------------------------------------------------------
+ * Functions to access the OMAP IO region
+ *
+ * NOTE: - Use omap_read/write[bwl] for physical register addresses
+ *	 - Use __raw_read/write[bwl]() for virtual register addresses
+ *	 - Use IO_ADDRESS(phys_addr) to convert registers to virtual addresses
+ *	 - DO NOT use hardcoded virtual addresses to allow changing the
+ *	   IO address space again if needed
  */
+#define omap_readb(a)		__raw_readb(IO_ADDRESS(a))
+#define omap_readw(a)		__raw_readw(IO_ADDRESS(a))
+#define omap_readl(a)		__raw_readl(IO_ADDRESS(a))
 
-#ifndef __ASSEMBLER__
-
-/*
- * NOTE: Please use ioremap + __raw_read/write where possible instead of these
- */
-
-extern u8 omap_readb(u32 pa);
-extern u16 omap_readw(u32 pa);
-extern u32 omap_readl(u32 pa);
-extern void omap_writeb(u8 v, u32 pa);
-extern void omap_writew(u16 v, u32 pa);
-extern void omap_writel(u32 v, u32 pa);
+#define omap_writeb(v,a)	__raw_writeb(v, IO_ADDRESS(a))
+#define omap_writew(v,a)	__raw_writew(v, IO_ADDRESS(a))
+#define omap_writel(v,a)	__raw_writel(v, IO_ADDRESS(a))
 
 struct omap_sdrc_params;
 

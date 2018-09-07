@@ -68,7 +68,7 @@ static void * r10bio_pool_alloc(gfp_t gfp_flags, void *data)
 
 	/* allocate a r10bio with room for raid_disks entries in the bios array */
 	r10_bio = kzalloc(size, gfp_flags);
-	if (!r10_bio && conf->mddev)
+	if (!r10_bio)
 		unplug_slaves(conf->mddev);
 
 	return r10_bio;
@@ -493,7 +493,7 @@ static int raid10_mergeable_bvec(struct request_queue *q,
  */
 static int read_balance(conf_t *conf, r10bio_t *r10_bio)
 {
-	const sector_t this_sector = r10_bio->sector;
+	const unsigned long this_sector = r10_bio->sector;
 	int disk, slot, nslot;
 	const int sectors = r10_bio->sectors;
 	sector_t new_distance, current_distance;
@@ -631,8 +631,6 @@ static int raid10_congested(void *data, int bits)
 	conf_t *conf = mddev->private;
 	int i, ret = 0;
 
-	if (mddev_congested(mddev, bits))
-		return 1;
 	rcu_read_lock();
 	for (i = 0; i < mddev->raid_disks && ret == 0; i++) {
 		mdk_rdev_t *rdev = rcu_dereference(conf->mirrors[i].rdev);
@@ -798,12 +796,12 @@ static int make_request(struct request_queue *q, struct bio * bio)
 	int i;
 	int chunk_sects = conf->chunk_mask + 1;
 	const int rw = bio_data_dir(bio);
-	const bool do_sync = bio_rw_flagged(bio, BIO_RW_SYNCIO);
+	const int do_sync = bio_sync(bio);
 	struct bio_list bl;
 	unsigned long flags;
 	mdk_rdev_t *blocked_rdev;
 
-	if (unlikely(bio_rw_flagged(bio, BIO_RW_BARRIER))) {
+	if (unlikely(bio_barrier(bio))) {
 		bio_endio(bio, -EOPNOTSUPP);
 		return 0;
 	}
@@ -824,28 +822,10 @@ static int make_request(struct request_queue *q, struct bio * bio)
 		 */
 		bp = bio_split(bio,
 			       chunk_sects - (bio->bi_sector & (chunk_sects - 1)) );
-
-		/* Each of these 'make_request' calls will call 'wait_barrier'.
-		 * If the first succeeds but the second blocks due to the resync
-		 * thread raising the barrier, we will deadlock because the
-		 * IO to the underlying device will be queued in generic_make_request
-		 * and will never complete, so will never reduce nr_pending.
-		 * So increment nr_waiting here so no new raise_barriers will
-		 * succeed, and so the second wait_barrier cannot block.
-		 */
-		spin_lock_irq(&conf->resync_lock);
-		conf->nr_waiting++;
-		spin_unlock_irq(&conf->resync_lock);
-
 		if (make_request(q, &bp->bio1))
 			generic_make_request(&bp->bio1);
 		if (make_request(q, &bp->bio2))
 			generic_make_request(&bp->bio2);
-
-		spin_lock_irq(&conf->resync_lock);
-		conf->nr_waiting--;
-		wake_up(&conf->wait_barrier);
-		spin_unlock_irq(&conf->resync_lock);
 
 		bio_pair_release(bp);
 		return 0;
@@ -902,7 +882,7 @@ static int make_request(struct request_queue *q, struct bio * bio)
 			mirror->rdev->data_offset;
 		read_bio->bi_bdev = mirror->rdev->bdev;
 		read_bio->bi_end_io = raid10_end_read_request;
-		read_bio->bi_rw = READ | (do_sync << BIO_RW_SYNCIO);
+		read_bio->bi_rw = READ | do_sync;
 		read_bio->bi_private = r10_bio;
 
 		generic_make_request(read_bio);
@@ -970,7 +950,7 @@ static int make_request(struct request_queue *q, struct bio * bio)
 			conf->mirrors[d].rdev->data_offset;
 		mbio->bi_bdev = conf->mirrors[d].rdev->bdev;
 		mbio->bi_end_io	= raid10_end_write_request;
-		mbio->bi_rw = WRITE | (do_sync << BIO_RW_SYNCIO);
+		mbio->bi_rw = WRITE | do_sync;
 		mbio->bi_private = r10_bio;
 
 		atomic_inc(&r10_bio->remaining);
@@ -1173,17 +1153,13 @@ static int raid10_add_disk(mddev_t *mddev, mdk_rdev_t *rdev)
 
 			disk_stack_limits(mddev->gendisk, rdev->bdev,
 					  rdev->data_offset << 9);
-			/* as we don't honour merge_bvec_fn, we must
-			 * never risk violating it, so limit
-			 * ->max_phys_segments to one lying with a single
-			 * page, as a one page request is never in
-			 * violation.
+			/* as we don't honour merge_bvec_fn, we must never risk
+			 * violating it, so limit ->max_sector to one PAGE, as
+			 * a one page request is never in violation.
 			 */
-			if (rdev->bdev->bd_disk->queue->merge_bvec_fn) {
-				blk_queue_max_phys_segments(mddev->queue, 1);
-				blk_queue_segment_boundary(mddev->queue,
-							   PAGE_CACHE_SIZE - 1);
-			}
+			if (rdev->bdev->bd_disk->queue->merge_bvec_fn &&
+			    queue_max_sectors(mddev->queue) > (PAGE_SIZE>>9))
+				blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
 			p->head_position = 0;
 			rdev->raid_disk = mirror;
@@ -1634,7 +1610,7 @@ static void raid10d(mddev_t *mddev)
 				raid_end_bio_io(r10_bio);
 				bio_put(bio);
 			} else {
-				const bool do_sync = bio_rw_flagged(r10_bio->master_bio, BIO_RW_SYNCIO);
+				const int do_sync = bio_sync(r10_bio->master_bio);
 				bio_put(bio);
 				rdev = conf->mirrors[mirror].rdev;
 				if (printk_ratelimit())
@@ -1647,7 +1623,7 @@ static void raid10d(mddev_t *mddev)
 				bio->bi_sector = r10_bio->devs[r10_bio->read_slot].addr
 					+ rdev->data_offset;
 				bio->bi_bdev = rdev->bdev;
-				bio->bi_rw = READ | (do_sync << BIO_RW_SYNCIO);
+				bio->bi_rw = READ | do_sync;
 				bio->bi_private = r10_bio;
 				bio->bi_end_io = raid10_end_read_request;
 				unplug = 1;
@@ -1798,7 +1774,7 @@ static sector_t sync_request(mddev_t *mddev, sector_t sector_nr, int *skipped, i
 	max_sync = RESYNC_PAGES << (PAGE_SHIFT-9);
 	if (!test_bit(MD_RECOVERY_SYNC, &mddev->recovery)) {
 		/* recovery... the complicated one */
-		int j, k;
+		int i, j, k;
 		r10_bio = NULL;
 
 		for (i=0 ; i<conf->raid_disks; i++)
@@ -2118,6 +2094,7 @@ static int run(mddev_t *mddev)
 	if (!conf->tmppage)
 		goto out_free_conf;
 
+	conf->mddev = mddev;
 	conf->raid_disks = mddev->raid_disks;
 	conf->near_copies = nc;
 	conf->far_copies = fc;
@@ -2154,7 +2131,6 @@ static int run(mddev_t *mddev)
 		goto out_free_conf;
 	}
 
-	conf->mddev = mddev;
 	spin_lock_init(&conf->device_lock);
 	mddev->queue->queue_lock = &conf->device_lock;
 
@@ -2177,14 +2153,12 @@ static int run(mddev_t *mddev)
 		disk_stack_limits(mddev->gendisk, rdev->bdev,
 				  rdev->data_offset << 9);
 		/* as we don't honour merge_bvec_fn, we must never risk
-		 * violating it, so limit max_phys_segments to 1 lying
-		 * within a single page.
+		 * violating it, so limit ->max_sector to one PAGE, as
+		 * a one page request is never in violation.
 		 */
-		if (rdev->bdev->bd_disk->queue->merge_bvec_fn) {
-			blk_queue_max_phys_segments(mddev->queue, 1);
-			blk_queue_segment_boundary(mddev->queue,
-						   PAGE_CACHE_SIZE - 1);
-		}
+		if (rdev->bdev->bd_disk->queue->merge_bvec_fn &&
+		    queue_max_sectors(mddev->queue) > (PAGE_SIZE>>9))
+			blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
 		disk->head_position = 0;
 	}
@@ -2215,7 +2189,7 @@ static int run(mddev_t *mddev)
 	}
 
 
-	mddev->thread = md_register_thread(raid10d, mddev, NULL);
+	mddev->thread = md_register_thread(raid10d, mddev, "%s_raid10");
 	if (!mddev->thread) {
 		printk(KERN_ERR
 		       "raid10: couldn't allocate thread for %s\n",

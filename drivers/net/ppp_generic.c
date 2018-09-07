@@ -590,7 +590,7 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			if (file == ppp->owner)
 				ppp_shutdown_interface(ppp);
 		}
-		if (atomic_long_read(&file->f_count) < 2) {
+		if (atomic_long_read(&file->f_count) <= 2) {
 			ppp_release(NULL, file);
 			err = 0;
 		} else
@@ -705,8 +705,9 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			val &= 0xffff;
 		}
 		vj = slhc_init(val2+1, val+1);
-		if (IS_ERR(vj)) {
-			err = PTR_ERR(vj);
+		if (!vj) {
+			printk(KERN_ERR "PPP: no memory (VJ compressor)\n");
+			err = -ENOMEM;
 			break;
 		}
 		ppp_lock(ppp);
@@ -950,7 +951,7 @@ out:
 /*
  * Network interface unit routines.
  */
-static netdev_tx_t
+static int
 ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ppp *ppp = netdev_priv(dev);
@@ -987,12 +988,12 @@ ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	netif_stop_queue(dev);
 	skb_queue_tail(&ppp->file.xq, skb);
 	ppp_xmit_process(ppp);
-	return NETDEV_TX_OK;
+	return 0;
 
  outf:
 	kfree_skb(skb);
 	++dev->stats.tx_dropped;
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static int
@@ -1430,7 +1431,6 @@ static int ppp_mp_explode(struct ppp *ppp, struct sk_buff *skb)
 		*otherwise divide it according to the speed
 		*of the channel we are going to transmit on
 		*/
-		flen = len;
 		if (nfree > 0) {
 			if (pch->speed == 0) {
 				flen = totlen/nfree	;
@@ -1943,15 +1943,8 @@ ppp_receive_mp_frame(struct ppp *ppp, struct sk_buff *skb, struct channel *pch)
 	}
 
 	/* Pull completed packets off the queue and receive them. */
-	while ((skb = ppp_mp_reconstruct(ppp))) {
-		if (pskb_may_pull(skb, 2))
-			ppp_receive_nonmp_frame(ppp, skb);
-		else {
-			++ppp->dev->stats.rx_length_errors;
-			kfree_skb(skb);
-			ppp_receive_error(ppp);
-		}
-	}
+	while ((skb = ppp_mp_reconstruct(ppp)))
+		ppp_receive_nonmp_frame(ppp, skb);
 
 	return;
 

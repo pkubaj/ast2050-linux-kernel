@@ -68,13 +68,21 @@ static int zpff_init(struct hid_device *hid)
 	struct hid_report *report;
 	struct hid_input *hidinput = list_entry(hid->inputs.next,
 						struct hid_input, list);
+	struct list_head *report_list =
+			&hid->report_enum[HID_OUTPUT_REPORT].report_list;
 	struct input_dev *dev = hidinput->input;
-	int i, error;
+	int error;
 
-	for (i = 0; i < 4; i++) {
-		report = hid_validate_values(hid, HID_OUTPUT_REPORT, 0, i, 1);
-		if (!report)
-			return -ENODEV;
+	if (list_empty(report_list)) {
+		dev_err(&hid->dev, "no output report found\n");
+		return -ENODEV;
+	}
+
+	report = list_entry(report_list->next, struct hid_report, list);
+
+	if (report->maxfield < 4) {
+		dev_err(&hid->dev, "not enough fields in report\n");
+		return -ENODEV;
 	}
 
 	zpff = kzalloc(sizeof(struct zpff_device), GFP_KERNEL);
@@ -144,12 +152,12 @@ static struct hid_driver zp_driver = {
 	.probe = zp_probe,
 };
 
-static int __init zp_init(void)
+static int zp_init(void)
 {
 	return hid_register_driver(&zp_driver);
 }
 
-static void __exit zp_exit(void)
+static void zp_exit(void)
 {
 	hid_unregister_driver(&zp_driver);
 }

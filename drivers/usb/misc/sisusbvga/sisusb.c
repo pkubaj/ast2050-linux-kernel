@@ -79,12 +79,14 @@ sisusb_free_buffers(struct sisusb_usb_data *sisusb)
 
 	for (i = 0; i < NUMOBUFS; i++) {
 		if (sisusb->obuf[i]) {
-			kfree(sisusb->obuf[i]);
+			usb_buffer_free(sisusb->sisusb_dev, sisusb->obufsize,
+				sisusb->obuf[i], sisusb->transfer_dma_out[i]);
 			sisusb->obuf[i] = NULL;
 		}
 	}
 	if (sisusb->ibuf) {
-		kfree(sisusb->ibuf);
+		usb_buffer_free(sisusb->sisusb_dev, sisusb->ibufsize,
+			sisusb->ibuf, sisusb->transfer_dma_in);
 		sisusb->ibuf = NULL;
 	}
 }
@@ -228,7 +230,8 @@ sisusb_bulk_completeout(struct urb *urb)
 
 static int
 sisusb_bulkout_msg(struct sisusb_usb_data *sisusb, int index, unsigned int pipe, void *data,
-		int len, int *actual_length, int timeout, unsigned int tflags)
+		int len, int *actual_length, int timeout, unsigned int tflags,
+		dma_addr_t transfer_dma)
 {
 	struct urb *urb = sisusb->sisurbout[index];
 	int retval, byteswritten = 0;
@@ -241,6 +244,9 @@ sisusb_bulkout_msg(struct sisusb_usb_data *sisusb, int index, unsigned int pipe,
 
 	urb->transfer_flags |= tflags;
 	urb->actual_length = 0;
+
+	if ((urb->transfer_dma = transfer_dma))
+		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 
 	/* Set up context */
 	sisusb->urbout_context[index].actual_length = (timeout) ?
@@ -291,8 +297,8 @@ sisusb_bulk_completein(struct urb *urb)
 }
 
 static int
-sisusb_bulkin_msg(struct sisusb_usb_data *sisusb, unsigned int pipe, void *data,
-	int len, int *actual_length, int timeout, unsigned int tflags)
+sisusb_bulkin_msg(struct sisusb_usb_data *sisusb, unsigned int pipe, void *data, int len,
+		int *actual_length, int timeout, unsigned int tflags, dma_addr_t transfer_dma)
 {
 	struct urb *urb = sisusb->sisurbin;
 	int retval, readbytes = 0;
@@ -304,6 +310,9 @@ sisusb_bulkin_msg(struct sisusb_usb_data *sisusb, unsigned int pipe, void *data,
 
 	urb->transfer_flags |= tflags;
 	urb->actual_length = 0;
+
+	if ((urb->transfer_dma = transfer_dma))
+		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 
 	sisusb->completein = 0;
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
@@ -413,7 +422,8 @@ static int sisusb_send_bulk_msg(struct sisusb_usb_data *sisusb, int ep, int len,
 						thispass,
 						&transferred_len,
 						async ? 0 : 5 * HZ,
-						tflags);
+						tflags,
+						sisusb->transfer_dma_out[index]);
 
 			if (result == -ETIMEDOUT) {
 
@@ -422,16 +432,29 @@ static int sisusb_send_bulk_msg(struct sisusb_usb_data *sisusb, int ep, int len,
 					return -ETIME;
 
 				continue;
-			}
 
-			if ((result == 0) && !async && transferred_len) {
+			} else if ((result == 0) && !async && transferred_len) {
 
 				thispass -= transferred_len;
-				buffer += transferred_len;
+				if (thispass) {
+					if (sisusb->transfer_dma_out) {
+						/* If DMA, copy remaining
+						 * to beginning of buffer
+						 */
+						memcpy(buffer,
+						       buffer + transferred_len,
+						       thispass);
+					} else {
+						/* If not DMA, simply increase
+						 * the pointer
+						 */
+						buffer += transferred_len;
+					}
+				}
 
 			} else
 				break;
-		}
+		};
 
 		if (result)
 			return result;
@@ -507,7 +530,8 @@ static int sisusb_recv_bulk_msg(struct sisusb_usb_data *sisusb, int ep, int len,
 					   thispass,
 					   &transferred_len,
 					   5 * HZ,
-					   tflags);
+					   tflags,
+					   sisusb->transfer_dma_in);
 
 		if (transferred_len)
 			thispass = transferred_len;
@@ -2435,8 +2459,7 @@ sisusb_open(struct inode *inode, struct file *file)
 	}
 
 	if (!sisusb->devinit) {
-		if (sisusb->sisusb_dev->speed == USB_SPEED_HIGH ||
-		    sisusb->sisusb_dev->speed == USB_SPEED_SUPER) {
+		if (sisusb->sisusb_dev->speed == USB_SPEED_HIGH) {
 			if (sisusb_init_gfxdevice(sisusb, 0)) {
 				mutex_unlock(&sisusb->lock);
 				dev_err(&sisusb->sisusb_dev->dev, "Failed to initialize device\n");
@@ -3008,7 +3031,6 @@ sisusb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 #else
 			x.sisusb_conactive  = 0;
 #endif
-			memset(x.sisusb_reserved, 0, sizeof(x.sisusb_reserved));
 
 			if (copy_to_user((void __user *)arg, &x, sizeof(x)))
 				retval = -EFAULT;
@@ -3110,7 +3132,8 @@ static int sisusb_probe(struct usb_interface *intf,
 
 	/* Allocate buffers */
 	sisusb->ibufsize = SISUSB_IBUF_SIZE;
-	if (!(sisusb->ibuf = kmalloc(SISUSB_IBUF_SIZE, GFP_KERNEL))) {
+	if (!(sisusb->ibuf = usb_buffer_alloc(dev, SISUSB_IBUF_SIZE,
+					GFP_KERNEL, &sisusb->transfer_dma_in))) {
 		dev_err(&sisusb->sisusb_dev->dev, "Failed to allocate memory for input buffer");
 		retval = -ENOMEM;
 		goto error_2;
@@ -3119,7 +3142,9 @@ static int sisusb_probe(struct usb_interface *intf,
 	sisusb->numobufs = 0;
 	sisusb->obufsize = SISUSB_OBUF_SIZE;
 	for (i = 0; i < NUMOBUFS; i++) {
-		if (!(sisusb->obuf[i] = kmalloc(SISUSB_OBUF_SIZE, GFP_KERNEL))) {
+		if (!(sisusb->obuf[i] = usb_buffer_alloc(dev, SISUSB_OBUF_SIZE,
+					GFP_KERNEL,
+					&sisusb->transfer_dma_out[i]))) {
 			if (i == 0) {
 				dev_err(&sisusb->sisusb_dev->dev, "Failed to allocate memory for output buffer\n");
 				retval = -ENOMEM;
@@ -3169,7 +3194,7 @@ static int sisusb_probe(struct usb_interface *intf,
 
 	sisusb->present = 1;
 
-	if (dev->speed == USB_SPEED_HIGH || dev->speed == USB_SPEED_SUPER) {
+	if (dev->speed == USB_SPEED_HIGH) {
 		int initscreen = 1;
 #ifdef INCL_SISUSB_CON
 		if (sisusb_first_vc > 0 &&
@@ -3247,7 +3272,6 @@ static struct usb_device_id sisusb_table [] = {
 	{ USB_DEVICE(0x0711, 0x0902) },
 	{ USB_DEVICE(0x0711, 0x0903) },
 	{ USB_DEVICE(0x0711, 0x0918) },
-	{ USB_DEVICE(0x0711, 0x0920) },
 	{ USB_DEVICE(0x182d, 0x021c) },
 	{ USB_DEVICE(0x182d, 0x0269) },
 	{ }

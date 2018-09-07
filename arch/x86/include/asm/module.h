@@ -1,7 +1,18 @@
 #ifndef _ASM_X86_MODULE_H
 #define _ASM_X86_MODULE_H
 
-#include <asm-generic/module.h>
+/* x86_32/64 are simple */
+struct mod_arch_specific {};
+
+#ifdef CONFIG_X86_32
+# define Elf_Shdr Elf32_Shdr
+# define Elf_Sym Elf32_Sym
+# define Elf_Ehdr Elf32_Ehdr
+#else
+# define Elf_Shdr Elf64_Shdr
+# define Elf_Sym Elf64_Sym
+# define Elf_Ehdr Elf64_Ehdr
+#endif
 
 #ifdef CONFIG_X86_64
 /* X86_64 does not define MODULE_PROC_FAMILY */
@@ -17,8 +28,6 @@
 #define MODULE_PROC_FAMILY "586MMX "
 #elif defined CONFIG_MCORE2
 #define MODULE_PROC_FAMILY "CORE2 "
-#elif defined CONFIG_MATOM
-#define MODULE_PROC_FAMILY "ATOM "
 #elif defined CONFIG_M686
 #define MODULE_PROC_FAMILY "686 "
 #elif defined CONFIG_MPENTIUMII

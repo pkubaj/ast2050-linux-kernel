@@ -14,9 +14,6 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 
@@ -47,7 +44,7 @@ ip_vs_lc_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
 	struct ip_vs_dest *dest, *least = NULL;
 	unsigned int loh = 0, doh;
 
-	IP_VS_DBG(6, "%s(): Scheduling...\n", __func__);
+	IP_VS_DBG(6, "ip_vs_lc_schedule(): Scheduling...\n");
 
 	/*
 	 * Simply select the server with the least number of

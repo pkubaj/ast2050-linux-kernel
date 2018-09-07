@@ -352,6 +352,7 @@ int __devinit init_bttv_i2c(struct bttv *btv)
 		/* bt878 */
 		strlcpy(btv->c.i2c_adap.name, "bt878",
 			sizeof(btv->c.i2c_adap.name));
+		btv->c.i2c_adap.id = I2C_HW_B_BT848;	/* FIXME */
 		btv->c.i2c_adap.algo = &bttv_algo;
 	} else {
 		/* bt848 */
@@ -361,6 +362,7 @@ int __devinit init_bttv_i2c(struct bttv *btv)
 
 		strlcpy(btv->c.i2c_adap.name, "bttv",
 			sizeof(btv->c.i2c_adap.name));
+		btv->c.i2c_adap.id = I2C_HW_B_BT848;
 		memcpy(&btv->i2c_algo, &bttv_i2c_algo_bit_template,
 		       sizeof(bttv_i2c_algo_bit_template));
 		btv->i2c_algo.udelay = i2c_udelay;
@@ -388,12 +390,7 @@ int __devinit init_bttv_i2c(struct bttv *btv)
 	if (0 == btv->i2c_rc && i2c_scan)
 		do_i2c_scan(btv->c.v4l2_dev.name, &btv->i2c_client);
 
-	return btv->i2c_rc;
-}
-
-/* Instantiate the I2C IR receiver device, if present */
-void __devinit init_bttv_i2c_ir(struct bttv *btv)
-{
+	/* Instantiate the IR receiver device, if present */
 	if (0 == btv->i2c_rc) {
 		struct i2c_board_info info;
 		/* The external IR receiver is at i2c address 0x34 (0x35 for
@@ -413,6 +410,7 @@ void __devinit init_bttv_i2c_ir(struct bttv *btv)
 		strlcpy(info.type, "ir_video", I2C_NAME_SIZE);
 		i2c_new_probed_device(&btv->c.i2c_adap, &info, addr_list);
 	}
+	return btv->i2c_rc;
 }
 
 int __devexit fini_bttv_i2c(struct bttv *btv)

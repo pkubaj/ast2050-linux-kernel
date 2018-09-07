@@ -352,9 +352,7 @@ static int pohmelfs_sync_remote_dir(struct pohmelfs_inode *pi)
 			test_bit(NETFS_INODE_REMOTE_DIR_SYNCED, &pi->state) || pi->error, ret);
 	dprintk("%s: awake dir: %llu, ret: %ld, err: %d.\n", __func__, pi->ino, ret, pi->error);
 	if (ret <= 0) {
-		err = ret;
-		if (!err)
-			err = -ETIMEDOUT;
+		err = -ETIMEDOUT;
 		goto err_out_exit;
 	}
 
@@ -414,7 +412,7 @@ static int pohmelfs_readdir(struct file *file, void *dirent, filldir_t filldir)
 				__func__, file->f_pos, pi->ino, n->data, n->len,
 				n->ino, n->mode, mode, file->f_pos, n->hash);
 
-		file->private_data = (void *)(unsigned long)n->hash;
+		file->private_data = (void *)n->hash;
 
 		len = n->len;
 		err = filldir(dirent, n->data, n->len, file->f_pos, n->ino, mode);
@@ -474,11 +472,10 @@ static int pohmelfs_lookup_single(struct pohmelfs_inode *parent,
 	err = 0;
 	ret = wait_event_interruptible_timeout(psb->wait,
 			!test_bit(NETFS_COMMAND_PENDING, &parent->state), ret);
-	if (ret <= 0) {
-		err = ret;
-		if (!err)
-			err = -ETIMEDOUT;
-	}
+	if (ret == 0)
+		err = -ETIMEDOUT;
+	else if (signal_pending(current))
+		err = -EINTR;
 
 	if (err)
 		goto err_out_exit;
@@ -508,21 +505,13 @@ struct dentry *pohmelfs_lookup(struct inode *dir, struct dentry *dentry, struct 
 	struct pohmelfs_name *n;
 	struct inode *inode = NULL;
 	unsigned long ino = 0;
-	int err, lock_type = POHMELFS_READ_LOCK, need_lock = 1;
+	int err, lock_type = POHMELFS_READ_LOCK, need_lock;
 	struct qstr str = dentry->d_name;
 
 	if ((nd->intent.open.flags & O_ACCMODE) > 1)
 		lock_type = POHMELFS_WRITE_LOCK;
 
-	if (test_bit(NETFS_INODE_OWNED, &parent->state)) {
-		if (lock_type == parent->lock_type)
-			need_lock = 0;
-		if ((lock_type == POHMELFS_READ_LOCK) && (parent->lock_type == POHMELFS_WRITE_LOCK))
-			need_lock = 0;
-	}
-
-	if ((lock_type == POHMELFS_READ_LOCK) && !test_bit(NETFS_INODE_REMOTE_DIR_SYNCED, &parent->state))
-		need_lock = 1;
+	need_lock = pohmelfs_need_lock(parent, lock_type);
 
 	str.hash = jhash(dentry->d_name.name, dentry->d_name.len, 0);
 

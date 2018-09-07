@@ -78,11 +78,9 @@ static int __devinit create_gpio_led(const struct gpio_led *template,
 {
 	int ret, state;
 
-	led_dat->gpio = -1;
-
 	/* skip leds that aren't available */
 	if (!gpio_is_valid(template->gpio)) {
-		printk(KERN_INFO "Skipping unavailable LED gpio %d (%s)\n",
+		printk(KERN_INFO "Skipping unavilable LED gpio %d (%s)\n", 
 				template->gpio, template->name);
 		return 0;
 	}
@@ -211,6 +209,7 @@ static int __devinit of_gpio_leds_probe(struct of_device *ofdev,
 					const struct of_device_id *match)
 {
 	struct device_node *np = ofdev->node, *child;
+	struct gpio_led led;
 	struct gpio_led_of_platform_data *pdata;
 	int count = 0, ret;
 
@@ -225,8 +224,8 @@ static int __devinit of_gpio_leds_probe(struct of_device *ofdev,
 	if (!pdata)
 		return -ENOMEM;
 
+	memset(&led, 0, sizeof(led));
 	for_each_child_of_node(np, child) {
-		struct gpio_led led = {};
 		enum of_gpio_flags flags;
 		const char *state;
 

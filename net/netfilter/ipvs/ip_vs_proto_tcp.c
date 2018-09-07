@@ -13,9 +13,6 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>                  /* for tcphdr */
@@ -147,15 +144,15 @@ tcp_partial_csum_update(int af, struct tcphdr *tcph,
 #ifdef CONFIG_IP_VS_IPV6
 	if (af == AF_INET6)
 		tcph->check =
-			~csum_fold(ip_vs_check_diff16(oldip->ip6, newip->ip6,
+			csum_fold(ip_vs_check_diff16(oldip->ip6, newip->ip6,
 					 ip_vs_check_diff2(oldlen, newlen,
-						csum_unfold(tcph->check))));
+						~csum_unfold(tcph->check))));
 	else
 #endif
 	tcph->check =
-		~csum_fold(ip_vs_check_diff4(oldip->ip, newip->ip,
+		csum_fold(ip_vs_check_diff4(oldip->ip, newip->ip,
 				ip_vs_check_diff2(oldlen, newlen,
-						csum_unfold(tcph->check))));
+						~csum_unfold(tcph->check))));
 }
 
 
@@ -269,7 +266,7 @@ tcp_dnat_handler(struct sk_buff *skb,
 	 *	Adjust TCP checksums
 	 */
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
-		tcp_partial_csum_update(cp->af, tcph, &cp->vaddr, &cp->daddr,
+		tcp_partial_csum_update(cp->af, tcph, &cp->daddr, &cp->vaddr,
 					htons(oldlen),
 					htons(skb->len - tcphoff));
 	} else if (!cp->app) {
@@ -377,7 +374,7 @@ static int tcp_timeouts[IP_VS_TCP_S_LAST+1] = {
 	[IP_VS_TCP_S_LAST]		=	2*HZ,
 };
 
-static const char *const tcp_state_name_table[IP_VS_TCP_S_LAST+1] = {
+static char * tcp_state_name_table[IP_VS_TCP_S_LAST+1] = {
 	[IP_VS_TCP_S_NONE]		=	"NONE",
 	[IP_VS_TCP_S_ESTABLISHED]	=	"ESTABLISHED",
 	[IP_VS_TCP_S_SYN_SENT]		=	"SYN_SENT",
@@ -664,7 +661,7 @@ tcp_app_conn_bind(struct ip_vs_conn *cp)
 				break;
 			spin_unlock(&tcp_app_lock);
 
-			IP_VS_DBG_BUF(9, "%s(): Binding conn %s:%u->"
+			IP_VS_DBG_BUF(9, "%s: Binding conn %s:%u->"
 				      "%s:%u to app %s on port %u\n",
 				      __func__,
 				      IP_VS_DBG_ADDR(cp->af, &cp->caddr),

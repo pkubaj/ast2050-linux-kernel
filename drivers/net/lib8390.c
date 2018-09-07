@@ -299,8 +299,7 @@ static void __ei_tx_timeout(struct net_device *dev)
  * Sends a packet to an 8390 network device.
  */
 
-static netdev_tx_t __ei_start_xmit(struct sk_buff *skb,
-				   struct net_device *dev)
+static int __ei_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	unsigned long e8390_base = dev->base_addr;
 	struct ei_device *ei_local = (struct ei_device *) netdev_priv(dev);
@@ -415,7 +414,7 @@ static netdev_tx_t __ei_start_xmit(struct sk_buff *skb,
 	dev_kfree_skb (skb);
 	dev->stats.tx_bytes += send_length;
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /**

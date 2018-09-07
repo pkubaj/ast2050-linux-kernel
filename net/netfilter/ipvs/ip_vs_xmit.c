@@ -13,9 +13,6 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/tcp.h>                  /* for tcphdr */
 #include <net/ip.h>
@@ -62,15 +59,6 @@ __ip_vs_dst_check(struct ip_vs_dest *dest, u32 rtos, u32 cookie)
 	}
 	dst_hold(dst);
 	return dst;
-}
-
-static inline bool
-__mtu_check_toobig_v6(const struct sk_buff *skb, u32 mtu)
-{
-	if (skb->len > mtu && !skb_is_gso(skb)) {
-		return true; /* Packet size violate MTU size */
-	}
-	return false;
 }
 
 static struct rtable *
@@ -247,18 +235,17 @@ ip_vs_bypass_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	EnterFunction(10);
 
 	if (ip_route_output_key(&init_net, &rt, &fl)) {
-		IP_VS_DBG_RL("%s(): ip_route_output error, dest: %pI4\n",
-			     __func__, &iph->daddr);
+		IP_VS_DBG_RL("ip_vs_bypass_xmit(): ip_route_output error, dest: %pI4\n",
+			     &iph->daddr);
 		goto tx_error_icmp;
 	}
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if ((skb->len > mtu) && (iph->frag_off & htons(IP_DF)) &&
-	    !skb_is_gso(skb)) {
+	if ((skb->len > mtu) && (iph->frag_off & htons(IP_DF))) {
 		ip_rt_put(rt);
 		icmp_send(skb, ICMP_DEST_UNREACH,ICMP_FRAG_NEEDED, htonl(mtu));
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_bypass_xmit(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -312,17 +299,17 @@ ip_vs_bypass_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	rt = (struct rt6_info *)ip6_route_output(&init_net, NULL, &fl);
 	if (!rt) {
-		IP_VS_DBG_RL("%s(): ip6_route_output error, dest: %pI6\n",
-			     __func__, &iph->daddr);
+		IP_VS_DBG_RL("ip_vs_bypass_xmit_v6(): ip6_route_output error, dest: %pI6\n",
+			     &iph->daddr);
 		goto tx_error_icmp;
 	}
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if (__mtu_check_toobig_v6(skb, mtu)) {
+	if (skb->len > mtu) {
 		dst_release(&rt->u.dst);
 		icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu, skb->dev);
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_bypass_xmit_v6(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -386,7 +373,7 @@ ip_vs_nat_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if ((skb->len > mtu) && (iph->frag_off & htons(IP_DF)) && !skb_is_gso(skb)) {
+	if ((skb->len > mtu) && (iph->frag_off & htons(IP_DF))) {
 		ip_rt_put(rt);
 		icmp_send(skb, ICMP_DEST_UNREACH,ICMP_FRAG_NEEDED, htonl(mtu));
 		IP_VS_DBG_RL_PKT(0, pp, skb, 0, "ip_vs_nat_xmit(): frag needed for");
@@ -462,7 +449,7 @@ ip_vs_nat_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if (__mtu_check_toobig_v6(skb, mtu)) {
+	if (skb->len > mtu) {
 		dst_release(&rt->u.dst);
 		icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu, skb->dev);
 		IP_VS_DBG_RL_PKT(0, pp, skb, 0,
@@ -549,9 +536,9 @@ ip_vs_tunnel_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	EnterFunction(10);
 
 	if (skb->protocol != htons(ETH_P_IP)) {
-		IP_VS_DBG_RL("%s(): protocol error, "
+		IP_VS_DBG_RL("ip_vs_tunnel_xmit(): protocol error, "
 			     "ETH_P_IP: %d, skb protocol: %d\n",
-			     __func__, htons(ETH_P_IP), skb->protocol);
+			     htons(ETH_P_IP), skb->protocol);
 		goto tx_error;
 	}
 
@@ -563,7 +550,7 @@ ip_vs_tunnel_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	mtu = dst_mtu(&rt->u.dst) - sizeof(struct iphdr);
 	if (mtu < 68) {
 		ip_rt_put(rt);
-		IP_VS_DBG_RL("%s(): mtu less than 68\n", __func__);
+		IP_VS_DBG_RL("ip_vs_tunnel_xmit(): mtu less than 68\n");
 		goto tx_error;
 	}
 	if (skb_dst(skb))
@@ -571,11 +558,11 @@ ip_vs_tunnel_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	df |= (old_iph->frag_off & htons(IP_DF));
 
-	if ((old_iph->frag_off & htons(IP_DF) &&
-	    mtu < ntohs(old_iph->tot_len) && !skb_is_gso(skb))) {
+	if ((old_iph->frag_off & htons(IP_DF))
+	    && mtu < ntohs(old_iph->tot_len)) {
 		icmp_send(skb, ICMP_DEST_UNREACH,ICMP_FRAG_NEEDED, htonl(mtu));
 		ip_rt_put(rt);
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_tunnel_xmit(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -591,7 +578,7 @@ ip_vs_tunnel_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 		if (!new_skb) {
 			ip_rt_put(rt);
 			kfree_skb(skb);
-			IP_VS_ERR_RL("%s(): no memory\n", __func__);
+			IP_VS_ERR_RL("ip_vs_tunnel_xmit(): no memory\n");
 			return NF_STOLEN;
 		}
 		kfree_skb(skb);
@@ -659,9 +646,9 @@ ip_vs_tunnel_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	EnterFunction(10);
 
 	if (skb->protocol != htons(ETH_P_IPV6)) {
-		IP_VS_DBG_RL("%s(): protocol error, "
+		IP_VS_DBG_RL("ip_vs_tunnel_xmit_v6(): protocol error, "
 			     "ETH_P_IPV6: %d, skb protocol: %d\n",
-			     __func__, htons(ETH_P_IPV6), skb->protocol);
+			     htons(ETH_P_IPV6), skb->protocol);
 		goto tx_error;
 	}
 
@@ -675,17 +662,16 @@ ip_vs_tunnel_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	/* TODO IPv6: do we need this check in IPv6? */
 	if (mtu < 1280) {
 		dst_release(&rt->u.dst);
-		IP_VS_DBG_RL("%s(): mtu less than 1280\n", __func__);
+		IP_VS_DBG_RL("ip_vs_tunnel_xmit_v6(): mtu less than 1280\n");
 		goto tx_error;
 	}
 	if (skb_dst(skb))
 		skb_dst(skb)->ops->update_pmtu(skb_dst(skb), mtu);
 
-	/* MTU checking: Notice that 'mtu' have been adjusted before hand */
-	if (__mtu_check_toobig_v6(skb, mtu)) {
+	if (mtu < ntohs(old_iph->payload_len) + sizeof(struct ipv6hdr)) {
 		icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu, skb->dev);
 		dst_release(&rt->u.dst);
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_tunnel_xmit_v6(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -701,7 +687,7 @@ ip_vs_tunnel_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 		if (!new_skb) {
 			dst_release(&rt->u.dst);
 			kfree_skb(skb);
-			IP_VS_ERR_RL("%s(): no memory\n", __func__);
+			IP_VS_ERR_RL("ip_vs_tunnel_xmit_v6(): no memory\n");
 			return NF_STOLEN;
 		}
 		kfree_skb(skb);
@@ -771,10 +757,10 @@ ip_vs_dr_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if ((iph->frag_off & htons(IP_DF)) && skb->len > mtu && !skb_is_gso(skb)) {
+	if ((iph->frag_off & htons(IP_DF)) && skb->len > mtu) {
 		icmp_send(skb, ICMP_DEST_UNREACH,ICMP_FRAG_NEEDED, htonl(mtu));
 		ip_rt_put(rt);
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_dr_xmit(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -824,10 +810,10 @@ ip_vs_dr_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if (__mtu_check_toobig_v6(skb, mtu)) {
+	if (skb->len > mtu) {
 		icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu, skb->dev);
 		dst_release(&rt->u.dst);
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_dr_xmit_v6(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -899,10 +885,10 @@ ip_vs_icmp_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if ((skb->len > mtu) && (ip_hdr(skb)->frag_off & htons(IP_DF)) && !skb_is_gso(skb)) {
+	if ((skb->len > mtu) && (ip_hdr(skb)->frag_off & htons(IP_DF))) {
 		ip_rt_put(rt);
 		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED, htonl(mtu));
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_in_icmp(): frag needed\n");
 		goto tx_error;
 	}
 
@@ -974,10 +960,10 @@ ip_vs_icmp_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 
 	/* MTU checking */
 	mtu = dst_mtu(&rt->u.dst);
-	if (__mtu_check_toobig_v6(skb, mtu)) {
+	if (skb->len > mtu) {
 		dst_release(&rt->u.dst);
 		icmpv6_send(skb, ICMPV6_PKT_TOOBIG, 0, mtu, skb->dev);
-		IP_VS_DBG_RL("%s(): frag needed\n", __func__);
+		IP_VS_DBG_RL("ip_vs_in_icmp(): frag needed\n");
 		goto tx_error;
 	}
 

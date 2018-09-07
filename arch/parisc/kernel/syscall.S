@@ -288,23 +288,18 @@ tracesys:
 	STREG	%r18,PT_GR18(%r2)
 	/* Finished saving things for the debugger */
 
-	copy	%r2,%r26
-	ldil	L%do_syscall_trace_enter,%r1
+	ldil	L%syscall_trace,%r1
 	ldil	L%tracesys_next,%r2
-	be	R%do_syscall_trace_enter(%sr7,%r1)
+	be	R%syscall_trace(%sr7,%r1)
 	ldo	R%tracesys_next(%r2),%r2
 	
-tracesys_next:
-	/* do_syscall_trace_enter either returned the syscallno, or -1L,
-	 *  so we skip restoring the PT_GR20 below, since we pulled it from
-	 *  task->thread.regs.gr[20] above.
-	 */
-	copy	%ret0,%r20
+tracesys_next:	
 	ldil	L%sys_call_table,%r1
 	ldo     R%sys_call_table(%r1), %r19
 
 	ldo     -THREAD_SZ_ALGN-FRAME_SIZE(%r30),%r1      /* get task ptr */
 	LDREG	TI_TASK(%r1), %r1
+	LDREG   TASK_PT_GR20(%r1), %r20
 	LDREG   TASK_PT_GR26(%r1), %r26		/* Restore the users args */
 	LDREG   TASK_PT_GR25(%r1), %r25
 	LDREG   TASK_PT_GR24(%r1), %r24
@@ -341,8 +336,7 @@ tracesys_exit:
 #ifdef CONFIG_64BIT
 	ldo	-16(%r30),%r29			/* Reference param save area */
 #endif
-	ldo	TASK_REGS(%r1),%r26
-	bl	do_syscall_trace_exit,%r2
+	bl	syscall_trace, %r2
 	STREG   %r28,TASK_PT_GR28(%r1)          /* save return value now */
 	ldo     -THREAD_SZ_ALGN-FRAME_SIZE(%r30),%r1      /* get task ptr */
 	LDREG	TI_TASK(%r1), %r1
@@ -359,12 +353,12 @@ tracesys_exit:
 
 tracesys_sigexit:
 	ldo     -THREAD_SZ_ALGN-FRAME_SIZE(%r30),%r1      /* get task ptr */
-	LDREG	TI_TASK(%r1), %r1
+	LDREG	0(%r1), %r1
 #ifdef CONFIG_64BIT
 	ldo	-16(%r30),%r29			/* Reference param save area */
 #endif
-	bl	do_syscall_trace_exit,%r2
-	ldo	TASK_REGS(%r1),%r26
+	bl	syscall_trace, %r2
+	nop
 
 	ldil	L%syscall_exit_rfi,%r1
 	be,n	R%syscall_exit_rfi(%sr7,%r1)

@@ -1,9 +1,3 @@
-/*
- * Copyright 2007-2009 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later
- */
-
 #ifndef _MACH_PORTMUX_H_
 #define _MACH_PORTMUX_H_
 

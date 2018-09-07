@@ -21,12 +21,10 @@
 #include <linux/errno.h>
 #include <linux/wait.h>
 #include <linux/ptrace.h>
-#include <linux/tracehook.h>
 #include <linux/unistd.h>
 #include <linux/stddef.h>
 #include <linux/compat.h>
 #include <linux/elf.h>
-#include <linux/tracehook.h>
 #include <asm/ucontext.h>
 #include <asm/rt_sigframe.h>
 #include <asm/uaccess.h>
@@ -35,6 +33,7 @@
 #include <asm/asm-offsets.h>
 
 #ifdef CONFIG_COMPAT
+#include <linux/compat.h>
 #include "signal32.h"
 #endif
 
@@ -468,59 +467,7 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 		sigaddset(&current->blocked,sig);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
-
-	tracehook_signal_handler(sig, info, ka, regs, 0);
-
 	return 1;
-}
-
-/*
- * Check how the syscall number gets loaded into %r20 within
- * the delay branch in userspace and adjust as needed.
- */
-
-static void check_syscallno_in_delay_branch(struct pt_regs *regs)
-{
-	u32 opcode, source_reg;
-	u32 __user *uaddr;
-	int err;
-
-	/* Usually we don't have to restore %r20 (the system call number)
-	 * because it gets loaded in the delay slot of the branch external
-	 * instruction via the ldi instruction.
-	 * In some cases a register-to-register copy instruction might have
-	 * been used instead, in which case we need to copy the syscall
-	 * number into the source register before returning to userspace.
-	 */
-
-	/* A syscall is just a branch, so all we have to do is fiddle the
-	 * return pointer so that the ble instruction gets executed again.
-	 */
-	regs->gr[31] -= 8; /* delayed branching */
-
-	/* Get assembler opcode of code in delay branch */
-	uaddr = (unsigned int *) ((regs->gr[31] & ~3) + 4);
-	err = get_user(opcode, uaddr);
-	if (err)
-		return;
-
-	/* Check if delay branch uses "ldi int,%r20" */
-	if ((opcode & 0xffff0000) == 0x34140000)
-		return;	/* everything ok, just return */
-
-	/* Check if delay branch uses "nop" */
-	if (opcode == INSN_NOP)
-		return;
-
-	/* Check if delay branch uses "copy %rX,%r20" */
-	if ((opcode & 0xffe0ffff) == 0x08000254) {
-		source_reg = (opcode >> 16) & 31;
-		regs->gr[source_reg] = regs->gr[20];
-		return;
-	}
-
-	pr_warn("syscall restart: %s (pid %d): unexpected opcode 0x%08x\n",
-		current->comm, task_pid_nr(current), opcode);
 }
 
 static inline void
@@ -544,7 +491,10 @@ syscall_restart(struct pt_regs *regs, struct k_sigaction *ka)
 		}
 		/* fallthrough */
 	case -ERESTARTNOINTR:
-		check_syscallno_in_delay_branch(regs);
+		/* A syscall is just a branch, so all
+		 * we have to do is fiddle the return pointer.
+		 */
+		regs->gr[31] -= 8; /* delayed branching */
 		/* Preserve original r28. */
 		regs->gr[28] = regs->orig_r28;
 		break;
@@ -595,12 +545,18 @@ insert_restart_trampoline(struct pt_regs *regs)
 	}
 	case -ERESTARTNOHAND:
 	case -ERESTARTSYS:
-	case -ERESTARTNOINTR:
-		check_syscallno_in_delay_branch(regs);
+	case -ERESTARTNOINTR: {
+		/* Hooray for delayed branching.  We don't
+		 * have to restore %r20 (the system call
+		 * number) because it gets loaded in the delay
+		 * slot of the branch external instruction.
+		 */
+		regs->gr[31] -= 8;
 		/* Preserve original r28. */
 		regs->gr[28] = regs->orig_r28;
 
 		return;
+	}
 	default:
 		break;
 	}
@@ -689,11 +645,4 @@ void do_notify_resume(struct pt_regs *regs, long in_syscall)
 	if (test_thread_flag(TIF_SIGPENDING) ||
 	    test_thread_flag(TIF_RESTORE_SIGMASK))
 		do_signal(regs, in_syscall);
-
-	if (test_thread_flag(TIF_NOTIFY_RESUME)) {
-		clear_thread_flag(TIF_NOTIFY_RESUME);
-		tracehook_notify_resume(regs);
-		if (current->replacement_session_keyring)
-			key_replace_session_keyring();
-	}
 }

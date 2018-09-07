@@ -53,11 +53,11 @@ static struct
 	.term = IPT_ERROR_INIT,			/* ERROR */
 };
 
-static const struct xt_table packet_filter = {
+static struct xt_table packet_filter = {
 	.name		= "filter",
 	.valid_hooks	= FILTER_VALID_HOOKS,
 	.me		= THIS_MODULE,
-	.af		= NFPROTO_IPV4,
+	.af		= AF_INET,
 };
 
 /* The work comes in here from netfilter.c. */
@@ -102,21 +102,21 @@ static struct nf_hook_ops ipt_ops[] __read_mostly = {
 	{
 		.hook		= ipt_local_in_hook,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_LOCAL_IN,
 		.priority	= NF_IP_PRI_FILTER,
 	},
 	{
 		.hook		= ipt_hook,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_FORWARD,
 		.priority	= NF_IP_PRI_FILTER,
 	},
 	{
 		.hook		= ipt_local_out_hook,
 		.owner		= THIS_MODULE,
-		.pf		= NFPROTO_IPV4,
+		.pf		= PF_INET,
 		.hooknum	= NF_INET_LOCAL_OUT,
 		.priority	= NF_IP_PRI_FILTER,
 	},

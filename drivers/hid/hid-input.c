@@ -159,12 +159,17 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 
 	field->hidinput = hidinput;
 
+	dbg_hid("Mapping: ");
+	hid_resolv_usage(usage->hid);
+	dbg_hid_line(" ---> ");
+
 	if (field->flags & HID_MAIN_ITEM_CONSTANT)
 		goto ignore;
 
 	/* only LED usages are supported in output fields */
 	if (field->report_type == HID_OUTPUT_REPORT &&
 			(usage->hid & HID_USAGE_PAGE) != HID_UP_LED) {
+		dbg_hid_line(" [non-LED output field] ");
 		goto ignore;
 	}
 
@@ -556,9 +561,15 @@ mapped:
 		set_bit(MSC_SCAN, input->mscbit);
 	}
 
-ignore:
+	hid_resolv_event(usage->type, usage->code);
+
+	dbg_hid_line("\n");
+
 	return;
 
+ignore:
+	dbg_hid_line("IGNORED\n");
+	return;
 }
 
 void hidinput_hid_event(struct hid_device *hid, struct hid_field *field, struct hid_usage *usage, __s32 value)

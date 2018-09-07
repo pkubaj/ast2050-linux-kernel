@@ -220,8 +220,6 @@ vlan_dev_get_egress_qos_mask(struct net_device *dev, struct sk_buff *skb)
 {
 	struct vlan_priority_tci_mapping *mp;
 
-	smp_rmb(); /* coupled with smp_wmb() in vlan_dev_set_egress_priority() */
-
 	mp = vlan_dev_info(dev)->egress_priority_map[(skb->priority & 0xF)];
 	while (mp) {
 		if (mp->priority == skb->priority) {
@@ -290,14 +288,10 @@ static int vlan_dev_hard_header(struct sk_buff *skb, struct net_device *dev,
 	return rc;
 }
 
-static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
-					    struct net_device *dev)
+static int vlan_dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	int i = skb_get_queue_mapping(skb);
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
+	struct netdev_queue *txq = netdev_get_tx_queue(dev, 0);
 	struct vlan_ethhdr *veth = (struct vlan_ethhdr *)(skb->data);
-	unsigned int len;
-	int ret;
 
 	/* Handle non-VLAN frames if they are sent to us, for example by DHCP.
 	 *
@@ -323,43 +317,29 @@ static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 			vlan_dev_info(dev)->cnt_inc_headroom_on_tx++;
 	}
 
+	txq->tx_packets++;
+	txq->tx_bytes += skb->len;
 
 	skb->dev = vlan_dev_info(dev)->real_dev;
-	len = skb->len;
-	ret = dev_queue_xmit(skb);
-
-	if (likely(ret == NET_XMIT_SUCCESS)) {
-		txq->tx_packets++;
-		txq->tx_bytes += len;
-	} else
-		txq->tx_dropped++;
-
+	dev_queue_xmit(skb);
 	return NETDEV_TX_OK;
 }
 
-static netdev_tx_t vlan_dev_hwaccel_hard_start_xmit(struct sk_buff *skb,
-						    struct net_device *dev)
+static int vlan_dev_hwaccel_hard_start_xmit(struct sk_buff *skb,
+					    struct net_device *dev)
 {
-	int i = skb_get_queue_mapping(skb);
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
+	struct netdev_queue *txq = netdev_get_tx_queue(dev, 0);
 	u16 vlan_tci;
-	unsigned int len;
-	int ret;
 
 	vlan_tci = vlan_dev_info(dev)->vlan_id;
 	vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb);
 	skb = __vlan_hwaccel_put_tag(skb, vlan_tci);
 
+	txq->tx_packets++;
+	txq->tx_bytes += skb->len;
+
 	skb->dev = vlan_dev_info(dev)->real_dev;
-	len = skb->len;
-	ret = dev_queue_xmit(skb);
-
-	if (likely(ret == NET_XMIT_SUCCESS)) {
-		txq->tx_packets++;
-		txq->tx_bytes += len;
-	} else
-		txq->tx_dropped++;
-
+	dev_queue_xmit(skb);
 	return NETDEV_TX_OK;
 }
 
@@ -420,11 +400,6 @@ int vlan_dev_set_egress_priority(const struct net_device *dev,
 	np->next = mp;
 	np->priority = skb_prio;
 	np->vlan_qos = vlan_qos;
-	/* Before inserting this element in hash table, make sure all its fields
-	 * are committed to memory.
-	 * coupled with smp_rmb() in vlan_dev_get_egress_qos_mask()
-	 */
-	smp_wmb();
 	vlan->egress_priority_map[skb_prio & 0xF] = np;
 	if (vlan_qos)
 		vlan->nr_egress_mappings++;
@@ -586,65 +561,14 @@ static int vlan_dev_neigh_setup(struct net_device *dev, struct neigh_parms *pa)
 	return err;
 }
 
-#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
-static int vlan_dev_fcoe_ddp_setup(struct net_device *dev, u16 xid,
-				   struct scatterlist *sgl, unsigned int sgc)
-{
-	struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
-	const struct net_device_ops *ops = real_dev->netdev_ops;
-	int rc = 0;
-
-	if (ops->ndo_fcoe_ddp_setup)
-		rc = ops->ndo_fcoe_ddp_setup(real_dev, xid, sgl, sgc);
-
-	return rc;
-}
-
-static int vlan_dev_fcoe_ddp_done(struct net_device *dev, u16 xid)
-{
-	struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
-	const struct net_device_ops *ops = real_dev->netdev_ops;
-	int len = 0;
-
-	if (ops->ndo_fcoe_ddp_done)
-		len = ops->ndo_fcoe_ddp_done(real_dev, xid);
-
-	return len;
-}
-
-static int vlan_dev_fcoe_enable(struct net_device *dev)
-{
-	struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
-	const struct net_device_ops *ops = real_dev->netdev_ops;
-	int rc = -EINVAL;
-
-	if (ops->ndo_fcoe_enable)
-		rc = ops->ndo_fcoe_enable(real_dev);
-	return rc;
-}
-
-static int vlan_dev_fcoe_disable(struct net_device *dev)
-{
-	struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
-	const struct net_device_ops *ops = real_dev->netdev_ops;
-	int rc = -EINVAL;
-
-	if (ops->ndo_fcoe_disable)
-		rc = ops->ndo_fcoe_disable(real_dev);
-	return rc;
-}
-#endif
-
 static void vlan_dev_change_rx_flags(struct net_device *dev, int change)
 {
 	struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
 
-	if (dev->flags & IFF_UP) {
-		if (change & IFF_ALLMULTI)
-			dev_set_allmulti(real_dev, dev->flags & IFF_ALLMULTI ? 1 : -1);
-		if (change & IFF_PROMISC)
-			dev_set_promiscuity(real_dev, dev->flags & IFF_PROMISC ? 1 : -1);
-	}
+	if (change & IFF_ALLMULTI)
+		dev_set_allmulti(real_dev, dev->flags & IFF_ALLMULTI ? 1 : -1);
+	if (change & IFF_PROMISC)
+		dev_set_promiscuity(real_dev, dev->flags & IFF_PROMISC ? 1 : -1);
 }
 
 static void vlan_dev_set_rx_mode(struct net_device *vlan_dev)
@@ -710,10 +634,6 @@ static int vlan_dev_init(struct net_device *dev)
 		memcpy(dev->dev_addr, real_dev->dev_addr, dev->addr_len);
 	if (is_zero_ether_addr(dev->broadcast))
 		memcpy(dev->broadcast, real_dev->broadcast, dev->addr_len);
-
-#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
-	dev->fcoe_ddp_xid = real_dev->fcoe_ddp_xid;
-#endif
 
 	if (real_dev->features & NETIF_F_HW_VLAN_TX) {
 		dev->header_ops      = real_dev->header_ops;
@@ -795,12 +715,6 @@ static const struct net_device_ops vlan_netdev_ops = {
 	.ndo_change_rx_flags	= vlan_dev_change_rx_flags,
 	.ndo_do_ioctl		= vlan_dev_ioctl,
 	.ndo_neigh_setup	= vlan_dev_neigh_setup,
-#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
-	.ndo_fcoe_ddp_setup	= vlan_dev_fcoe_ddp_setup,
-	.ndo_fcoe_ddp_done	= vlan_dev_fcoe_ddp_done,
-	.ndo_fcoe_enable	= vlan_dev_fcoe_enable,
-	.ndo_fcoe_disable	= vlan_dev_fcoe_disable,
-#endif
 };
 
 static const struct net_device_ops vlan_netdev_accel_ops = {
@@ -817,12 +731,6 @@ static const struct net_device_ops vlan_netdev_accel_ops = {
 	.ndo_change_rx_flags	= vlan_dev_change_rx_flags,
 	.ndo_do_ioctl		= vlan_dev_ioctl,
 	.ndo_neigh_setup	= vlan_dev_neigh_setup,
-#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
-	.ndo_fcoe_ddp_setup	= vlan_dev_fcoe_ddp_setup,
-	.ndo_fcoe_ddp_done	= vlan_dev_fcoe_ddp_done,
-	.ndo_fcoe_enable	= vlan_dev_fcoe_enable,
-	.ndo_fcoe_disable	= vlan_dev_fcoe_disable,
-#endif
 };
 
 void vlan_setup(struct net_device *dev)

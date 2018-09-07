@@ -226,13 +226,12 @@ struct sock {
 #define sk_prot			__sk_common.skc_prot
 #define sk_net			__sk_common.skc_net
 	kmemcheck_bitfield_begin(flags);
-	unsigned int		sk_shutdown  : 2,
-				sk_no_check  : 2,
-				sk_userlocks : 4,
-				sk_protocol  : 8,
-				sk_type      : 16;
-#define SK_PROTOCOL_MAX ((u8)~0U)
+	unsigned char		sk_shutdown : 2,
+				sk_no_check : 2,
+				sk_userlocks : 4;
 	kmemcheck_bitfield_end(flags);
+	unsigned char		sk_protocol;
+	unsigned short		sk_type;
 	int			sk_rcvbuf;
 	socket_lock_t		sk_lock;
 	/*
@@ -507,8 +506,6 @@ enum sock_flags {
 	SOCK_TIMESTAMPING_SYS_HARDWARE, /* %SOF_TIMESTAMPING_SYS_HARDWARE */
 };
 
-#define SK_FLAGS_TIMESTAMP ((1UL << SOCK_TIMESTAMP) | (1UL << SOCK_TIMESTAMPING_RX_SOFTWARE))
-
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)
 {
 	nsk->sk_flags = osk->sk_flags;
@@ -627,7 +624,7 @@ struct proto {
 	void			(*shutdown)(struct sock *sk, int how);
 	int			(*setsockopt)(struct sock *sk, int level, 
 					int optname, char __user *optval,
-					unsigned int optlen);
+					int optlen);
 	int			(*getsockopt)(struct sock *sk, int level, 
 					int optname, char __user *optval, 
 					int __user *option);  	 
@@ -635,7 +632,7 @@ struct proto {
 	int			(*compat_setsockopt)(struct sock *sk,
 					int level,
 					int optname, char __user *optval,
-					unsigned int optlen);
+					int optlen);
 	int			(*compat_getsockopt)(struct sock *sk,
 					int level,
 					int optname, char __user *optval,
@@ -954,7 +951,7 @@ extern void			sock_rfree(struct sk_buff *skb);
 
 extern int			sock_setsockopt(struct socket *sock, int level,
 						int op, char __user *optval,
-						unsigned int optlen);
+						int optlen);
 
 extern int			sock_getsockopt(struct socket *sock, int level,
 						int op, char __user *optval, 
@@ -996,7 +993,7 @@ extern int                      sock_no_shutdown(struct socket *, int);
 extern int			sock_no_getsockopt(struct socket *, int , int,
 						   char __user *, int __user *);
 extern int			sock_no_setsockopt(struct socket *, int, int,
-						   char __user *, unsigned int);
+						   char __user *, int);
 extern int                      sock_no_sendmsg(struct kiocb *, struct socket *,
 						struct msghdr *, size_t);
 extern int                      sock_no_recvmsg(struct kiocb *, struct socket *,
@@ -1018,11 +1015,11 @@ extern int sock_common_getsockopt(struct socket *sock, int level, int optname,
 extern int sock_common_recvmsg(struct kiocb *iocb, struct socket *sock,
 			       struct msghdr *msg, size_t size, int flags);
 extern int sock_common_setsockopt(struct socket *sock, int level, int optname,
-				  char __user *optval, unsigned int optlen);
+				  char __user *optval, int optlen);
 extern int compat_sock_common_getsockopt(struct socket *sock, int level,
 		int optname, char __user *optval, int __user *optlen);
 extern int compat_sock_common_setsockopt(struct socket *sock, int level,
-		int optname, char __user *optval, unsigned int optlen);
+		int optname, char __user *optval, int optlen);
 
 extern void sk_common_release(struct sock *sk);
 
@@ -1357,7 +1354,20 @@ extern void sk_stop_timer(struct sock *sk, struct timer_list* timer);
 
 extern int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb);
 
-extern int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb);
+static inline int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb)
+{
+	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
+	   number of warnings when compiling with -W --ANK
+	 */
+	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
+	    (unsigned)sk->sk_rcvbuf)
+		return -ENOMEM;
+	skb_set_owner_r(skb, sk);
+	skb_queue_tail(&sk->sk_error_queue, skb);
+	if (!sock_flag(sk, SOCK_DEAD))
+		sk->sk_data_ready(sk, skb->len);
+	return 0;
+}
 
 /*
  *	Recover an error report and clear atomically

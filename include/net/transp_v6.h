@@ -16,8 +16,6 @@ extern struct proto tcpv6_prot;
 
 struct flowi;
 
-extern void initialize_hashidentrnd(void);
-
 /* extention headers */
 extern int				ipv6_exthdrs_init(void);
 extern void				ipv6_exthdrs_exit(void);
@@ -53,7 +51,7 @@ extern int			datagram_send_ctl(struct net *net,
 /*
  *	address family specific functions
  */
-extern const struct inet_connection_sock_af_ops ipv4_specific;
+extern struct inet_connection_sock_af_ops ipv4_specific;
 
 extern void inet6_destroy_sock(struct sock *sk);
 

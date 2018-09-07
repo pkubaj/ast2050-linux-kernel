@@ -57,6 +57,12 @@
 #ifndef _P80211META_H
 #define _P80211META_H
 
+/*================================================================*/
+/* Project Includes */
+
+/*================================================================*/
+/* Types */
+
 /*----------------------------------------------------------------*/
 /* The following structure types are used for the metadata */
 /* representation of category list metadata, group list metadata, */

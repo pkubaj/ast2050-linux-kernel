@@ -151,14 +151,14 @@ int __devinit __pata_platform_probe(struct device *dev,
 	 */
 	if (mmio) {
 		ap->ioaddr.cmd_addr = devm_ioremap(dev, io_res->start,
-				resource_size(io_res));
+				io_res->end - io_res->start + 1);
 		ap->ioaddr.ctl_addr = devm_ioremap(dev, ctl_res->start,
-				resource_size(ctl_res));
+				ctl_res->end - ctl_res->start + 1);
 	} else {
 		ap->ioaddr.cmd_addr = devm_ioport_map(dev, io_res->start,
-				resource_size(io_res));
+				io_res->end - io_res->start + 1);
 		ap->ioaddr.ctl_addr = devm_ioport_map(dev, ctl_res->start,
-				resource_size(ctl_res));
+				ctl_res->end - ctl_res->start + 1);
 	}
 	if (!ap->ioaddr.cmd_addr || !ap->ioaddr.ctl_addr) {
 		dev_err(dev, "failed to map IO/CTL base\n");

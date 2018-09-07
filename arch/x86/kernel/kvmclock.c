@@ -22,8 +22,6 @@
 #include <asm/msr.h>
 #include <asm/apic.h>
 #include <linux/percpu.h>
-
-#include <asm/x86_init.h>
 #include <asm/reboot.h>
 
 #define KVM_SCALE 22
@@ -184,13 +182,12 @@ void __init kvmclock_init(void)
 	if (kvmclock && kvm_para_has_feature(KVM_FEATURE_CLOCKSOURCE)) {
 		if (kvm_register_clock("boot clock"))
 			return;
+		pv_time_ops.get_wallclock = kvm_get_wallclock;
+		pv_time_ops.set_wallclock = kvm_set_wallclock;
 		pv_time_ops.sched_clock = kvm_clock_read;
-		x86_platform.calibrate_tsc = kvm_get_tsc_khz;
-		x86_platform.get_wallclock = kvm_get_wallclock;
-		x86_platform.set_wallclock = kvm_set_wallclock;
+		pv_time_ops.get_tsc_khz = kvm_get_tsc_khz;
 #ifdef CONFIG_X86_LOCAL_APIC
-		x86_cpuinit.setup_percpu_clockev =
-			kvm_setup_secondary_clock;
+		pv_apic_ops.setup_secondary_clock = kvm_setup_secondary_clock;
 #endif
 #ifdef CONFIG_SMP
 		smp_ops.smp_prepare_boot_cpu = kvm_smp_prepare_boot_cpu;
@@ -201,6 +198,7 @@ void __init kvmclock_init(void)
 #endif
 		kvm_get_preset_lpj();
 		clocksource_register(&kvm_clock);
+		pv_info.paravirt_enabled = 1;
 		pv_info.name = "KVM";
 	}
 }

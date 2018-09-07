@@ -75,16 +75,12 @@ struct net_bridge_port
 	bridge_id			designated_bridge;
 	u32				path_cost;
 	u32				designated_cost;
-	unsigned long			designated_age;
 
 	struct timer_list		forward_delay_timer;
 	struct timer_list		hold_timer;
 	struct timer_list		message_age_timer;
 	struct kobject			kobj;
 	struct rcu_head			rcu;
-
-	unsigned long 			flags;
-#define BR_HAIRPIN_MODE		0x00000001
 };
 
 struct net_bridge
@@ -144,8 +140,7 @@ static inline int br_is_root_bridge(const struct net_bridge *br)
 
 /* br_device.c */
 extern void br_dev_setup(struct net_device *dev);
-extern netdev_tx_t br_dev_xmit(struct sk_buff *skb,
-			       struct net_device *dev);
+extern int br_dev_xmit(struct sk_buff *skb, struct net_device *dev);
 
 /* br_fdb.c */
 extern int br_fdb_init(void);

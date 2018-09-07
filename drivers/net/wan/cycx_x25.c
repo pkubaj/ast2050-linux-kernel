@@ -84,7 +84,6 @@
 #include <linux/kernel.h>	/* printk(), and other useful stuff */
 #include <linux/module.h>
 #include <linux/string.h>	/* inline memset(), etc. */
-#include <linux/sched.h>
 #include <linux/slab.h>		/* kmalloc(), kfree() */
 #include <linux/stddef.h>	/* offsetof(), etc. */
 #include <linux/wanrouter.h>	/* WAN router definitions */
@@ -140,8 +139,8 @@ static int cycx_netdevice_hard_header(struct sk_buff *skb,
 				      const void *daddr, const void *saddr,
 				      unsigned len);
 static int cycx_netdevice_rebuild_header(struct sk_buff *skb);
-static netdev_tx_t cycx_netdevice_hard_start_xmit(struct sk_buff *skb,
-							struct net_device *dev);
+static int cycx_netdevice_hard_start_xmit(struct sk_buff *skb,
+					  struct net_device *dev);
 
 static struct net_device_stats *
 			cycx_netdevice_get_stats(struct net_device *dev);
@@ -594,8 +593,8 @@ static int cycx_netdevice_rebuild_header(struct sk_buff *skb)
  *    bottom half" (with interrupts enabled).
  * 2. Setting tbusy flag will inhibit further transmit requests from the
  *    protocol stack and can be used for flow control with protocol layer. */
-static netdev_tx_t cycx_netdevice_hard_start_xmit(struct sk_buff *skb,
-							struct net_device *dev)
+static int cycx_netdevice_hard_start_xmit(struct sk_buff *skb,
+					  struct net_device *dev)
 {
 	struct cycx_x25_channel *chan = netdev_priv(dev);
 	struct cycx_device *card = chan->card;
@@ -664,7 +663,7 @@ static netdev_tx_t cycx_netdevice_hard_start_xmit(struct sk_buff *skb,
 free_packet:
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 /* Get Ethernet-style interface statistics.

@@ -439,7 +439,6 @@ void rds_rdma_send_complete(struct rds_message *rm, int status)
 		sock_put(rds_rs_to_sk(rs));
 	}
 }
-EXPORT_SYMBOL_GPL(rds_rdma_send_complete);
 
 /*
  * This is the same as rds_rdma_send_complete except we
@@ -495,7 +494,6 @@ out:
 
 	return found;
 }
-EXPORT_SYMBOL_GPL(rds_send_get_message);
 
 /*
  * This removes messages from the socket's list if they're on it.  The list
@@ -612,7 +610,6 @@ void rds_send_drop_acked(struct rds_connection *conn, u64 ack,
 	/* now remove the messages from the sock list as needed */
 	rds_send_remove_from_sock(&list, RDS_RDMA_SUCCESS);
 }
-EXPORT_SYMBOL_GPL(rds_send_drop_acked);
 
 void rds_send_drop_to(struct rds_sock *rs, struct sockaddr_in *dest)
 {
@@ -842,13 +839,11 @@ int rds_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 		release_sock(sk);
 	}
 
-	lock_sock(sk);
+	/* racing with another thread binding seems ok here */
 	if (daddr == 0 || rs->rs_bound_addr == 0) {
-		release_sock(sk);
 		ret = -ENOTCONN; /* XXX not a great errno */
 		goto out;
 	}
-	release_sock(sk);
 
 	rm = rds_message_copy_from_user(msg->msg_iov, payload_len);
 	if (IS_ERR(rm)) {

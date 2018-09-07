@@ -50,12 +50,7 @@
 	/*
 	 * Reload arg registers from stack in case ptrace changed them.
 	 * We don't reload %eax because syscall_trace_enter() returned
-	 * the %rax value we should see.  Instead, we just truncate that
-	 * value to 32 bits again as we did on entry from user mode.
-	 * If it's a new value set by user_regset during entry tracing,
-	 * this matches the normal truncation of the user-mode value.
-	 * If it's -1 to make us punt the syscall, then (u32)-1 is still
-	 * an appropriately invalid value.
+	 * the value it wants us to use in the table lookup.
 	 */
 	.macro LOAD_ARGS32 offset, _r9=0
 	.if \_r9
@@ -65,7 +60,6 @@
 	movl \offset+48(%rsp),%edx
 	movl \offset+56(%rsp),%esi
 	movl \offset+64(%rsp),%edi
-	movl %eax,%eax			/* zero extension */
 	.endm
 	
 	.macro CFI_STARTPROC32 simple
@@ -159,7 +153,7 @@ ENTRY(ia32_sysenter_target)
 	testl  $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%r10)
 	CFI_REMEMBER_STATE
 	jnz  sysenter_tracesys
-	cmpq	$(IA32_NR_syscalls-1),%rax
+	cmpl	$(IA32_NR_syscalls-1),%eax
 	ja	ia32_badsys
 sysenter_do_call:
 	IA32_ARG_FIXUP
@@ -201,7 +195,7 @@ sysexit_from_sys_call:
 	movl $AUDIT_ARCH_I386,%edi	/* 1st arg: audit arch */
 	call audit_syscall_entry
 	movl RAX-ARGOFFSET(%rsp),%eax	/* reload syscall number */
-	cmpq $(IA32_NR_syscalls-1),%rax
+	cmpl $(IA32_NR_syscalls-1),%eax
 	ja ia32_badsys
 	movl %ebx,%edi			/* reload 1st syscall arg */
 	movl RCX-ARGOFFSET(%rsp),%esi	/* reload 2nd syscall arg */
@@ -254,7 +248,7 @@ sysenter_tracesys:
 	call	syscall_trace_enter
 	LOAD_ARGS32 ARGOFFSET  /* reload args from stack in case ptrace changed it */
 	RESTORE_REST
-	cmpq	$(IA32_NR_syscalls-1),%rax
+	cmpl	$(IA32_NR_syscalls-1),%eax
 	ja	int_ret_from_sys_call /* sysenter_tracesys has set RAX(%rsp) */
 	jmp	sysenter_do_call
 	CFI_ENDPROC
@@ -320,7 +314,7 @@ ENTRY(ia32_cstar_target)
 	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%r10)
 	CFI_REMEMBER_STATE
 	jnz   cstar_tracesys
-	cmpq $IA32_NR_syscalls-1,%rax
+	cmpl $IA32_NR_syscalls-1,%eax
 	ja  ia32_badsys
 cstar_do_call:
 	IA32_ARG_FIXUP 1
@@ -373,7 +367,7 @@ cstar_tracesys:
 	LOAD_ARGS32 ARGOFFSET, 1  /* reload args from stack in case ptrace changed it */
 	RESTORE_REST
 	xchgl %ebp,%r9d
-	cmpq $(IA32_NR_syscalls-1),%rax
+	cmpl $(IA32_NR_syscalls-1),%eax
 	ja int_ret_from_sys_call /* cstar_tracesys has set RAX(%rsp) */
 	jmp cstar_do_call
 END(ia32_cstar_target)
@@ -431,7 +425,7 @@ ENTRY(ia32_syscall)
 	orl   $TS_COMPAT,TI_status(%r10)
 	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%r10)
 	jnz ia32_tracesys
-	cmpq $(IA32_NR_syscalls-1),%rax
+	cmpl $(IA32_NR_syscalls-1),%eax
 	ja ia32_badsys
 ia32_do_call:
 	IA32_ARG_FIXUP
@@ -450,7 +444,7 @@ ia32_tracesys:
 	call syscall_trace_enter
 	LOAD_ARGS32 ARGOFFSET  /* reload args from stack in case ptrace changed it */
 	RESTORE_REST
-	cmpq $(IA32_NR_syscalls-1),%rax
+	cmpl $(IA32_NR_syscalls-1),%eax
 	ja  int_ret_from_sys_call	/* ia32_tracesys has set RAX(%rsp) */
 	jmp ia32_do_call
 END(ia32_syscall)
@@ -552,7 +546,7 @@ ia32_sys_call_table:
 	.quad sys_mkdir
 	.quad sys_rmdir		/* 40 */
 	.quad sys_dup
-	.quad sys_pipe
+	.quad sys32_pipe
 	.quad compat_sys_times
 	.quad quiet_ni_syscall			/* old prof syscall holder */
 	.quad sys_brk		/* 45 */
@@ -702,7 +696,7 @@ ia32_sys_call_table:
 	.quad quiet_ni_syscall		/* streams2 */
 	.quad stub32_vfork            /* 190 */
 	.quad compat_sys_getrlimit
-	.quad sys_mmap_pgoff
+	.quad sys32_mmap2
 	.quad sys32_truncate64
 	.quad sys32_ftruncate64
 	.quad sys32_stat64		/* 195 */
@@ -846,5 +840,5 @@ ia32_sys_call_table:
 	.quad compat_sys_preadv
 	.quad compat_sys_pwritev
 	.quad compat_sys_rt_tgsigqueueinfo	/* 335 */
-	.quad sys_perf_event_open
+	.quad sys_perf_counter_open
 ia32_syscall_end:

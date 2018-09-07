@@ -34,8 +34,6 @@ void kmemcheck_mark_initialized_pages(struct page *p, unsigned int n);
 int kmemcheck_show_addr(unsigned long address);
 int kmemcheck_hide_addr(unsigned long address);
 
-bool kmemcheck_is_obj_initialized(unsigned long addr, size_t size);
-
 #else
 #define kmemcheck_enabled 0
 
@@ -101,11 +99,6 @@ static inline void kmemcheck_mark_initialized_pages(struct page *p,
 {
 }
 
-static inline bool kmemcheck_is_obj_initialized(unsigned long addr, size_t size)
-{
-	return true;
-}
-
 #endif /* CONFIG_KMEMCHECK */
 
 /*
@@ -144,15 +137,10 @@ static inline bool kmemcheck_is_obj_initialized(unsigned long addr, size_t size)
 	int name##_end[0];
 
 #define kmemcheck_annotate_bitfield(ptr, name)				\
-	do {								\
-		int _n;							\
-									\
-		if (!ptr)						\
-			break;						\
-									\
-		_n = (long) &((ptr)->name##_end)			\
+	do if (ptr) {							\
+		int _n = (long) &((ptr)->name##_end)			\
 			- (long) &((ptr)->name##_begin);		\
-		MAYBE_BUILD_BUG_ON(_n < 0);				\
+		BUILD_BUG_ON(_n < 0);					\
 									\
 		kmemcheck_mark_initialized(&((ptr)->name##_begin), _n);	\
 	} while (0)

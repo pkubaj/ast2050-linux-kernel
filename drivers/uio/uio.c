@@ -19,7 +19,6 @@
 #include <linux/device.h>
 #include <linux/mm.h>
 #include <linux/idr.h>
-#include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/kobject.h>
 #include <linux/uio_driver.h>
@@ -659,7 +658,7 @@ static int uio_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return 0;
 }
 
-static const struct vm_operations_struct uio_vm_ops = {
+static struct vm_operations_struct uio_vm_ops = {
 	.open = uio_vma_open,
 	.close = uio_vma_close,
 	.fault = uio_vma_fault,
@@ -669,30 +668,16 @@ static int uio_mmap_physical(struct vm_area_struct *vma)
 {
 	struct uio_device *idev = vma->vm_private_data;
 	int mi = uio_find_mem_index(vma);
-	struct uio_mem *mem;
 	if (mi < 0)
-		return -EINVAL;
-	mem = idev->info->mem + mi;
-
-	if (vma->vm_end - vma->vm_start > mem->size)
 		return -EINVAL;
 
 	vma->vm_flags |= VM_IO | VM_RESERVED;
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
-	/*
-	 * We cannot use the vm_iomap_memory() helper here,
-	 * because vma->vm_pgoff is the map index we looked
-	 * up above in uio_find_mem_index(), rather than an
-	 * actual page offset into the mmap.
-	 *
-	 * So we just do the physical mmap without a page
-	 * offset.
-	 */
 	return remap_pfn_range(vma,
 			       vma->vm_start,
-			       mem->addr >> PAGE_SHIFT,
+			       idev->info->mem[mi].addr >> PAGE_SHIFT,
 			       vma->vm_end - vma->vm_start,
 			       vma->vm_page_prot);
 }

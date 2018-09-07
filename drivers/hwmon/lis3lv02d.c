@@ -127,14 +127,12 @@ void lis3lv02d_poweron(struct lis3lv02d *lis3)
 
 	/*
 	 * Common configuration
-	 * BDU: (12 bits sensors only) LSB and MSB values are not updated until
-	 *      both have been read. So the value read will always be correct.
+	 * BDU: LSB and MSB values are not updated until both have been read.
+	 *      So the value read will always be correct.
 	 */
-	if (lis3->whoami == LIS_DOUBLE_ID) {
-		lis3->read(lis3, CTRL_REG2, &reg);
-		reg |= CTRL2_BDU;
-		lis3->write(lis3, CTRL_REG2, reg);
-	}
+	lis3->read(lis3, CTRL_REG2, &reg);
+	reg |= CTRL2_BDU;
+	lis3->write(lis3, CTRL_REG2, reg);
 }
 EXPORT_SYMBOL_GPL(lis3lv02d_poweron);
 
@@ -363,8 +361,7 @@ static ssize_t lis3lv02d_calibrate_store(struct device *dev,
 }
 
 /* conversion btw sampling rate and the register values */
-static int lis3_12_rates[4] = {40, 160, 640, 2560};
-static int lis3_8_rates[2] = {100, 400};
+static int lis3lv02dl_df_val[4] = {40, 160, 640, 2560};
 static ssize_t lis3lv02d_rate_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -372,13 +369,8 @@ static ssize_t lis3lv02d_rate_show(struct device *dev,
 	int val;
 
 	lis3_dev.read(&lis3_dev, CTRL_REG1, &ctrl);
-
-	if (lis3_dev.whoami == LIS_DOUBLE_ID)
-		val = lis3_12_rates[(ctrl & (CTRL1_DF0 | CTRL1_DF1)) >> 4];
-	else
-		val = lis3_8_rates[(ctrl & CTRL1_DR) >> 7];
-
-	return sprintf(buf, "%d\n", val);
+	val = (ctrl & (CTRL1_DF0 | CTRL1_DF1)) >> 4;
+	return sprintf(buf, "%d\n", lis3lv02dl_df_val[val]);
 }
 
 static DEVICE_ATTR(position, S_IRUGO, lis3lv02d_position_show, NULL);
@@ -460,15 +452,6 @@ int lis3lv02d_init_device(struct lis3lv02d *dev)
 			dev->write(dev, CLICK_THSY_X,
 					(p->click_thresh_x & 0xf) |
 					(p->click_thresh_y << 4));
-		}
-
-		if (p->wakeup_flags && (dev->whoami == LIS_SINGLE_ID)) {
-			dev->write(dev, FF_WU_CFG_1, p->wakeup_flags);
-			dev->write(dev, FF_WU_THS_1, p->wakeup_thresh & 0x7f);
-			/* default to 2.5ms for now */
-			dev->write(dev, FF_WU_DURATION_1, 1);
-			/* enable high pass filter for both free-fall units */
-			dev->write(dev, CTRL_REG2, HP_FF_WU1 | HP_FF_WU2);
 		}
 
 		if (p->irq_cfg)

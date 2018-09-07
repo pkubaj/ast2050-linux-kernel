@@ -24,9 +24,11 @@
 #include <asm/setup.h>
 #include <asm/sections.h>
 
+#define __page_aligned	__attribute__((section(".data.page_aligned")))
+
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
-pgd_t swapper_pg_dir[PTRS_PER_PGD] __page_aligned_data;
+pgd_t swapper_pg_dir[PTRS_PER_PGD] __page_aligned;
 
 struct page *empty_zero_page;
 EXPORT_SYMBOL(empty_zero_page);
@@ -139,7 +141,7 @@ void __init mem_init(void)
 
 	printk ("Memory: %luk/%luk available (%dk kernel code, "
 		"%dk reserved, %dk data, %dk init)\n",
-		nr_free_pages() << (PAGE_SHIFT - 10),
+		(unsigned long)nr_free_pages() << (PAGE_SHIFT - 10),
 		totalram_pages << (PAGE_SHIFT - 10),
 		codesize >> 10,
 		reservedpages << (PAGE_SHIFT - 10),

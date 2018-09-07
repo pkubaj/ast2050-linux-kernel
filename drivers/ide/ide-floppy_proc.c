@@ -1,34 +1,22 @@
 #include <linux/kernel.h>
 #include <linux/ide.h>
-#include <linux/seq_file.h>
 
 #include "ide-floppy.h"
 
-static int idefloppy_capacity_proc_show(struct seq_file *m, void *v)
+static int proc_idefloppy_read_capacity(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
 {
-	ide_drive_t*drive = (ide_drive_t *)m->private;
+	ide_drive_t*drive = (ide_drive_t *)data;
+	int len;
 
-	seq_printf(m, "%llu\n", (long long)ide_gd_capacity(drive));
-	return 0;
+	len = sprintf(page, "%llu\n", (long long)ide_gd_capacity(drive));
+	PROC_IDE_READ_RETURN(page, start, off, count, eof, len);
 }
-
-static int idefloppy_capacity_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, idefloppy_capacity_proc_show, PDE(inode)->data);
-}
-
-static const struct file_operations idefloppy_capacity_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= idefloppy_capacity_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 ide_proc_entry_t ide_floppy_proc[] = {
-	{ "capacity",	S_IFREG|S_IRUGO, &idefloppy_capacity_proc_fops	},
-	{ "geometry",	S_IFREG|S_IRUGO, &ide_geometry_proc_fops	},
-	{}
+	{ "capacity",	S_IFREG|S_IRUGO, proc_idefloppy_read_capacity,	NULL },
+	{ "geometry",	S_IFREG|S_IRUGO, proc_ide_read_geometry,	NULL },
+	{ NULL, 0, NULL, NULL }
 };
 
 ide_devset_rw_field(bios_cyl, bios_cyl);

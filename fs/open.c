@@ -199,7 +199,7 @@ out:
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
 {
-	int ret;
+	int err;
 	struct iattr newattrs;
 
 	/* Not pretty: "inode->i_size" shouldn't really be signed. But it is. */
@@ -214,14 +214,12 @@ int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	}
 
 	/* Remove suid/sgid on truncate too */
-	ret = should_remove_suid(dentry);
-	if (ret)
-		newattrs.ia_valid |= ret | ATTR_FORCE;
+	newattrs.ia_valid |= should_remove_suid(dentry);
 
 	mutex_lock(&dentry->d_inode->i_mutex);
-	ret = notify_change(dentry, &newattrs);
+	err = notify_change(dentry, &newattrs);
 	mutex_unlock(&dentry->d_inode->i_mutex);
-	return ret;
+	return err;
 }
 
 static long do_sys_truncate(const char __user *pathname, loff_t length)
@@ -290,9 +288,10 @@ out:
 	return error;
 }
 
-SYSCALL_DEFINE2(truncate, const char __user *, path, long, length)
+SYSCALL_DEFINE2(truncate, const char __user *, path, unsigned long, length)
 {
-	return do_sys_truncate(path, length);
+	/* on 32-bit boxen it will cut the range 2^31--2^32-1 off */
+	return do_sys_truncate(path, (long)length);
 }
 
 static long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
@@ -957,8 +956,6 @@ struct file *dentry_open(struct dentry *dentry, struct vfsmount *mnt, int flags,
 {
 	int error;
 	struct file *f;
-
-	validate_creds(cred);
 
 	/*
 	 * We must always pass in a valid mount pointer.   Historically

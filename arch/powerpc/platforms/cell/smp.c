@@ -58,6 +58,8 @@
  */
 static cpumask_t of_spin_map;
 
+extern void generic_secondary_smp_init(unsigned long);
+
 /**
  * smp_startup_cpu() - start the given cpu
  *

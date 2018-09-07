@@ -14,12 +14,6 @@
 #include "tomoyo.h"
 #include "realpath.h"
 
-static int tomoyo_cred_alloc_blank(struct cred *new, gfp_t gfp)
-{
-	new->security = NULL;
-	return 0;
-}
-
 static int tomoyo_cred_prepare(struct cred *new, const struct cred *old,
 			       gfp_t gfp)
 {
@@ -29,15 +23,6 @@ static int tomoyo_cred_prepare(struct cred *new, const struct cred *old,
 	 */
 	new->security = old->security;
 	return 0;
-}
-
-static void tomoyo_cred_transfer(struct cred *new, const struct cred *old)
-{
-	/*
-	 * Since "struct tomoyo_domain_info *" is a sharable pointer,
-	 * we don't need to duplicate.
-	 */
-	new->security = old->security;
 }
 
 static int tomoyo_bprm_set_creds(struct linux_binprm *bprm)
@@ -76,8 +61,14 @@ static int tomoyo_bprm_check_security(struct linux_binprm *bprm)
 	 * Execute permission is checked against pathname passed to do_execve()
 	 * using current domain.
 	 */
-	if (!domain)
-		return tomoyo_find_next_domain(bprm);
+	if (!domain) {
+		struct tomoyo_domain_info *next_domain = NULL;
+		int retval = tomoyo_find_next_domain(bprm, &next_domain);
+
+		if (!retval)
+			bprm->cred->security = next_domain;
+		return retval;
+	}
 	/*
 	 * Read permission is checked against interpreters using next domain.
 	 * '1' is the result of open_to_namei_flags(O_RDONLY).
@@ -277,9 +268,7 @@ static int tomoyo_dentry_open(struct file *f, const struct cred *cred)
  */
 static struct security_operations tomoyo_security_ops = {
 	.name                = "tomoyo",
-	.cred_alloc_blank    = tomoyo_cred_alloc_blank,
 	.cred_prepare        = tomoyo_cred_prepare,
-	.cred_transfer	     = tomoyo_cred_transfer,
 	.bprm_set_creds      = tomoyo_bprm_set_creds,
 	.bprm_check_security = tomoyo_bprm_check_security,
 #ifdef CONFIG_SYSCTL

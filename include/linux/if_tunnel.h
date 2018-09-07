@@ -2,7 +2,6 @@
 #define _IF_TUNNEL_H_
 
 #include <linux/types.h>
-#include <asm/byteorder.h>
 
 #ifdef __KERNEL__
 #include <linux/ip.h>
@@ -45,7 +44,7 @@ struct ip_tunnel_prl {
 	__u16			flags;
 	__u16			__reserved;
 	__u32			datalen;
-	__u32			__reserved2;
+	__u32			rs_delay;
 	/* data follows */
 };
 

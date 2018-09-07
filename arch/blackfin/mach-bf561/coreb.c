@@ -48,7 +48,7 @@ coreb_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned l
 	return ret;
 }
 
-static const struct file_operations coreb_fops = {
+static struct file_operations coreb_fops = {
 	.owner   = THIS_MODULE,
 	.ioctl   = coreb_ioctl,
 };

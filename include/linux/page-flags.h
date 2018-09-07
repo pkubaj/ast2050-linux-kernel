@@ -51,9 +51,6 @@
  * PG_buddy is set to indicate that the page is free and in the buddy system
  * (see mm/page_alloc.c).
  *
- * PG_hwpoison indicates that a page got corrupted in hardware and contains
- * data with incorrect ECC bits that triggered a machine check. Accessing is
- * not safe since it may cause another machine check. Don't touch!
  */
 
 /*
@@ -102,11 +99,8 @@ enum pageflags {
 #ifdef CONFIG_HAVE_MLOCKED_PAGE_BIT
 	PG_mlocked,		/* Page is vma mlocked */
 #endif
-#ifdef CONFIG_ARCH_USES_PG_UNCACHED
+#ifdef CONFIG_IA64_UNCACHED_ALLOCATOR
 	PG_uncached,		/* Page has been mapped as uncached */
-#endif
-#ifdef CONFIG_MEMORY_FAILURE
-	PG_hwpoison,		/* hardware poisoned page. Don't touch */
 #endif
 	__NR_PAGEFLAGS,
 
@@ -164,9 +158,6 @@ static inline int TestSetPage##uname(struct page *page)			\
 static inline int TestClearPage##uname(struct page *page)		\
 		{ return test_and_clear_bit(PG_##lname, &page->flags); }
 
-#define __TESTCLEARFLAG(uname, lname)					\
-static inline int __TestClearPage##uname(struct page *page)		\
-		{ return __test_and_clear_bit(PG_##lname, &page->flags); }
 
 #define PAGEFLAG(uname, lname) TESTPAGEFLAG(uname, lname)		\
 	SETPAGEFLAG(uname, lname) CLEARPAGEFLAG(uname, lname)
@@ -192,9 +183,6 @@ static inline void __ClearPage##uname(struct page *page) {  }
 
 #define TESTCLEARFLAG_FALSE(uname)					\
 static inline int TestClearPage##uname(struct page *page) { return 0; }
-
-#define __TESTCLEARFLAG_FALSE(uname)					\
-static inline int __TestClearPage##uname(struct page *page) { return 0; }
 
 struct page;	/* forward declaration */
 
@@ -262,26 +250,17 @@ PAGEFLAG(Unevictable, unevictable) __CLEARPAGEFLAG(Unevictable, unevictable)
 #ifdef CONFIG_HAVE_MLOCKED_PAGE_BIT
 #define MLOCK_PAGES 1
 PAGEFLAG(Mlocked, mlocked) __CLEARPAGEFLAG(Mlocked, mlocked)
-	TESTSCFLAG(Mlocked, mlocked) __TESTCLEARFLAG(Mlocked, mlocked)
+	TESTSCFLAG(Mlocked, mlocked)
 #else
 #define MLOCK_PAGES 0
-PAGEFLAG_FALSE(Mlocked) SETPAGEFLAG_NOOP(Mlocked)
-	TESTCLEARFLAG_FALSE(Mlocked) __TESTCLEARFLAG_FALSE(Mlocked)
+PAGEFLAG_FALSE(Mlocked)
+	SETPAGEFLAG_NOOP(Mlocked) TESTCLEARFLAG_FALSE(Mlocked)
 #endif
 
-#ifdef CONFIG_ARCH_USES_PG_UNCACHED
+#ifdef CONFIG_IA64_UNCACHED_ALLOCATOR
 PAGEFLAG(Uncached, uncached)
 #else
 PAGEFLAG_FALSE(Uncached)
-#endif
-
-#ifdef CONFIG_MEMORY_FAILURE
-PAGEFLAG(HWPoison, hwpoison)
-TESTSETFLAG(HWPoison, hwpoison)
-#define __PG_HWPOISON (1UL << PG_hwpoison)
-#else
-PAGEFLAG_FALSE(HWPoison)
-#define __PG_HWPOISON 0
 #endif
 
 static inline int PageUptodate(struct page *page)
@@ -362,7 +341,7 @@ static inline int PageCompound(struct page *page)
  * pages on the LRU and/or pagecache.
  */
 TESTPAGEFLAG(Compound, compound)
-__SETPAGEFLAG(Head, compound)  __CLEARPAGEFLAG(Head, compound)
+__PAGEFLAG(Head, compound)
 
 /*
  * PG_reclaim is used in combination with PG_compound to mark the
@@ -374,13 +353,7 @@ __SETPAGEFLAG(Head, compound)  __CLEARPAGEFLAG(Head, compound)
  * PG_compound & PG_reclaim	=> Tail page
  * PG_compound & ~PG_reclaim	=> Head page
  */
-#define PG_head_mask ((1L << PG_compound))
 #define PG_head_tail_mask ((1L << PG_compound) | (1L << PG_reclaim))
-
-static inline int PageHead(struct page *page)
-{
-	return ((page->flags & PG_head_tail_mask) == PG_head_mask);
-}
 
 static inline int PageTail(struct page *page)
 {
@@ -414,7 +387,7 @@ static inline void __ClearPageTail(struct page *page)
 	 1 << PG_private | 1 << PG_private_2 | \
 	 1 << PG_buddy	 | 1 << PG_writeback | 1 << PG_reserved | \
 	 1 << PG_slab	 | 1 << PG_swapcache | 1 << PG_active | \
-	 1 << PG_unevictable | __PG_MLOCKED | __PG_HWPOISON)
+	 1 << PG_unevictable | __PG_MLOCKED)
 
 /*
  * Flags checked when a page is prepped for return by the page allocator.
@@ -423,8 +396,8 @@ static inline void __ClearPageTail(struct page *page)
  */
 #define PAGE_FLAGS_CHECK_AT_PREP	((1 << NR_PAGEFLAGS) - 1)
 
-#define PAGE_FLAGS_PRIVATE				\
-	(1 << PG_private | 1 << PG_private_2)
+#endif /* !__GENERATING_BOUNDS_H */
+
 /**
  * page_has_private - Determine if page has private stuff
  * @page: The page to be checked
@@ -432,11 +405,8 @@ static inline void __ClearPageTail(struct page *page)
  * Determine if a page has private stuff, indicating that release routines
  * should be invoked upon it.
  */
-static inline int page_has_private(struct page *page)
-{
-	return !!(page->flags & PAGE_FLAGS_PRIVATE);
-}
-
-#endif /* !__GENERATING_BOUNDS_H */
+#define page_has_private(page)			\
+	((page)->flags & ((1 << PG_private) |	\
+			  (1 << PG_private_2)))
 
 #endif	/* PAGE_FLAGS_H */

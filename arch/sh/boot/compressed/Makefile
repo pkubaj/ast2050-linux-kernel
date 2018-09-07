@@ -5,10 +5,9 @@
 #
 
 targets		:= vmlinux vmlinux.bin vmlinux.bin.gz \
-		   vmlinux.bin.bz2 vmlinux.bin.lzma \
-		   head_$(BITS).o misc.o piggy.o
+		   head_$(BITS).o misc_$(BITS).o piggy.o
 
-OBJECTS = $(obj)/head_$(BITS).o $(obj)/misc.o $(obj)/cache.o
+OBJECTS = $(obj)/head_$(BITS).o $(obj)/misc_$(BITS).o $(obj)/cache.o
 
 ifdef CONFIG_SH_STANDARD_BIOS
 OBJECTS += $(obj)/../../kernel/sh_bios.o
@@ -24,7 +23,7 @@ IMAGE_OFFSET	:= $(shell /bin/bash -c 'printf "0x%08x" \
 
 LIBGCC	:= $(shell $(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
 
-ifeq ($(CONFIG_MCOUNT),y)
+ifeq ($(CONFIG_FUNCTION_TRACER),y)
 ORIG_CFLAGS := $(KBUILD_CFLAGS)
 KBUILD_CFLAGS = $(subst -pg, , $(ORIG_CFLAGS))
 endif
@@ -39,18 +38,10 @@ $(obj)/vmlinux: $(OBJECTS) $(obj)/piggy.o $(LIBGCC) FORCE
 $(obj)/vmlinux.bin: vmlinux FORCE
 	$(call if_changed,objcopy)
 
-vmlinux.bin.all-y := $(obj)/vmlinux.bin
-
-$(obj)/vmlinux.bin.gz: $(vmlinux.bin.all-y) FORCE
+$(obj)/vmlinux.bin.gz: $(obj)/vmlinux.bin FORCE
 	$(call if_changed,gzip)
-$(obj)/vmlinux.bin.bz2: $(vmlinux.bin.all-y) FORCE
-	$(call if_changed,bzip2)
-$(obj)/vmlinux.bin.lzma: $(vmlinux.bin.all-y) FORCE
-	$(call if_changed,lzma)
 
 OBJCOPYFLAGS += -R .empty_zero_page
 
-LDFLAGS_piggy.o := -r --format binary --oformat $(ld-bfd) -T
-
-$(obj)/piggy.o: $(obj)/vmlinux.scr $(obj)/vmlinux.bin.$(suffix-y) FORCE
-	$(call if_changed,ld)
+$(obj)/piggy.o: $(obj)/piggy.S $(obj)/vmlinux.bin.gz FORCE
+	$(call if_changed,as_o_S)

@@ -469,22 +469,17 @@ befs_follow_link(struct dentry *dentry, struct nameidata *nd)
 		befs_data_stream *data = &befs_ino->i_data.ds;
 		befs_off_t len = data->size;
 
-		if (len == 0) {
-			befs_error(sb, "Long symlink with illegal length");
+		befs_debug(sb, "Follow long symlink");
+
+		link = kmalloc(len, GFP_NOFS);
+		if (!link) {
+			link = ERR_PTR(-ENOMEM);
+		} else if (befs_read_lsymlink(sb, data, link, len) != len) {
+			kfree(link);
+			befs_error(sb, "Failed to read entire long symlink");
 			link = ERR_PTR(-EIO);
 		} else {
-			befs_debug(sb, "Follow long symlink");
-
-			link = kmalloc(len, GFP_NOFS);
-			if (!link) {
-				link = ERR_PTR(-ENOMEM);
-			} else if (befs_read_lsymlink(sb, data, link, len) != len) {
-				kfree(link);
-				befs_error(sb, "Failed to read entire long symlink");
-				link = ERR_PTR(-EIO);
-			} else {
-				link[len - 1] = '\0';
-			}
+			link[len - 1] = '\0';
 		}
 	} else {
 		link = befs_ino->i_data.symlink;
@@ -742,7 +737,12 @@ befs_put_super(struct super_block *sb)
 {
 	kfree(BEFS_SB(sb)->mount_opts.iocharset);
 	BEFS_SB(sb)->mount_opts.iocharset = NULL;
-	unload_nls(BEFS_SB(sb)->nls);
+
+	if (BEFS_SB(sb)->nls) {
+		unload_nls(BEFS_SB(sb)->nls);
+		BEFS_SB(sb)->nls = NULL;
+	}
+
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
 }
@@ -842,7 +842,7 @@ befs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_magic = BEFS_SUPER_MAGIC;
 	/* Set real blocksize of fs */
 	sb_set_blocksize(sb, (ulong) befs_sb->block_size);
-	sb->s_op = &befs_sops;
+	sb->s_op = (struct super_operations *) &befs_sops;
 	root = befs_iget(sb, iaddr2blockno(sb, &(befs_sb->root_dir)));
 	if (IS_ERR(root)) {
 		ret = PTR_ERR(root);
@@ -878,7 +878,6 @@ befs_fill_super(struct super_block *sb, void *data, int silent)
 	brelse(bh);
 
       unacquire_priv_sbp:
-	kfree(befs_sb->mount_opts.iocharset);
 	kfree(sb->s_fs_info);
 
       unacquire_none:

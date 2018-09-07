@@ -33,7 +33,7 @@ if usbmon is built into the kernel.
 
 Verify that bus sockets are present.
 
-# ls /sys/kernel/debug/usb/usbmon
+# ls /sys/kernel/debug/usbmon
 0s  0u  1s  1t  1u  2s  2t  2u  3s  3t  3u  4s  4t  4u
 #
 
@@ -43,11 +43,10 @@ This allows to filter away annoying devices that talk continuously.
 
 2. Find which bus connects to the desired device
 
-Run "cat /sys/kernel/debug/usb/devices", and find the T-line which corresponds
-to the device. Usually you do it by looking for the vendor string. If you have
-many similar devices, unplug one and compare the two
-/sys/kernel/debug/usb/devices outputs. The T-line will have a bus number.
-Example:
+Run "cat /proc/bus/usb/devices", and find the T-line which corresponds to
+the device. Usually you do it by looking for the vendor string. If you have
+many similar devices, unplug one and compare two /proc/bus/usb/devices outputs.
+The T-line will have a bus number. Example:
 
 T:  Bus=03 Lev=01 Prnt=01 Port=00 Cnt=01 Dev#=  2 Spd=12  MxCh= 0
 D:  Ver= 1.10 Cls=00(>ifc ) Sub=00 Prot=00 MxPS= 8 #Cfgs=  1
@@ -55,18 +54,15 @@ P:  Vendor=0557 ProdID=2004 Rev= 1.00
 S:  Manufacturer=ATEN
 S:  Product=UC100KM V2.00
 
-"Bus=03" means it's bus 3. Alternatively, you can look at the output from
-"lsusb" and get the bus number from the appropriate line. Example:
-
-Bus 003 Device 002: ID 0557:2004 ATEN UC100KM V2.00
+Bus=03 means it's bus 3.
 
 3. Start 'cat'
 
-# cat /sys/kernel/debug/usb/usbmon/3u > /tmp/1.mon.out
+# cat /sys/kernel/debug/usbmon/3u > /tmp/1.mon.out
 
 to listen on a single bus, otherwise, to listen on all buses, type:
 
-# cat /sys/kernel/debug/usb/usbmon/0u > /tmp/1.mon.out
+# cat /sys/kernel/debug/usbmon/0u > /tmp/1.mon.out
 
 This process will be reading until killed. Naturally, the output can be
 redirected to a desirable location. This is preferred, because it is going
@@ -309,7 +305,7 @@ Before the call, hdr, data, and alloc should be filled. Upon return, the area
 pointed by hdr contains the next event structure, and the data buffer contains
 the data, if any. The event is removed from the kernel buffer.
 
-The MON_IOCX_GET copies 48 bytes to hdr area, MON_IOCX_GETX copies 64 bytes.
+The MON_IOCX_GET copies 48 bytes, MON_IOCX_GETX copies 64 bytes.
 
  MON_IOCX_MFETCH, defined as _IOWR(MON_IOC_MAGIC, 7, struct mon_mfetch_arg)
 

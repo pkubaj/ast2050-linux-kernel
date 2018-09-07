@@ -1638,26 +1638,24 @@ pxafb_freq_policy(struct notifier_block *nb, unsigned long val, void *data)
  * Power management hooks.  Note that we won't be called from IRQ context,
  * unlike the blank functions above, so we may sleep.
  */
-static int pxafb_suspend(struct device *dev)
+static int pxafb_suspend(struct platform_device *dev, pm_message_t state)
 {
-	struct pxafb_info *fbi = dev_get_drvdata(dev);
+	struct pxafb_info *fbi = platform_get_drvdata(dev);
 
 	set_ctrlr_state(fbi, C_DISABLE_PM);
 	return 0;
 }
 
-static int pxafb_resume(struct device *dev)
+static int pxafb_resume(struct platform_device *dev)
 {
-	struct pxafb_info *fbi = dev_get_drvdata(dev);
+	struct pxafb_info *fbi = platform_get_drvdata(dev);
 
 	set_ctrlr_state(fbi, C_ENABLE_PM);
 	return 0;
 }
-
-static struct dev_pm_ops pxafb_pm_ops = {
-	.suspend	= pxafb_suspend,
-	.resume		= pxafb_resume,
-};
+#else
+#define pxafb_suspend	NULL
+#define pxafb_resume	NULL
 #endif
 
 static int __devinit pxafb_init_video_memory(struct pxafb_info *fbi)
@@ -2083,9 +2081,6 @@ static int __devinit pxafb_probe(struct platform_device *dev)
 		goto failed;
 	}
 
-	if (cpu_is_pxa3xx() && inf->acceleration_enabled)
-		fbi->fb.fix.accel = FB_ACCEL_PXA3XX;
-
 	fbi->backlight_power = inf->pxafb_backlight_power;
 	fbi->lcd_power = inf->pxafb_lcd_power;
 
@@ -2096,14 +2091,14 @@ static int __devinit pxafb_probe(struct platform_device *dev)
 		goto failed_fbi;
 	}
 
-	r = request_mem_region(r->start, resource_size(r), dev->name);
+	r = request_mem_region(r->start, r->end - r->start + 1, dev->name);
 	if (r == NULL) {
 		dev_err(&dev->dev, "failed to request I/O memory\n");
 		ret = -EBUSY;
 		goto failed_fbi;
 	}
 
-	fbi->mmio_base = ioremap(r->start, resource_size(r));
+	fbi->mmio_base = ioremap(r->start, r->end - r->start + 1);
 	if (fbi->mmio_base == NULL) {
 		dev_err(&dev->dev, "failed to map I/O memory\n");
 		ret = -EBUSY;
@@ -2202,7 +2197,7 @@ failed_free_dma:
 failed_free_io:
 	iounmap(fbi->mmio_base);
 failed_free_res:
-	release_mem_region(r->start, resource_size(r));
+	release_mem_region(r->start, r->end - r->start + 1);
 failed_fbi:
 	clk_put(fbi->clk);
 	platform_set_drvdata(dev, NULL);
@@ -2242,7 +2237,7 @@ static int __devexit pxafb_remove(struct platform_device *dev)
 	iounmap(fbi->mmio_base);
 
 	r = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	release_mem_region(r->start, resource_size(r));
+	release_mem_region(r->start, r->end - r->start + 1);
 
 	clk_put(fbi->clk);
 	kfree(fbi);
@@ -2253,12 +2248,11 @@ static int __devexit pxafb_remove(struct platform_device *dev)
 static struct platform_driver pxafb_driver = {
 	.probe		= pxafb_probe,
 	.remove 	= __devexit_p(pxafb_remove),
+	.suspend	= pxafb_suspend,
+	.resume		= pxafb_resume,
 	.driver		= {
 		.owner	= THIS_MODULE,
 		.name	= "pxa2xx-fb",
-#ifdef CONFIG_PM
-		.pm	= &pxafb_pm_ops,
-#endif
 	},
 };
 

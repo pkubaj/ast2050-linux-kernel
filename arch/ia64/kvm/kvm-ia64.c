@@ -210,6 +210,16 @@ int kvm_dev_ioctl_check_extension(long ext)
 
 }
 
+static struct kvm_io_device *vcpu_find_mmio_dev(struct kvm_vcpu *vcpu,
+					gpa_t addr, int len, int is_write)
+{
+	struct kvm_io_device *dev;
+
+	dev = kvm_io_bus_find_dev(&vcpu->kvm->mmio_bus, addr, len, is_write);
+
+	return dev;
+}
+
 static int handle_vm_error(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
 	kvm_run->exit_reason = KVM_EXIT_UNKNOWN;
@@ -221,7 +231,6 @@ static int handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
 	struct kvm_mmio_req *p;
 	struct kvm_io_device *mmio_dev;
-	int r;
 
 	p = kvm_get_vcpu_ioreq(vcpu);
 
@@ -238,13 +247,16 @@ static int handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	kvm_run->exit_reason = KVM_EXIT_MMIO;
 	return 0;
 mmio:
-	if (p->dir)
-		r = kvm_io_bus_read(&vcpu->kvm->mmio_bus, p->addr,
-				    p->size, &p->data);
-	else
-		r = kvm_io_bus_write(&vcpu->kvm->mmio_bus, p->addr,
-				     p->size, &p->data);
-	if (r)
+	mmio_dev = vcpu_find_mmio_dev(vcpu, p->addr, p->size, !p->dir);
+	if (mmio_dev) {
+		if (!p->dir)
+			kvm_iodevice_write(mmio_dev, p->addr, p->size,
+						&p->data);
+		else
+			kvm_iodevice_read(mmio_dev, p->addr, p->size,
+						&p->data);
+
+	} else
 		printk(KERN_ERR"kvm: No iodevice found! addr:%lx\n", p->addr);
 	p->state = STATE_IORESP_READY;
 
@@ -325,12 +337,13 @@ static struct kvm_vcpu *lid_to_vcpu(struct kvm *kvm, unsigned long id,
 {
 	union ia64_lid lid;
 	int i;
-	struct kvm_vcpu *vcpu;
 
-	kvm_for_each_vcpu(i, vcpu, kvm) {
-		lid.val = VCPU_LID(vcpu);
-		if (lid.id == id && lid.eid == eid)
-			return vcpu;
+	for (i = 0; i < kvm->arch.online_vcpus; i++) {
+		if (kvm->vcpus[i]) {
+			lid.val = VCPU_LID(kvm->vcpus[i]);
+			if (lid.id == id && lid.eid == eid)
+				return kvm->vcpus[i];
+		}
 	}
 
 	return NULL;
@@ -396,21 +409,21 @@ static int handle_global_purge(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	struct kvm *kvm = vcpu->kvm;
 	struct call_data call_data;
 	int i;
-	struct kvm_vcpu *vcpui;
 
 	call_data.ptc_g_data = p->u.ptc_g_data;
 
-	kvm_for_each_vcpu(i, vcpui, kvm) {
-		if (vcpui->arch.mp_state == KVM_MP_STATE_UNINITIALIZED ||
-				vcpu == vcpui)
+	for (i = 0; i < kvm->arch.online_vcpus; i++) {
+		if (!kvm->vcpus[i] || kvm->vcpus[i]->arch.mp_state ==
+						KVM_MP_STATE_UNINITIALIZED ||
+					vcpu == kvm->vcpus[i])
 			continue;
 
-		if (waitqueue_active(&vcpui->wq))
-			wake_up_interruptible(&vcpui->wq);
+		if (waitqueue_active(&kvm->vcpus[i]->wq))
+			wake_up_interruptible(&kvm->vcpus[i]->wq);
 
-		if (vcpui->cpu != -1) {
-			call_data.vcpu = vcpui;
-			smp_call_function_single(vcpui->cpu,
+		if (kvm->vcpus[i]->cpu != -1) {
+			call_data.vcpu = kvm->vcpus[i];
+			smp_call_function_single(kvm->vcpus[i]->cpu,
 					vcpu_global_purge, &call_data, 1);
 		} else
 			printk(KERN_WARNING"kvm: Uninit vcpu received ipi!\n");
@@ -839,6 +852,8 @@ struct  kvm *kvm_arch_create_vm(void)
 
 	kvm_init_vm(kvm);
 
+	kvm->arch.online_vcpus = 0;
+
 	return kvm;
 
 }
@@ -985,10 +1000,10 @@ long kvm_arch_vm_ioctl(struct file *filp,
 			goto out;
 		if (irqchip_in_kernel(kvm)) {
 			__s32 status;
-			mutex_lock(&kvm->irq_lock);
+			mutex_lock(&kvm->lock);
 			status = kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID,
 				    irq_event.irq, irq_event.level);
-			mutex_unlock(&kvm->irq_lock);
+			mutex_unlock(&kvm->lock);
 			if (ioctl == KVM_IRQ_LINE_STATUS) {
 				irq_event.status = status;
 				if (copy_to_user(argp, &irq_event,
@@ -1185,11 +1200,6 @@ out:
 
 #define PALE_RESET_ENTRY    0x80000000ffffffb0UL
 
-bool kvm_vcpu_compatible(struct kvm_vcpu *vcpu)
-{
-	return irqchip_in_kernel(vcpu->kvm) == (vcpu->arch.apic != NULL);
-}
-
 int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 {
 	struct kvm_vcpu *v;
@@ -1206,7 +1216,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	if (IS_ERR(vmm_vcpu))
 		return PTR_ERR(vmm_vcpu);
 
-	if (kvm_vcpu_is_bsp(vcpu)) {
+	if (vcpu->vcpu_id == 0) {
 		vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 
 		/*Set entry address for first run.*/
@@ -1214,7 +1224,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 		/*Initialize itc offset for vcpus*/
 		itc_offset = 0UL - kvm_get_itc(vcpu);
-		for (i = 0; i < KVM_MAX_VCPUS; i++) {
+		for (i = 0; i < kvm->arch.online_vcpus; i++) {
 			v = (struct kvm_vcpu *)((char *)vcpu +
 					sizeof(struct kvm_vcpu_data) * i);
 			v->arch.itc_offset = itc_offset;
@@ -1345,6 +1355,8 @@ struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm,
 		printk(KERN_DEBUG"kvm: vcpu_setup error!!\n");
 		goto fail;
 	}
+
+	kvm->arch.online_vcpus++;
 
 	return vcpu;
 fail:
@@ -1802,8 +1814,7 @@ static int kvm_ia64_sync_dirty_log(struct kvm *kvm,
 {
 	struct kvm_memory_slot *memslot;
 	int r, i;
-	long base;
-	unsigned long n;
+	long n, base;
 	unsigned long *dirty_bitmap = (unsigned long *)(kvm->arch.vm_base +
 			offsetof(struct kvm_vm_data, kvm_mem_dirty_log));
 
@@ -1816,7 +1827,7 @@ static int kvm_ia64_sync_dirty_log(struct kvm *kvm,
 	if (!memslot->dirty_bitmap)
 		goto out;
 
-	n = kvm_dirty_bitmap_bytes(memslot);
+	n = ALIGN(memslot->npages, BITS_PER_LONG) / 8;
 	base = memslot->base_gfn / BITS_PER_LONG;
 
 	for (i = 0; i < n/sizeof(long); ++i) {
@@ -1832,7 +1843,7 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 		struct kvm_dirty_log *log)
 {
 	int r;
-	unsigned long n;
+	int n;
 	struct kvm_memory_slot *memslot;
 	int is_dirty = 0;
 
@@ -1850,7 +1861,7 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 	if (is_dirty) {
 		kvm_flush_remote_tlbs(kvm);
 		memslot = &kvm->memslots[log->slot];
-		n = kvm_dirty_bitmap_bytes(memslot);
+		n = ALIGN(memslot->npages, BITS_PER_LONG) / 8;
 		memset(memslot->dirty_bitmap, 0, n);
 	}
 	r = 0;
@@ -1941,6 +1952,19 @@ int kvm_highest_pending_irq(struct kvm_vcpu *vcpu)
     return find_highest_bits((int *)&vpd->irr[0]);
 }
 
+int kvm_cpu_has_interrupt(struct kvm_vcpu *vcpu)
+{
+	if (kvm_highest_pending_irq(vcpu) != -1)
+		return 1;
+	return 0;
+}
+
+int kvm_arch_interrupt_allowed(struct kvm_vcpu *vcpu)
+{
+	/* do real check here */
+	return 1;
+}
+
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.timer_fired;
@@ -1953,8 +1977,7 @@ gfn_t unalias_gfn(struct kvm *kvm, gfn_t gfn)
 
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu)
 {
-	return (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE) ||
-		(kvm_highest_pending_irq(vcpu) != -1);
+	return vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE;
 }
 
 int kvm_arch_vcpu_ioctl_get_mpstate(struct kvm_vcpu *vcpu,

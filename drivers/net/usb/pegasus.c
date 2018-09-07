@@ -62,11 +62,8 @@ static char *devid=NULL;
 static struct usb_eth_dev usb_dev_id[] = {
 #define	PEGASUS_DEV(pn, vid, pid, flags)	\
 	{.name = pn, .vendor = vid, .device = pid, .private = flags},
-#define PEGASUS_DEV_CLASS(pn, vid, pid, dclass, flags) \
-	PEGASUS_DEV(pn, vid, pid, flags)
 #include "pegasus.h"
 #undef	PEGASUS_DEV
-#undef	PEGASUS_DEV_CLASS
 	{NULL, 0, 0, 0},
 	{NULL, 0, 0, 0}
 };
@@ -74,18 +71,8 @@ static struct usb_eth_dev usb_dev_id[] = {
 static struct usb_device_id pegasus_ids[] = {
 #define	PEGASUS_DEV(pn, vid, pid, flags) \
 	{.match_flags = USB_DEVICE_ID_MATCH_DEVICE, .idVendor = vid, .idProduct = pid},
-/*
- * The Belkin F8T012xx1 bluetooth adaptor has the same vendor and product
- * IDs as the Belkin F5D5050, so we need to teach the pegasus driver to
- * ignore adaptors belonging to the "Wireless" class 0xE0. For this one
- * case anyway, seeing as the pegasus is for "Wired" adaptors.
- */
-#define PEGASUS_DEV_CLASS(pn, vid, pid, dclass, flags) \
-	{.match_flags = (USB_DEVICE_ID_MATCH_DEVICE | USB_DEVICE_ID_MATCH_DEV_CLASS), \
-	.idVendor = vid, .idProduct = pid, .bDeviceClass = dclass},
 #include "pegasus.h"
 #undef	PEGASUS_DEV
-#undef	PEGASUS_DEV_CLASS
 	{},
 	{}
 };
@@ -889,8 +876,7 @@ static void pegasus_tx_timeout(struct net_device *net)
 	pegasus->stats.tx_errors++;
 }
 
-static netdev_tx_t pegasus_start_xmit(struct sk_buff *skb,
-					    struct net_device *net)
+static int pegasus_start_xmit(struct sk_buff *skb, struct net_device *net)
 {
 	pegasus_t *pegasus = netdev_priv(net);
 	int count = ((skb->len + 2) & 0x3f) ? skb->len + 2 : skb->len + 3;
@@ -928,7 +914,7 @@ static netdev_tx_t pegasus_start_xmit(struct sk_buff *skb,
 	}
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 static struct net_device_stats *pegasus_netdev_stats(struct net_device *dev)
@@ -1187,7 +1173,7 @@ static void pegasus_set_msglevel(struct net_device *dev, u32 v)
 	pegasus->msg_enable = v;
 }
 
-static const struct ethtool_ops ops = {
+static struct ethtool_ops ops = {
 	.get_drvinfo = pegasus_get_drvinfo,
 	.get_settings = pegasus_get_settings,
 	.set_settings = pegasus_set_settings,

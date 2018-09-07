@@ -3,14 +3,13 @@
  *
  * Interface to the FSF support functions.
  *
- * Copyright IBM Corporation 2002, 2009
+ * Copyright IBM Corporation 2002, 2008
  */
 
 #ifndef FSF_H
 #define FSF_H
 
 #include <linux/pfn.h>
-#include <linux/scatterlist.h>
 
 #define FSF_QTCB_CURRENT_VERSION		0x00000001
 

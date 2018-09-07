@@ -65,7 +65,7 @@ struct blk_shadow {
 	unsigned long frame[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 };
 
-static const struct block_device_operations xlvbd_block_fops;
+static struct block_device_operations xlvbd_block_fops;
 
 #define BLK_RING_SIZE __RING_SIZE((struct blkif_sring *)0, PAGE_SIZE)
 
@@ -889,7 +889,7 @@ static void blkfront_connect(struct blkfront_info *info)
 	}
 
 	err = xenbus_gather(XBT_NIL, info->xbdev->otherend,
-			    "feature-barrier", "%d", &info->feature_barrier,
+			    "feature-barrier", "%lu", &info->feature_barrier,
 			    NULL);
 	if (err)
 		info->feature_barrier = 0;
@@ -942,10 +942,10 @@ static void blkfront_closing(struct xenbus_device *dev)
 	/* Flush gnttab callback work. Must be done with no locks held. */
 	flush_scheduled_work();
 
-	del_gendisk(info->gd);
-
 	blk_cleanup_queue(info->rq);
 	info->rq = NULL;
+
+	del_gendisk(info->gd);
 
  out:
 	xenbus_frontend_closed(dev);
@@ -1039,7 +1039,7 @@ static int blkif_release(struct gendisk *disk, fmode_t mode)
 	return 0;
 }
 
-static const struct block_device_operations xlvbd_block_fops =
+static struct block_device_operations xlvbd_block_fops =
 {
 	.owner = THIS_MODULE,
 	.open = blkif_open,

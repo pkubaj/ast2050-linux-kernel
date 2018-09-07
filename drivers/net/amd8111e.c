@@ -1300,8 +1300,7 @@ static int amd8111e_tx_queue_avail(struct amd8111e_priv* lp )
 This function will queue the transmit packets to the descriptors and will trigger the send operation. It also initializes the transmit descriptors with buffer physical address, byte count, ownership to hardware etc.
 */
 
-static netdev_tx_t amd8111e_start_xmit(struct sk_buff *skb,
-				       struct net_device * dev)
+static int amd8111e_start_xmit(struct sk_buff *skb, struct net_device * dev)
 {
 	struct amd8111e_priv *lp = netdev_priv(dev);
 	int tx_index;
@@ -1347,7 +1346,7 @@ static netdev_tx_t amd8111e_start_xmit(struct sk_buff *skb,
 		netif_stop_queue(dev);
 	}
 	spin_unlock_irqrestore(&lp->lock, flags);
-	return NETDEV_TX_OK;
+	return 0;
 }
 /*
 This function returns all the memory mapped registers of the device.
@@ -1523,6 +1522,9 @@ static int amd8111e_ioctl(struct net_device * dev , struct ifreq *ifr, int cmd)
 	struct amd8111e_priv *lp = netdev_priv(dev);
 	int err;
 	u32 mii_regval;
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
 
 	switch(cmd) {
 	case SIOCGMIIPHY:

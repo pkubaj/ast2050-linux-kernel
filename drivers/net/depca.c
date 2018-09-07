@@ -237,7 +237,6 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/ioport.h>
@@ -517,8 +516,7 @@ struct depca_private {
 ** Public Functions
 */
 static int depca_open(struct net_device *dev);
-static netdev_tx_t depca_start_xmit(struct sk_buff *skb,
-				    struct net_device *dev);
+static int depca_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t depca_interrupt(int irq, void *dev_id);
 static int depca_close(struct net_device *dev);
 static int depca_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
@@ -930,8 +928,7 @@ static void depca_tx_timeout(struct net_device *dev)
 /*
 ** Writes a socket buffer to TX descriptor ring and starts transmission
 */
-static netdev_tx_t depca_start_xmit(struct sk_buff *skb,
-				    struct net_device *dev)
+static int depca_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct depca_private *lp = netdev_priv(dev);
 	u_long ioaddr = dev->base_addr;
@@ -1796,7 +1793,7 @@ static int __init get_hw_addr(struct net_device *dev)
 static int load_packet(struct net_device *dev, struct sk_buff *skb)
 {
 	struct depca_private *lp = netdev_priv(dev);
-	int i, entry, end, len, status = NETDEV_TX_OK;
+	int i, entry, end, len, status = 0;
 
 	entry = lp->tx_new;	/* Ring around buffer number. */
 	end = (entry + (skb->len - 1) / TX_BUFF_SZ) & lp->txRingMask;

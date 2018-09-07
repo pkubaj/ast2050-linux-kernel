@@ -12,8 +12,6 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 
-struct device;
-
 /*
  * Some platforms don't support the GPIO programming interface.
  *
@@ -90,15 +88,6 @@ static inline int gpio_export(unsigned gpio, bool direction_may_change)
 	WARN_ON(1);
 	return -EINVAL;
 }
-
-static inline int gpio_export_link(struct device *dev, const char *name,
-				unsigned gpio)
-{
-	/* GPIO can never have been exported */
-	WARN_ON(1);
-	return -EINVAL;
-}
-
 
 static inline void gpio_unexport(unsigned gpio)
 {

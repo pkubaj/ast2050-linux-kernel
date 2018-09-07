@@ -3162,12 +3162,7 @@ static inline int raw_cmd_copyout(int cmd, char __user *param,
 	int ret;
 
 	while (ptr) {
-		struct floppy_raw_cmd cmd = *ptr;
-		cmd.next = NULL;
-		cmd.kernel_data = NULL;
-		ret = copy_to_user((void __user *)param, &cmd, sizeof(cmd));
-		if (ret)
-			return -EFAULT;
+		COPYOUT(*ptr);
 		param += sizeof(struct floppy_raw_cmd);
 		if ((ptr->flags & FD_RAW_READ) && ptr->buffer_length) {
 			if (ptr->length >= 0
@@ -3214,12 +3209,9 @@ static inline int raw_cmd_copyin(int cmd, char __user *param,
 		if (!ptr)
 			return -ENOMEM;
 		*rcmd = ptr;
-		ret = copy_from_user(ptr, (void __user *)param, sizeof(*ptr));
+		COPYIN(*ptr);
 		ptr->next = NULL;
 		ptr->buffer_length = 0;
-		ptr->kernel_data = NULL;
-		if (ret)
-			return -EFAULT;
 		param += sizeof(struct floppy_raw_cmd);
 		if (ptr->cmd_count > 33)
 			/* the command may now also take up the space
@@ -3915,7 +3907,7 @@ static int floppy_revalidate(struct gendisk *disk)
 	return res;
 }
 
-static const struct block_device_operations floppy_fops = {
+static struct block_device_operations floppy_fops = {
 	.owner			= THIS_MODULE,
 	.open			= floppy_open,
 	.release		= floppy_release,
@@ -4159,7 +4151,7 @@ static void floppy_device_release(struct device *dev)
 {
 }
 
-static int floppy_resume(struct device *dev)
+static int floppy_resume(struct platform_device *dev)
 {
 	int fdc;
 
@@ -4170,15 +4162,10 @@ static int floppy_resume(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops floppy_pm_ops = {
-	.resume = floppy_resume,
-	.restore = floppy_resume,
-};
-
 static struct platform_driver floppy_driver = {
+	.resume = floppy_resume,
 	.driver = {
 		.name = "floppy",
-		.pm = &floppy_pm_ops,
 	},
 };
 

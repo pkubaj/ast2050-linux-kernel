@@ -57,8 +57,6 @@ struct ipl_block_fcp {
 } __attribute__((packed));
 
 #define DIAG308_VMPARM_SIZE	64
-#define DIAG308_SCPDATA_SIZE	(PAGE_SIZE - (sizeof(struct ipl_list_hdr) + \
-				 offsetof(struct ipl_block_fcp, scp_data)))
 
 struct ipl_block_ccw {
 	u8  load_parm[8];
@@ -93,8 +91,7 @@ extern void do_halt(void);
 extern void do_poff(void);
 extern void ipl_save_parameters(void);
 extern void ipl_update_parameters(void);
-extern size_t append_ipl_vmparm(char *, size_t);
-extern size_t append_ipl_scpdata(char *, size_t);
+extern void get_ipl_vmparm(char *);
 
 enum {
 	IPL_DEVNO_VALID		= 1,

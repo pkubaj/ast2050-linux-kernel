@@ -15,6 +15,7 @@
 #include <linux/bug.h>
 #include <linux/nmi.h>
 #include <linux/sysfs.h>
+#include <linux/ftrace.h>
 
 #include <asm/stacktrace.h>
 

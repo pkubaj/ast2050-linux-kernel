@@ -2652,8 +2652,6 @@ static int bttv_querycap(struct file *file, void  *priv,
 		V4L2_CAP_VBI_CAPTURE |
 		V4L2_CAP_READWRITE |
 		V4L2_CAP_STREAMING;
-	if (btv->has_saa6588)
-		cap->capabilities |= V4L2_CAP_RDS_CAPTURE;
 	if (no_overlay <= 0)
 		cap->capabilities |= V4L2_CAP_VIDEO_OVERLAY;
 
@@ -3532,7 +3530,7 @@ static int radio_s_tuner(struct file *file, void *priv,
 	if (0 != t->index)
 		return -EINVAL;
 
-	bttv_call_all(btv, tuner, s_tuner, t);
+	bttv_call_all(btv, tuner, g_tuner, t);
 	return 0;
 }
 
@@ -4468,7 +4466,6 @@ static int __devinit bttv_probe(struct pci_dev *dev,
 		request_modules(btv);
 	}
 
-	init_bttv_i2c_ir(btv);
 	bttv_input_init(btv);
 
 	/* everything is fine */
@@ -4619,10 +4616,14 @@ static int bttv_resume(struct pci_dev *pci_dev)
 #endif
 
 static struct pci_device_id bttv_pci_tbl[] = {
-	{PCI_VDEVICE(BROOKTREE, PCI_DEVICE_ID_BT848), 0},
-	{PCI_VDEVICE(BROOKTREE, PCI_DEVICE_ID_BT849), 0},
-	{PCI_VDEVICE(BROOKTREE, PCI_DEVICE_ID_BT878), 0},
-	{PCI_VDEVICE(BROOKTREE, PCI_DEVICE_ID_BT879), 0},
+	{PCI_VENDOR_ID_BROOKTREE, PCI_DEVICE_ID_BT848,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{PCI_VENDOR_ID_BROOKTREE, PCI_DEVICE_ID_BT849,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{PCI_VENDOR_ID_BROOKTREE, PCI_DEVICE_ID_BT878,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{PCI_VENDOR_ID_BROOKTREE, PCI_DEVICE_ID_BT879,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0,}
 };
 

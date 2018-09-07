@@ -252,14 +252,6 @@ static chunk_t area_location(struct pstore *ps, chunk_t area)
 	return 1 + ((ps->exceptions_per_area + 1) * area);
 }
 
-static void skip_metadata(struct pstore *ps)
-{
-	uint32_t stride = ps->exceptions_per_area + 1;
-	chunk_t next_free = ps->next_free;
-	if (sector_div(next_free, stride) == 1)
-		ps->next_free++;
-}
-
 /*
  * Read or write a metadata area.  Remembering to skip the first
  * chunk which holds the header.
@@ -489,8 +481,6 @@ static int read_exceptions(struct pstore *ps,
 
 	ps->current_area--;
 
-	skip_metadata(ps);
-
 	return 0;
 }
 
@@ -597,6 +587,8 @@ static int persistent_prepare_exception(struct dm_exception_store *store,
 					struct dm_snap_exception *e)
 {
 	struct pstore *ps = get_info(store);
+	uint32_t stride;
+	chunk_t next_free;
 	sector_t size = get_dev_size(store->cow->bdev);
 
 	/* Is there enough room ? */
@@ -609,8 +601,10 @@ static int persistent_prepare_exception(struct dm_exception_store *store,
 	 * Move onto the next free pending, making sure to take
 	 * into account the location of the metadata chunks.
 	 */
-	ps->next_free++;
-	skip_metadata(ps);
+	stride = (ps->exceptions_per_area + 1);
+	next_free = ++ps->next_free;
+	if (sector_div(next_free, stride) == 1)
+		ps->next_free++;
 
 	atomic_inc(&ps->pending_count);
 	return 0;

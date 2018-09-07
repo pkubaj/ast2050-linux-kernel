@@ -147,7 +147,6 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 		}
 
 		error = request_irq(irq, gpio_keys_isr,
-				    IRQF_SHARED |
 				    IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 				    button->desc ? button->desc : "gpio_keys",
 				    bdata);
@@ -217,9 +216,8 @@ static int __devexit gpio_keys_remove(struct platform_device *pdev)
 
 
 #ifdef CONFIG_PM
-static int gpio_keys_suspend(struct device *dev)
+static int gpio_keys_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	struct platform_device *pdev = to_platform_device(dev);
 	struct gpio_keys_platform_data *pdata = pdev->dev.platform_data;
 	int i;
 
@@ -236,9 +234,8 @@ static int gpio_keys_suspend(struct device *dev)
 	return 0;
 }
 
-static int gpio_keys_resume(struct device *dev)
+static int gpio_keys_resume(struct platform_device *pdev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
 	struct gpio_keys_platform_data *pdata = pdev->dev.platform_data;
 	int i;
 
@@ -254,22 +251,19 @@ static int gpio_keys_resume(struct device *dev)
 
 	return 0;
 }
-
-static const struct dev_pm_ops gpio_keys_pm_ops = {
-	.suspend	= gpio_keys_suspend,
-	.resume		= gpio_keys_resume,
-};
+#else
+#define gpio_keys_suspend	NULL
+#define gpio_keys_resume	NULL
 #endif
 
 static struct platform_driver gpio_keys_device_driver = {
 	.probe		= gpio_keys_probe,
 	.remove		= __devexit_p(gpio_keys_remove),
+	.suspend	= gpio_keys_suspend,
+	.resume		= gpio_keys_resume,
 	.driver		= {
 		.name	= "gpio-keys",
 		.owner	= THIS_MODULE,
-#ifdef CONFIG_PM
-		.pm	= &gpio_keys_pm_ops,
-#endif
 	}
 };
 

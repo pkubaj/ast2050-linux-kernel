@@ -291,7 +291,7 @@ static void fc_scsi_scan_rport(struct work_struct *work);
 #define FC_STARGET_NUM_ATTRS 	3
 #define FC_RPORT_NUM_ATTRS	10
 #define FC_VPORT_NUM_ATTRS	9
-#define FC_HOST_NUM_ATTRS	22
+#define FC_HOST_NUM_ATTRS	21
 
 struct fc_internal {
 	struct scsi_transport_template t;
@@ -1215,15 +1215,6 @@ store_fc_vport_delete(struct device *dev, struct device_attribute *attr,
 {
 	struct fc_vport *vport = transport_class_to_vport(dev);
 	struct Scsi_Host *shost = vport_to_shost(vport);
-	unsigned long flags;
-
-	spin_lock_irqsave(shost->host_lock, flags);
-	if (vport->flags & (FC_VPORT_DEL | FC_VPORT_CREATING)) {
-		spin_unlock_irqrestore(shost->host_lock, flags);
-		return -EBUSY;
-	}
-	vport->flags |= FC_VPORT_DELETING;
-	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	fc_queue_work(shost, &vport->vport_delete_work);
 	return count;
@@ -1813,9 +1804,6 @@ store_fc_host_vport_delete(struct device *dev, struct device_attribute *attr,
 	list_for_each_entry(vport, &fc_host->vports, peers) {
 		if ((vport->channel == 0) &&
 		    (vport->port_name == wwpn) && (vport->node_name == wwnn)) {
-			if (vport->flags & (FC_VPORT_DEL | FC_VPORT_CREATING))
-				break;
-			vport->flags |= FC_VPORT_DELETING;
 			match = 1;
 			break;
 		}
@@ -2407,7 +2395,6 @@ fc_rport_final_delete(struct work_struct *work)
 	struct Scsi_Host *shost = rport_to_shost(rport);
 	struct fc_internal *i = to_fc_internal(shost->transportt);
 	unsigned long flags;
-	int do_callback = 0;
 
 	/*
 	 * if a scan is pending, flush the SCSI Host work_q so that
@@ -2446,15 +2433,8 @@ fc_rport_final_delete(struct work_struct *work)
 	 * Avoid this call if we already called it when we preserved the
 	 * rport for the binding.
 	 */
-	spin_lock_irqsave(shost->host_lock, flags);
 	if (!(rport->flags & FC_RPORT_DEVLOSS_CALLBK_DONE) &&
-	    (i->f->dev_loss_tmo_callbk)) {
-		rport->flags |= FC_RPORT_DEVLOSS_CALLBK_DONE;
-		do_callback = 1;
-	}
-	spin_unlock_irqrestore(shost->host_lock, flags);
-
-	if (do_callback)
+	    (i->f->dev_loss_tmo_callbk))
 		i->f->dev_loss_tmo_callbk(rport);
 
 	fc_bsg_remove(rport->rqst_q);
@@ -3001,7 +2981,6 @@ fc_timeout_deleted_rport(struct work_struct *work)
 	struct fc_internal *i = to_fc_internal(shost->transportt);
 	struct fc_host_attrs *fc_host = shost_to_fc_host(shost);
 	unsigned long flags;
-	int do_callback = 0;
 
 	spin_lock_irqsave(shost->host_lock, flags);
 
@@ -3067,6 +3046,7 @@ fc_timeout_deleted_rport(struct work_struct *work)
 	rport->roles = FC_PORT_ROLE_UNKNOWN;
 	rport->port_state = FC_PORTSTATE_NOTPRESENT;
 	rport->flags &= ~FC_RPORT_FAST_FAIL_TIMEDOUT;
+	rport->flags |= FC_RPORT_DEVLOSS_CALLBK_DONE;
 
 	/*
 	 * Pre-emptively kill I/O rather than waiting for the work queue
@@ -3076,40 +3056,32 @@ fc_timeout_deleted_rport(struct work_struct *work)
 	spin_unlock_irqrestore(shost->host_lock, flags);
 	fc_terminate_rport_io(rport);
 
-	spin_lock_irqsave(shost->host_lock, flags);
+	BUG_ON(rport->port_state != FC_PORTSTATE_NOTPRESENT);
 
-	if (rport->port_state == FC_PORTSTATE_NOTPRESENT) {	/* still missing */
-
-		/* remove the identifiers that aren't used in the consisting binding */
-		switch (fc_host->tgtid_bind_type) {
-		case FC_TGTID_BIND_BY_WWPN:
-			rport->node_name = -1;
-			rport->port_id = -1;
-			break;
-		case FC_TGTID_BIND_BY_WWNN:
-			rport->port_name = -1;
-			rport->port_id = -1;
-			break;
-		case FC_TGTID_BIND_BY_ID:
-			rport->node_name = -1;
-			rport->port_name = -1;
-			break;
-		case FC_TGTID_BIND_NONE:	/* to keep compiler happy */
-			break;
-		}
-
-		/*
-		 * As this only occurs if the remote port (scsi target)
-		 * went away and didn't come back - we'll remove
-		 * all attached scsi devices.
-		 */
-		rport->flags |= FC_RPORT_DEVLOSS_CALLBK_DONE;
-		fc_queue_work(shost, &rport->stgt_delete_work);
-
-		do_callback = 1;
+	/* remove the identifiers that aren't used in the consisting binding */
+	switch (fc_host->tgtid_bind_type) {
+	case FC_TGTID_BIND_BY_WWPN:
+		rport->node_name = -1;
+		rport->port_id = -1;
+		break;
+	case FC_TGTID_BIND_BY_WWNN:
+		rport->port_name = -1;
+		rport->port_id = -1;
+		break;
+	case FC_TGTID_BIND_BY_ID:
+		rport->node_name = -1;
+		rport->port_name = -1;
+		break;
+	case FC_TGTID_BIND_NONE:	/* to keep compiler happy */
+		break;
 	}
 
-	spin_unlock_irqrestore(shost->host_lock, flags);
+	/*
+	 * As this only occurs if the remote port (scsi target)
+	 * went away and didn't come back - we'll remove
+	 * all attached scsi devices.
+	 */
+	fc_queue_work(shost, &rport->stgt_delete_work);
 
 	/*
 	 * Notify the driver that the rport is now dead. The LLDD will
@@ -3117,7 +3089,7 @@ fc_timeout_deleted_rport(struct work_struct *work)
 	 *
 	 * Note: we set the CALLBK_DONE flag above to correspond
 	 */
-	if (do_callback && i->f->dev_loss_tmo_callbk)
+	if (i->f->dev_loss_tmo_callbk)
 		i->f->dev_loss_tmo_callbk(rport);
 }
 
@@ -3340,6 +3312,18 @@ fc_vport_terminate(struct fc_vport *vport)
 	unsigned long flags;
 	int stat;
 
+	spin_lock_irqsave(shost->host_lock, flags);
+	if (vport->flags & FC_VPORT_CREATING) {
+		spin_unlock_irqrestore(shost->host_lock, flags);
+		return -EBUSY;
+	}
+	if (vport->flags & (FC_VPORT_DEL)) {
+		spin_unlock_irqrestore(shost->host_lock, flags);
+		return -EALREADY;
+	}
+	vport->flags |= FC_VPORT_DELETING;
+	spin_unlock_irqrestore(shost->host_lock, flags);
+
 	if (i->f->vport_delete)
 		stat = i->f->vport_delete(vport);
 	else
@@ -3459,7 +3443,7 @@ fc_bsg_jobdone(struct fc_bsg_job *job)
 
 /**
  * fc_bsg_softirq_done - softirq done routine for destroying the bsg requests
- * @rq:        BSG request that holds the job to be destroyed
+ * @req:        BSG request that holds the job to be destroyed
  */
 static void fc_bsg_softirq_done(struct request *rq)
 {
@@ -3613,7 +3597,6 @@ enum fc_dispatch_result {
 
 /**
  * fc_bsg_host_dispatch - process fc host bsg requests and dispatch to LLDD
- * @q:		fc host request queue
  * @shost:	scsi host rport attached to
  * @job:	bsg job to be processed
  */
@@ -3683,7 +3666,6 @@ fc_bsg_host_dispatch(struct request_queue *q, struct Scsi_Host *shost,
 fail_host_msg:
 	/* return the errno failure code as the only status */
 	BUG_ON(job->reply_len < sizeof(uint32_t));
-	job->reply->reply_payload_rcv_len = 0;
 	job->reply->result = ret;
 	job->reply_len = sizeof(uint32_t);
 	fc_bsg_jobdone(job);
@@ -3722,7 +3704,6 @@ fc_bsg_goose_queue(struct fc_rport *rport)
 
 /**
  * fc_bsg_rport_dispatch - process rport bsg requests and dispatch to LLDD
- * @q:		rport request queue
  * @shost:	scsi host rport attached to
  * @rport:	rport request destined to
  * @job:	bsg job to be processed
@@ -3769,7 +3750,6 @@ check_bidi:
 fail_rport_msg:
 	/* return the errno failure code as the only status */
 	BUG_ON(job->reply_len < sizeof(uint32_t));
-	job->reply->reply_payload_rcv_len = 0;
 	job->reply->result = ret;
 	job->reply_len = sizeof(uint32_t);
 	fc_bsg_jobdone(job);
@@ -3796,9 +3776,8 @@ fc_bsg_request_handler(struct request_queue *q, struct Scsi_Host *shost,
 		return;
 
 	while (!blk_queue_plugged(q)) {
-		if (rport && (rport->port_state == FC_PORTSTATE_BLOCKED) &&
-		    !(rport->flags & FC_RPORT_FAST_FAIL_TIMEDOUT))
-			break;
+		if (rport && (rport->port_state == FC_PORTSTATE_BLOCKED))
+				break;
 
 		req = blk_fetch_request(q);
 		if (!req)
@@ -3827,7 +3806,6 @@ fc_bsg_request_handler(struct request_queue *q, struct Scsi_Host *shost,
 		/* check if we have the msgcode value at least */
 		if (job->request_len < sizeof(uint32_t)) {
 			BUG_ON(job->reply_len < sizeof(uint32_t));
-			job->reply->reply_payload_rcv_len = 0;
 			job->reply->result = -ENOMSG;
 			job->reply_len = sizeof(uint32_t);
 			fc_bsg_jobdone(job);

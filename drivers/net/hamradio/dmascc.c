@@ -959,7 +959,7 @@ static int scc_send_packet(struct sk_buff *skb, struct net_device *dev)
 	spin_unlock_irqrestore(&priv->ring_lock, flags);
 	dev_kfree_skb(skb);
 
-	return NETDEV_TX_OK;
+	return 0;
 }
 
 

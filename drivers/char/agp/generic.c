@@ -123,9 +123,6 @@ static struct agp_memory *agp_create_user_memory(unsigned long num_agp_pages)
 	struct agp_memory *new;
 	unsigned long alloc_size = num_agp_pages*sizeof(struct page *);
 
-	if (INT_MAX/sizeof(struct page *) < num_agp_pages)
-		return NULL;
-
 	new = kzalloc(sizeof(struct agp_memory), GFP_KERNEL);
 	if (new == NULL)
 		return NULL;
@@ -245,14 +242,11 @@ struct agp_memory *agp_allocate_memory(struct agp_bridge_data *bridge,
 	int scratch_pages;
 	struct agp_memory *new;
 	size_t i;
-	int cur_memory;
 
 	if (!bridge)
 		return NULL;
 
-	cur_memory = atomic_read(&bridge->current_memory_agp);
-	if ((cur_memory + page_count > bridge->max_memory_agp) ||
-	    (cur_memory + page_count < page_count))
+	if ((atomic_read(&bridge->current_memory_agp) + page_count) > bridge->max_memory_agp)
 		return NULL;
 
 	if (type >= AGP_USER_TYPES) {
@@ -443,12 +437,6 @@ int agp_bind_memory(struct agp_memory *curr, off_t pg_start)
 		curr->bridge->driver->cache_flush();
 		curr->is_flushed = true;
 	}
-
-	if (curr->bridge->driver->agp_map_memory) {
-		ret_val = curr->bridge->driver->agp_map_memory(curr);
-		if (ret_val)
-			return ret_val;
-	}
 	ret_val = curr->bridge->driver->insert_memory(curr, pg_start, curr->type);
 
 	if (ret_val != 0)
@@ -489,9 +477,6 @@ int agp_unbind_memory(struct agp_memory *curr)
 
 	if (ret_val != 0)
 		return ret_val;
-
-	if (curr->bridge->driver->agp_unmap_memory)
-		curr->bridge->driver->agp_unmap_memory(curr);
 
 	curr->is_bound = false;
 	curr->pg_start = 0;
@@ -994,7 +979,7 @@ int agp_generic_create_gatt_table(struct agp_bridge_data *bridge)
 	set_memory_uc((unsigned long)table, 1 << page_order);
 	bridge->gatt_table = (void *)table;
 #else
-	bridge->gatt_table = ioremap_nocache(virt_to_phys(table),
+	bridge->gatt_table = ioremap_nocache(virt_to_gart(table),
 					(PAGE_SIZE * (1 << page_order)));
 	bridge->driver->cache_flush();
 #endif
@@ -1007,7 +992,7 @@ int agp_generic_create_gatt_table(struct agp_bridge_data *bridge)
 
 		return -ENOMEM;
 	}
-	bridge->gatt_bus_addr = virt_to_phys(bridge->gatt_table_real);
+	bridge->gatt_bus_addr = virt_to_gart(bridge->gatt_table_real);
 
 	/* AK: bogus, should encode addresses > 4GB */
 	for (i = 0; i < num_entries; i++) {
@@ -1129,8 +1114,8 @@ int agp_generic_insert_memory(struct agp_memory * mem, off_t pg_start, int type)
 		return -EINVAL;
 	}
 
-	if (((pg_start + mem->page_count) > num_entries) ||
-	    ((pg_start + mem->page_count) < pg_start))
+	/* AK: could wrap */
+	if ((pg_start + mem->page_count) > num_entries)
 		return -EINVAL;
 
 	j = pg_start;
@@ -1147,9 +1132,7 @@ int agp_generic_insert_memory(struct agp_memory * mem, off_t pg_start, int type)
 	}
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
-		writel(bridge->driver->mask_memory(bridge,
-						   page_to_phys(mem->pages[i]),
-						   mask_type),
+		writel(bridge->driver->mask_memory(bridge, mem->pages[i], mask_type),
 		       bridge->gatt_table+j);
 	}
 	readl(bridge->gatt_table+j-1);	/* PCI Posting. */
@@ -1164,7 +1147,7 @@ int agp_generic_remove_memory(struct agp_memory *mem, off_t pg_start, int type)
 {
 	size_t i;
 	struct agp_bridge_data *bridge;
-	int mask_type, num_entries;
+	int mask_type;
 
 	bridge = mem->bridge;
 	if (!bridge)
@@ -1174,11 +1157,6 @@ int agp_generic_remove_memory(struct agp_memory *mem, off_t pg_start, int type)
 		return 0;
 
 	if (type != mem->type)
-		return -EINVAL;
-
-	num_entries = agp_num_entries();
-	if (((pg_start + mem->page_count) > num_entries) ||
-	    ((pg_start + mem->page_count) < pg_start))
 		return -EINVAL;
 
 	mask_type = bridge->driver->agp_type_to_mask_type(bridge, type);
@@ -1369,8 +1347,9 @@ void global_cache_flush(void)
 EXPORT_SYMBOL(global_cache_flush);
 
 unsigned long agp_generic_mask_memory(struct agp_bridge_data *bridge,
-				      dma_addr_t addr, int type)
+				      struct page *page, int type)
 {
+	unsigned long addr = phys_to_gart(page_to_phys(page));
 	/* memory type is ignored in the generic routine */
 	if (bridge->driver->masks)
 		return addr | bridge->driver->masks[0].mask;

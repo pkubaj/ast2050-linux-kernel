@@ -23,14 +23,13 @@
  */
 	.text
 
-#include <linux/init.h>
 #include <linux/linkage.h>
 #include <asm/segment.h>
 #include <asm/page_types.h>
 #include <asm/boot.h>
 #include <asm/asm-offsets.h>
 
-	__HEAD
+	.section ".text.head","ax",@progbits
 ENTRY(startup_32)
 	cld
 	/*

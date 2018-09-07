@@ -70,8 +70,6 @@ struct class_private {
  * @knode_parent - node in sibling list
  * @knode_driver - node in driver list
  * @knode_bus - node in bus list
- * @driver_data - private pointer for driver specific info.  Will turn into a
- * list soon.
  * @device - pointer back to the struct class that this structure is
  * associated with.
  *
@@ -82,7 +80,6 @@ struct device_private {
 	struct klist_node knode_parent;
 	struct klist_node knode_driver;
 	struct klist_node knode_bus;
-	void *driver_data;
 	struct device *device;
 };
 #define to_device_private_parent(obj)	\
@@ -91,8 +88,6 @@ struct device_private {
 	container_of(obj, struct device_private, knode_driver)
 #define to_device_private_bus(obj)	\
 	container_of(obj, struct device_private, knode_bus)
-
-extern int device_private_init(struct device *dev);
 
 /* initialisation functions */
 extern int devices_init(void);
@@ -138,10 +133,4 @@ extern void module_remove_driver(struct device_driver *drv);
 static inline void module_add_driver(struct module *mod,
 				     struct device_driver *drv) { }
 static inline void module_remove_driver(struct device_driver *drv) { }
-#endif
-
-#ifdef CONFIG_DEVTMPFS
-extern int devtmpfs_init(void);
-#else
-static inline int devtmpfs_init(void) { return 0; }
 #endif

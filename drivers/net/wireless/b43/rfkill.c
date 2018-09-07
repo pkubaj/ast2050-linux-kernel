@@ -28,19 +28,13 @@
 /* Returns TRUE, if the radio is enabled in hardware. */
 bool b43_is_hw_radio_enabled(struct b43_wldev *dev)
 {
-	if (dev->phy.rev >= 3 || dev->phy.type == B43_PHYTYPE_LP) {
+	if (dev->phy.rev >= 3) {
 		if (!(b43_read32(dev, B43_MMIO_RADIO_HWENABLED_HI)
 		      & B43_MMIO_RADIO_HWENABLED_HI_MASK))
 			return 1;
 	} else {
-		/* To prevent CPU fault on PPC, do not read a register
-		 * unless the interface is started; however, on resume
-		 * for hibernation, this routine is entered early. When
-		 * that happens, unconditionally return TRUE.
-		 */
-		if (b43_status(dev) < B43_STAT_STARTED)
-			return 1;
-		if (b43_read16(dev, B43_MMIO_RADIO_HWENABLED_LO)
+		if (b43_status(dev) >= B43_STAT_STARTED &&
+		    b43_read16(dev, B43_MMIO_RADIO_HWENABLED_LO)
 		    & B43_MMIO_RADIO_HWENABLED_LO_MASK)
 			return 1;
 	}

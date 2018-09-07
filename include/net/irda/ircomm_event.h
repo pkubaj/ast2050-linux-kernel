@@ -74,7 +74,7 @@ struct ircomm_info {
 	struct qos_info *qos;
 };
 
-extern const char *const ircomm_state[];
+extern char *ircomm_state[];
 
 struct ircomm_cb;   /* Forward decl. */
 

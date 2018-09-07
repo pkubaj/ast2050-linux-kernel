@@ -1,7 +1,32 @@
 /*
- * Copyright 2006-2009 Analog Devices Inc.
+ * file:        include/asm-blackfin/mach-bf533/bfin_serial_5xx.h
+ * based on:
+ * author:
  *
- * Licensed under the GPL-2 or later
+ * created:
+ * description:
+ *	blackfin serial driver head file
+ * rev:
+ *
+ * modified:
+ *
+ *
+ * bugs:         enter bugs at http://blackfin.uclinux.org/
+ *
+ * this program is free software; you can redistribute it and/or modify
+ * it under the terms of the gnu general public license as published by
+ * the free software foundation; either version 2, or (at your option)
+ * any later version.
+ *
+ * this program is distributed in the hope that it will be useful,
+ * but without any warranty; without even the implied warranty of
+ * merchantability or fitness for a particular purpose.  see the
+ * gnu general public license for more details.
+ *
+ * you should have received a copy of the gnu general public license
+ * along with this program; see the file copying.
+ * if not, write to the free software foundation,
+ * 59 temple place - suite 330, boston, ma 02111-1307, usa.
  */
 
 #include <linux/serial.h>
@@ -106,11 +131,11 @@ struct bfin_serial_res {
 struct bfin_serial_res bfin_serial_resource[] = {
 	{
 	0xFFC00400,
-	IRQ_UART0_RX,
-	IRQ_UART0_ERROR,
+	IRQ_UART_RX,
+	IRQ_UART_ERROR,
 #ifdef CONFIG_SERIAL_BFIN_DMA
-	CH_UART0_TX,
-	CH_UART0_RX,
+	CH_UART_TX,
+	CH_UART_RX,
 #endif
 #ifdef CONFIG_SERIAL_BFIN_CTSRTS
 	CONFIG_UART0_CTS_PIN,

@@ -10,6 +10,7 @@
 
 */
 
+#ifdef CONFIG_RTL8192_PM
 
 #ifndef R8192_PM_H
 #define R8192_PM_H
@@ -23,3 +24,4 @@ int rtl8192U_resume (struct usb_interface *intf);
 int rtl8192U_enable_wake (struct pci_dev *dev, u32 state, int enable);
 
 #endif //R8192U_PM_H
+#endif // CONFIG_RTL8192_PM

@@ -134,7 +134,6 @@ struct bas_cardstate {
 #define BS_ATRDPEND	0x040	/* urb_cmd_in in use */
 #define BS_ATWRPEND	0x080	/* urb_cmd_out in use */
 #define BS_SUSPEND	0x100	/* USB port suspended */
-#define BS_RESETTING	0x200	/* waiting for HD_RESET_INTERRUPT_PIPE_ACK */
 
 
 static struct gigaset_driver *driver = NULL;
@@ -320,21 +319,6 @@ static int gigaset_set_line_ctrl(struct cardstate *cs, unsigned cflag)
 	return -EINVAL;
 }
 
-/* set/clear bits in base connection state, return previous state
- */
-static inline int update_basstate(struct bas_cardstate *ucs,
-				  int set, int clear)
-{
-	unsigned long flags;
-	int state;
-
-	spin_lock_irqsave(&ucs->lock, flags);
-	state = ucs->basstate;
-	ucs->basstate = (state & ~clear) | set;
-	spin_unlock_irqrestore(&ucs->lock, flags);
-	return state;
-}
-
 /* error_hangup
  * hang up any existing connection because of an unrecoverable error
  * This function may be called from any context and takes care of scheduling
@@ -366,9 +350,12 @@ static inline void error_hangup(struct bc_state *bcs)
  */
 static inline void error_reset(struct cardstate *cs)
 {
-	/* reset interrupt pipe to recover (ignore errors) */
-	update_basstate(cs->hw.bas, BS_RESETTING, 0);
-	req_submit(cs->bcs, HD_RESET_INTERRUPT_PIPE, 0, BAS_TIMEOUT);
+	/* close AT command channel to recover (ignore errors) */
+	req_submit(cs->bcs, HD_CLOSE_ATCHANNEL, 0, BAS_TIMEOUT);
+
+	//FIXME try to recover without bothering the user
+	dev_err(cs->dev,
+	    "unrecoverable error - please disconnect Gigaset base to reset\n");
 }
 
 /* check_pending
@@ -411,13 +398,8 @@ static void check_pending(struct bas_cardstate *ucs)
 	case HD_DEVICE_INIT_ACK:		/* no reply expected */
 		ucs->pending = 0;
 		break;
-	case HD_RESET_INTERRUPT_PIPE:
-		if (!(ucs->basstate & BS_RESETTING))
-			ucs->pending = 0;
-		break;
-	/*
-	 * HD_READ_ATMESSAGE and HD_WRITE_ATMESSAGE are handled separately
-	 * and should never end up here
+	/* HD_READ_ATMESSAGE, HD_WRITE_ATMESSAGE, HD_RESET_INTERRUPTPIPE
+	 * are handled separately and should never end up here
 	 */
 	default:
 		dev_warn(&ucs->interface->dev,
@@ -465,6 +447,21 @@ static void cmd_in_timeout(unsigned long data)
 	ucs->rcvbuf = NULL;
 	ucs->rcvbuf_size = 0;
 	error_reset(cs);
+}
+
+/* set/clear bits in base connection state, return previous state
+ */
+inline static int update_basstate(struct bas_cardstate *ucs,
+				  int set, int clear)
+{
+	unsigned long flags;
+	int state;
+
+	spin_lock_irqsave(&ucs->lock, flags);
+	state = ucs->basstate;
+	ucs->basstate = (state & ~clear) | set;
+	spin_unlock_irqrestore(&ucs->lock, flags);
+	return state;
 }
 
 /* read_ctrl_callback
@@ -765,8 +762,7 @@ static void read_int_callback(struct urb *urb)
 		break;
 
 	case HD_RESET_INTERRUPT_PIPE_ACK:
-		update_basstate(ucs, 0, BS_RESETTING);
-		dev_notice(cs->dev, "interrupt pipe reset\n");
+		gig_dbg(DEBUG_USBREQ, "HD_RESET_INTERRUPT_PIPE_ACK");
 		break;
 
 	case HD_SUSPEND_END:
@@ -1335,24 +1331,28 @@ static void read_iso_tasklet(unsigned long data)
 		rcvbuf = urb->transfer_buffer;
 		totleft = urb->actual_length;
 		for (frame = 0; totleft > 0 && frame < BAS_NUMFRAMES; frame++) {
-			numbytes = urb->iso_frame_desc[frame].actual_length;
-			if (unlikely(urb->iso_frame_desc[frame].status))
+			if (unlikely(urb->iso_frame_desc[frame].status)) {
 				dev_warn(cs->dev,
-					 "isochronous read: frame %d[%d]: %s\n",
-					 frame, numbytes,
+					 "isochronous read: frame %d: %s\n",
+					 frame,
 					 get_usb_statmsg(
 					    urb->iso_frame_desc[frame].status));
-			if (unlikely(numbytes > BAS_MAXFRAME))
+				break;
+			}
+			numbytes = urb->iso_frame_desc[frame].actual_length;
+			if (unlikely(numbytes > BAS_MAXFRAME)) {
 				dev_warn(cs->dev,
 					 "isochronous read: frame %d: "
 					 "numbytes (%d) > BAS_MAXFRAME\n",
 					 frame, numbytes);
+				break;
+			}
 			if (unlikely(numbytes > totleft)) {
 				dev_warn(cs->dev,
 					 "isochronous read: frame %d: "
 					 "numbytes (%d) > totleft (%d)\n",
 					 frame, numbytes, totleft);
-				numbytes = totleft;
+				break;
 			}
 			offset = urb->iso_frame_desc[frame].offset;
 			if (unlikely(offset + numbytes > BAS_INBUFSIZE)) {
@@ -1361,7 +1361,7 @@ static void read_iso_tasklet(unsigned long data)
 					 "offset (%d) + numbytes (%d) "
 					 "> BAS_INBUFSIZE\n",
 					 frame, offset, numbytes);
-				numbytes = BAS_INBUFSIZE - offset;
+				break;
 			}
 			gigaset_isoc_receive(rcvbuf + offset, numbytes, bcs);
 			totleft -= numbytes;
@@ -1433,7 +1433,6 @@ static void req_timeout(unsigned long data)
 
 	case HD_CLOSE_ATCHANNEL:
 		dev_err(bcs->cs->dev, "timeout closing AT channel\n");
-		error_reset(bcs->cs);
 		break;
 
 	case HD_CLOSE_B2CHANNEL:
@@ -1441,13 +1440,6 @@ static void req_timeout(unsigned long data)
 		dev_err(bcs->cs->dev, "timeout closing channel %d\n",
 			bcs->channel + 1);
 		error_reset(bcs->cs);
-		break;
-
-	case HD_RESET_INTERRUPT_PIPE:
-		/* error recovery escalation */
-		dev_err(bcs->cs->dev,
-			"reset interrupt pipe timeout, attempting USB reset\n");
-		usb_queue_reset_device(bcs->cs->hw.bas->interface);
 		break;
 
 	default:
@@ -1939,15 +1931,6 @@ static int gigaset_write_cmd(struct cardstate *cs,
 	if (len <= 0) {
 		/* nothing to do */
 		rc = 0;
-		goto notqueued;
-	}
-
-	/* translate "+++" escape sequence sent as a single separate command
-	 * into "close AT channel" command for error recovery
-	 * The next command will reopen the AT channel automatically.
-	 */
-	if (len == 3 && !memcmp(buf, "+++", 3)) {
-		rc = req_submit(cs->bcs, HD_CLOSE_ATCHANNEL, 0, BAS_TIMEOUT);
 		goto notqueued;
 	}
 

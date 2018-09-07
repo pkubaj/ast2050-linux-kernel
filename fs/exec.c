@@ -33,7 +33,7 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/pagemap.h>
-#include <linux/perf_event.h>
+#include <linux/perf_counter.h>
 #include <linux/highmem.h>
 #include <linux/spinlock.h>
 #include <linux/key.h>
@@ -55,7 +55,6 @@
 #include <linux/kmod.h>
 #include <linux/fsnotify.h>
 #include <linux/fs_struct.h>
-#include <linux/pipe_fs_i.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -64,7 +63,6 @@
 
 int core_uses_pid;
 char core_pattern[CORENAME_MAX_SIZE] = "core";
-unsigned int core_pipe_limit;
 int suid_dumpable = 0;
 
 /* The maximal length of core_pattern is also specified in sysctl.c */
@@ -159,22 +157,7 @@ out:
 
 #ifdef CONFIG_MMU
 
-void acct_arg_size(struct linux_binprm *bprm, unsigned long pages)
-{
-	struct mm_struct *mm = current->mm;
-	long diff = (long)(pages - bprm->vma_pages);
-
-	if (!mm || !diff)
-		return;
-
-	bprm->vma_pages = pages;
-
-	down_write(&mm->mmap_sem);
-	mm->total_vm += diff;
-	up_write(&mm->mmap_sem);
-}
-
-struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
+static struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 		int write)
 {
 	struct page *page;
@@ -195,8 +178,6 @@ struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 	if (write) {
 		unsigned long size = bprm->vma->vm_end - bprm->vma->vm_start;
 		struct rlimit *rlim;
-
-		acct_arg_size(bprm, size / PAGE_SIZE);
 
 		/*
 		 * We've historically supported up to 32 pages (ARG_MAX)
@@ -264,11 +245,6 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 	vma->vm_start = vma->vm_end - PAGE_SIZE;
 	vma->vm_flags = VM_STACK_FLAGS;
 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
-
-	err = security_file_mmap(NULL, 0, 0, 0, vma->vm_start, 1);
-	if (err)
-		goto err;
-
 	err = insert_vm_struct(mm, vma);
 	if (err)
 		goto err;
@@ -291,11 +267,7 @@ static bool valid_arg_len(struct linux_binprm *bprm, long len)
 
 #else
 
-void acct_arg_size(struct linux_binprm *bprm, unsigned long pages)
-{
-}
-
-struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
+static struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 		int write)
 {
 	struct page *page;
@@ -402,9 +374,6 @@ static int count(char __user * __user * argv, int max)
 			argv++;
 			if (i++ >= max)
 				return -E2BIG;
-
-			if (fatal_signal_pending(current))
-				return -ERESTARTNOHAND;
 			cond_resched();
 		}
 	}
@@ -447,12 +416,6 @@ static int copy_strings(int argc, char __user * __user * argv,
 
 		while (len > 0) {
 			int offset, bytes_to_copy;
-
-			if (fatal_signal_pending(current)) {
-				ret = -ERESTARTNOHAND;
-				goto out;
-			}
-			cond_resched();
 
 			offset = pos % PAGE_SIZE;
 			if (offset == 0)
@@ -607,9 +570,6 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	struct vm_area_struct *prev = NULL;
 	unsigned long vm_flags;
 	unsigned long stack_base;
-	unsigned long stack_size;
-	unsigned long stack_expand;
-	unsigned long rlim_stack;
 
 #ifdef CONFIG_STACK_GROWSUP
 	/* Limit stack size to 1GB */
@@ -629,11 +589,6 @@ int setup_arg_pages(struct linux_binprm *bprm,
 #else
 	stack_top = arch_align_stack(stack_top);
 	stack_top = PAGE_ALIGN(stack_top);
-
-	if (unlikely(stack_top < mmap_min_addr) ||
-	    unlikely(vma->vm_end - vma->vm_start >= stack_top - mmap_min_addr))
-		return -ENOMEM;
-
 	stack_shift = vma->vm_end - stack_top;
 
 	bprm->p -= stack_shift;
@@ -667,27 +622,16 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	/* Move stack pages down in memory. */
 	if (stack_shift) {
 		ret = shift_arg_pages(vma, stack_shift);
-		if (ret)
-			goto out_unlock;
+		if (ret) {
+			up_write(&mm->mmap_sem);
+			return ret;
+		}
 	}
 
-	stack_expand = EXTRA_STACK_VM_PAGES * PAGE_SIZE;
-	stack_size = vma->vm_end - vma->vm_start;
-	/*
-	 * Align this down to a page boundary as expand_stack
-	 * will align it up.
-	 */
-	rlim_stack = rlimit(RLIMIT_STACK) & PAGE_MASK;
 #ifdef CONFIG_STACK_GROWSUP
-	if (stack_size + stack_expand > rlim_stack)
-		stack_base = vma->vm_start + rlim_stack;
-	else
-		stack_base = vma->vm_end + stack_expand;
+	stack_base = vma->vm_end + EXTRA_STACK_VM_PAGES * PAGE_SIZE;
 #else
-	if (stack_size + stack_expand > rlim_stack)
-		stack_base = vma->vm_end - rlim_stack;
-	else
-		stack_base = vma->vm_start - stack_expand;
+	stack_base = vma->vm_start - EXTRA_STACK_VM_PAGES * PAGE_SIZE;
 #endif
 	ret = expand_stack(vma, stack_base);
 	if (ret)
@@ -695,7 +639,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 
 out_unlock:
 	up_write(&mm->mmap_sem);
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL(setup_arg_pages);
 
@@ -901,9 +845,6 @@ static int de_thread(struct task_struct *tsk)
 	sig->notify_count = 0;
 
 no_thread_group:
-	if (current->mm)
-		setmax_mm_hiwater_rss(&sig->maxrss, current->mm);
-
 	exit_itimers(sig);
 	flush_itimer_signals();
 
@@ -982,7 +923,7 @@ void set_task_comm(struct task_struct *tsk, char *buf)
 	task_lock(tsk);
 	strlcpy(tsk->comm, buf, sizeof(tsk->comm));
 	task_unlock(tsk);
-	perf_event_comm(tsk);
+	perf_counter_comm(tsk);
 }
 
 int flush_old_exec(struct linux_binprm * bprm)
@@ -1002,14 +943,12 @@ int flush_old_exec(struct linux_binprm * bprm)
 	/*
 	 * Release all of the old mmap stuff
 	 */
-	acct_arg_size(bprm, 0);
 	retval = exec_mmap(bprm->mm);
 	if (retval)
 		goto out;
 
 	bprm->mm = NULL;		/* We're using it now */
 
-	set_fs(USER_DS);
 	current->flags &= ~PF_RANDOMIZE;
 	flush_thread();
 	current->personality &= ~bprm->per_clear;
@@ -1070,7 +1009,7 @@ void setup_new_exec(struct linux_binprm * bprm)
 	 * security domain:
 	 */
 	if (!get_dumpable(current->mm))
-		perf_event_exit_task(current);
+		perf_counter_exit_task(current);
 
 	/* An exec changes our domain. We are no longer part of the thread
 	   group */
@@ -1108,23 +1047,8 @@ void free_bprm(struct linux_binprm *bprm)
 		mutex_unlock(&current->cred_guard_mutex);
 		abort_creds(bprm->cred);
 	}
-	/* If a binfmt changed the interp, free it. */
-	if (bprm->interp != bprm->filename)
-		kfree(bprm->interp);
 	kfree(bprm);
 }
-
-int bprm_change_interp(char *interp, struct linux_binprm *bprm)
-{
-	/* If a binfmt changed the interp, free it first. */
-	if (bprm->interp != bprm->filename)
-		kfree(bprm->interp);
-	bprm->interp = kstrdup(interp, GFP_KERNEL);
-	if (!bprm->interp)
-		return -ENOMEM;
-	return 0;
-}
-EXPORT_SYMBOL(bprm_change_interp);
 
 /*
  * install the new credentials for this executable
@@ -1181,45 +1105,6 @@ int check_unsafe_exec(struct linux_binprm *bprm)
 	return res;
 }
 
-static void bprm_fill_uid(struct linux_binprm *bprm)
-{
-	struct inode *inode;
-	unsigned int mode;
-	uid_t uid;
-	gid_t gid;
-
-	/* clear any previous set[ug]id data from a previous binary */
-	bprm->cred->euid = current_euid();
-	bprm->cred->egid = current_egid();
-
-	if (bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)
-		return;
-
-	inode = bprm->file->f_path.dentry->d_inode;
-	mode = ACCESS_ONCE(inode->i_mode);
-	if (!(mode & (S_ISUID|S_ISGID)))
-		return;
-
-	/* Be careful if suid/sgid is set */
-	mutex_lock(&inode->i_mutex);
-
-	/* reload atomically mode/uid/gid now that lock held */
-	mode = inode->i_mode;
-	uid = inode->i_uid;
-	gid = inode->i_gid;
-	mutex_unlock(&inode->i_mutex);
-
-	if (mode & S_ISUID) {
-		bprm->per_clear |= PER_CLEAR_ON_SETID;
-		bprm->cred->euid = uid;
-	}
-
-	if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
-		bprm->per_clear |= PER_CLEAR_ON_SETID;
-		bprm->cred->egid = gid;
-	}
-}
-
 /* 
  * Fill the binprm structure from the inode. 
  * Check permissions, then read the first 128 (BINPRM_BUF_SIZE) bytes
@@ -1228,12 +1113,36 @@ static void bprm_fill_uid(struct linux_binprm *bprm)
  */
 int prepare_binprm(struct linux_binprm *bprm)
 {
+	umode_t mode;
+	struct inode * inode = bprm->file->f_path.dentry->d_inode;
 	int retval;
 
+	mode = inode->i_mode;
 	if (bprm->file->f_op == NULL)
 		return -EACCES;
 
-	bprm_fill_uid(bprm);
+	/* clear any previous set[ug]id data from a previous binary */
+	bprm->cred->euid = current_euid();
+	bprm->cred->egid = current_egid();
+
+	if (!(bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)) {
+		/* Set-uid? */
+		if (mode & S_ISUID) {
+			bprm->per_clear |= PER_CLEAR_ON_SETID;
+			bprm->cred->euid = inode->i_uid;
+		}
+
+		/* Set-gid? */
+		/*
+		 * If setgid is set but no group execute bit then this
+		 * is a candidate for mandatory locking, not a setgid
+		 * executable.
+		 */
+		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+			bprm->per_clear |= PER_CLEAR_ON_SETID;
+			bprm->cred->egid = inode->i_gid;
+		}
+	}
 
 	/* fill in binprm security blob */
 	retval = security_bprm_set_creds(bprm);
@@ -1300,16 +1209,16 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 	int try,retval;
 	struct linux_binfmt *fmt;
 
-	/* This allows 4 levels of binfmt rewrites before failing hard. */
-	if (depth > 5)
-		return -ELOOP;
-
 	retval = security_bprm_check(bprm);
 	if (retval)
 		return retval;
 	retval = ima_bprm_check(bprm);
 	if (retval)
 		return retval;
+
+	/* kernel module loader fixup */
+	/* so we don't try to load run modprobe in kernel space. */
+	set_fs(USER_DS);
 
 	retval = audit_bprm(bprm);
 	if (retval)
@@ -1325,8 +1234,12 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 			if (!try_module_get(fmt->module))
 				continue;
 			read_unlock(&binfmt_lock);
-			bprm->recursion_depth = depth + 1;
 			retval = fn(bprm, regs);
+			/*
+			 * Restore the depth counter to its starting value
+			 * in this call, so we don't have to rely on every
+			 * load_binary function to restore it on return.
+			 */
 			bprm->recursion_depth = depth;
 			if (retval >= 0) {
 				if (depth == 0)
@@ -1457,10 +1370,8 @@ int do_execve(char * filename,
 	return retval;
 
 out:
-	if (bprm->mm) {
-		acct_arg_size(bprm, 0);
-		mmput(bprm->mm);
-	}
+	if (bprm->mm)
+		mmput (bprm->mm);
 
 out_file:
 	if (bprm->file) {
@@ -1483,16 +1394,18 @@ out_ret:
 	return retval;
 }
 
-void set_binfmt(struct linux_binfmt *new)
+int set_binfmt(struct linux_binfmt *new)
 {
-	struct mm_struct *mm = current->mm;
+	struct linux_binfmt *old = current->binfmt;
 
-	if (mm->binfmt)
-		module_put(mm->binfmt->module);
-
-	mm->binfmt = new;
-	if (new)
-		__module_get(new->module);
+	if (new) {
+		if (!try_module_get(new->module))
+			return -1;
+	}
+	current->binfmt = new;
+	if (old)
+		module_put(old->module);
+	return 0;
 }
 
 EXPORT_SYMBOL(set_binfmt);
@@ -1808,12 +1721,6 @@ void set_dumpable(struct mm_struct *mm, int value)
 	}
 }
 
-/*
- * This returns the actual value of the suid_dumpable flag. For things
- * that are using this for checking for privilege transitions, it must
- * test against SUID_DUMP_USER rather than treating it as a boolean
- * value.
- */
 int get_dumpable(struct mm_struct *mm)
 {
 	int ret;
@@ -1821,29 +1728,6 @@ int get_dumpable(struct mm_struct *mm)
 	ret = mm->flags & 0x3;
 	return (ret >= 2) ? 2 : ret;
 }
-
-static void wait_for_dump_helpers(struct file *file)
-{
-	struct pipe_inode_info *pipe;
-
-	pipe = file->f_path.dentry->d_inode->i_pipe;
-
-	pipe_lock(pipe);
-	pipe->readers++;
-	pipe->writers--;
-
-	while ((pipe->readers > 1) && (!signal_pending(current))) {
-		wake_up_interruptible_sync(&pipe->wait);
-		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
-		pipe_wait(pipe);
-	}
-
-	pipe->readers--;
-	pipe->writers++;
-	pipe_unlock(pipe);
-
-}
-
 
 void do_coredump(long signr, int exit_code, struct pt_regs *regs)
 {
@@ -1861,12 +1745,11 @@ void do_coredump(long signr, int exit_code, struct pt_regs *regs)
 	unsigned long core_limit = current->signal->rlim[RLIMIT_CORE].rlim_cur;
 	char **helper_argv = NULL;
 	int helper_argc = 0;
-	int dump_count = 0;
-	static atomic_t core_dump_count = ATOMIC_INIT(0);
+	char *delimit;
 
 	audit_core_dumps(signr);
 
-	binfmt = mm->binfmt;
+	binfmt = current->binfmt;
 	if (!binfmt || !binfmt->core_dump)
 		goto fail;
 
@@ -1917,63 +1800,54 @@ void do_coredump(long signr, int exit_code, struct pt_regs *regs)
  	lock_kernel();
 	ispipe = format_corename(corename, signr);
 	unlock_kernel();
-
+	/*
+	 * Don't bother to check the RLIMIT_CORE value if core_pattern points
+	 * to a pipe.  Since we're not writing directly to the filesystem
+	 * RLIMIT_CORE doesn't really apply, as no actual core file will be
+	 * created unless the pipe reader choses to write out the core file
+	 * at which point file size limits and permissions will be imposed
+	 * as it does with any other process
+	 */
 	if ((!ispipe) && (core_limit < binfmt->min_coredump))
 		goto fail_unlock;
 
  	if (ispipe) {
-		if (core_limit == 0) {
-			/*
-			 * Normally core limits are irrelevant to pipes, since
-			 * we're not writing to the file system, but we use
-			 * core_limit of 0 here as a speacial value. Any
-			 * non-zero limit gets set to RLIM_INFINITY below, but
-			 * a limit of 0 skips the dump.  This is a consistent
-			 * way to catch recursive crashes.  We can still crash
-			 * if the core_pattern binary sets RLIM_CORE =  !0
-			 * but it runs as root, and can do lots of stupid things
-			 * Note that we use task_tgid_vnr here to grab the pid
-			 * of the process group leader.  That way we get the
-			 * right pid if a thread in a multi-threaded
-			 * core_pattern process dies.
-			 */
-			printk(KERN_WARNING
-				"Process %d(%s) has RLIMIT_CORE set to 0\n",
-				task_tgid_vnr(current), current->comm);
-			printk(KERN_WARNING "Aborting core\n");
-			goto fail_unlock;
-		}
-
-		dump_count = atomic_inc_return(&core_dump_count);
-		if (core_pipe_limit && (core_pipe_limit < dump_count)) {
-			printk(KERN_WARNING "Pid %d(%s) over core_pipe_limit\n",
-			       task_tgid_vnr(current), current->comm);
-			printk(KERN_WARNING "Skipping core dump\n");
-			goto fail_dropcount;
-		}
-
 		helper_argv = argv_split(GFP_KERNEL, corename+1, &helper_argc);
 		if (!helper_argv) {
 			printk(KERN_WARNING "%s failed to allocate memory\n",
 			       __func__);
-			goto fail_dropcount;
+			goto fail_unlock;
+		}
+		/* Terminate the string before the first option */
+		delimit = strchr(corename, ' ');
+		if (delimit)
+			*delimit = '\0';
+		delimit = strrchr(helper_argv[0], '/');
+		if (delimit)
+			delimit++;
+		else
+			delimit = helper_argv[0];
+		if (!strcmp(delimit, current->comm)) {
+			printk(KERN_NOTICE "Recursive core dump detected, "
+					"aborting\n");
+			goto fail_unlock;
 		}
 
 		core_limit = RLIM_INFINITY;
 
 		/* SIGPIPE can happen, but it's just never processed */
-		if (call_usermodehelper_pipe(helper_argv[0], helper_argv, NULL,
+ 		if (call_usermodehelper_pipe(corename+1, helper_argv, NULL,
 				&file)) {
  			printk(KERN_INFO "Core dump to %s pipe failed\n",
 			       corename);
-			goto fail_dropcount;
+ 			goto fail_unlock;
  		}
  	} else
  		file = filp_open(corename,
 				 O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE | flag,
 				 0600);
 	if (IS_ERR(file))
-		goto fail_dropcount;
+		goto fail_unlock;
 	inode = file->f_path.dentry->d_inode;
 	if (inode->i_nlink > 1)
 		goto close_fail;	/* multiple links - don't dump */
@@ -2003,12 +1877,7 @@ void do_coredump(long signr, int exit_code, struct pt_regs *regs)
 	if (retval)
 		current->signal->group_exit_code |= 0x80;
 close_fail:
-	if (ispipe && core_pipe_limit)
-		wait_for_dump_helpers(file);
 	filp_close(file, NULL);
-fail_dropcount:
-	if (dump_count)
-		atomic_dec(&core_dump_count);
 fail_unlock:
 	if (helper_argv)
 		argv_free(helper_argv);

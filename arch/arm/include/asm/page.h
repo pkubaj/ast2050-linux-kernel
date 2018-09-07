@@ -194,10 +194,6 @@ typedef unsigned long pgprot_t;
 
 typedef struct page *pgtable_t;
 
-#ifndef CONFIG_SPARSEMEM
-extern int pfn_valid(unsigned long);
-#endif
-
 #include <asm/memory.h>
 
 #endif /* !__ASSEMBLY__ */

@@ -184,7 +184,10 @@ if ($target eq "0") {
 
 # if it's a module, we need to find the .ko file and calculate a load offset
 if ($module ne "") {
-	my $modulefile = `modinfo $module | grep '^filename:' | awk '{ print \$2 }'`;
+	my $dir = dirname($filename);
+	$dir = $dir . "/";
+	my $mod = $module . ".ko";
+	my $modulefile = `find $dir -name $mod | head -1`;
 	chomp($modulefile);
 	$filename = $modulefile;
 	if ($filename eq "") {

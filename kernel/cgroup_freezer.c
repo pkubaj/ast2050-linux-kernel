@@ -47,20 +47,17 @@ static inline struct freezer *task_freezer(struct task_struct *task)
 			    struct freezer, css);
 }
 
-int cgroup_freezing_or_frozen(struct task_struct *task)
+int cgroup_frozen(struct task_struct *task)
 {
 	struct freezer *freezer;
 	enum freezer_state state;
 
 	task_lock(task);
 	freezer = task_freezer(task);
-	if (!freezer->css.cgroup->parent)
-		state = CGROUP_THAWED; /* root cgroup can't be frozen */
-	else
-		state = freezer->state;
+	state = freezer->state;
 	task_unlock(task);
 
-	return (state == CGROUP_FREEZING) || (state == CGROUP_FROZEN);
+	return state == CGROUP_FROZEN;
 }
 
 /*
@@ -162,7 +159,7 @@ static bool is_task_frozen_enough(struct task_struct *task)
  */
 static int freezer_can_attach(struct cgroup_subsys *ss,
 			      struct cgroup *new_cgroup,
-			      struct task_struct *task, bool threadgroup)
+			      struct task_struct *task)
 {
 	struct freezer *freezer;
 
@@ -179,19 +176,6 @@ static int freezer_can_attach(struct cgroup_subsys *ss,
 	freezer = cgroup_freezer(new_cgroup);
 	if (freezer->state == CGROUP_FROZEN)
 		return -EBUSY;
-
-	if (threadgroup) {
-		struct task_struct *c;
-
-		rcu_read_lock();
-		list_for_each_entry_rcu(c, &task->thread_group, thread_group) {
-			if (is_task_frozen_enough(c)) {
-				rcu_read_unlock();
-				return -EBUSY;
-			}
-		}
-		rcu_read_unlock();
-	}
 
 	return 0;
 }

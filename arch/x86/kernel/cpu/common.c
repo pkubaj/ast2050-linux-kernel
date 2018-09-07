@@ -13,14 +13,13 @@
 #include <linux/io.h>
 
 #include <asm/stackprotector.h>
-#include <asm/perf_event.h>
+#include <asm/perf_counter.h>
 #include <asm/mmu_context.h>
-#include <asm/archrandom.h>
 #include <asm/hypervisor.h>
 #include <asm/processor.h>
 #include <asm/sections.h>
-#include <linux/topology.h>
-#include <linux/cpumask.h>
+#include <asm/topology.h>
+#include <asm/cpumask.h>
 #include <asm/pgtable.h>
 #include <asm/atomic.h>
 #include <asm/proto.h>
@@ -29,12 +28,13 @@
 #include <asm/desc.h>
 #include <asm/i387.h>
 #include <asm/mtrr.h>
-#include <linux/numa.h>
+#include <asm/numa.h>
 #include <asm/asm.h>
 #include <asm/cpu.h>
 #include <asm/mce.h>
 #include <asm/msr.h>
 #include <asm/pat.h>
+#include <asm/smp.h>
 
 #ifdef CONFIG_X86_LOCAL_APIC
 #include <asm/uv/uv.h>
@@ -94,45 +94,45 @@ DEFINE_PER_CPU_PAGE_ALIGNED(struct gdt_page, gdt_page) = { .gdt = {
 	 * TLS descriptors are currently at a different place compared to i386.
 	 * Hopefully nobody expects them at a fixed place (Wine?)
 	 */
-	[GDT_ENTRY_KERNEL32_CS]		= GDT_ENTRY_INIT(0xc09b, 0, 0xfffff),
-	[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xa09b, 0, 0xfffff),
-	[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc093, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER32_CS]	= GDT_ENTRY_INIT(0xc0fb, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_DS]	= GDT_ENTRY_INIT(0xc0f3, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_CS]	= GDT_ENTRY_INIT(0xa0fb, 0, 0xfffff),
+	[GDT_ENTRY_KERNEL32_CS]		= { { { 0x0000ffff, 0x00cf9b00 } } },
+	[GDT_ENTRY_KERNEL_CS]		= { { { 0x0000ffff, 0x00af9b00 } } },
+	[GDT_ENTRY_KERNEL_DS]		= { { { 0x0000ffff, 0x00cf9300 } } },
+	[GDT_ENTRY_DEFAULT_USER32_CS]	= { { { 0x0000ffff, 0x00cffb00 } } },
+	[GDT_ENTRY_DEFAULT_USER_DS]	= { { { 0x0000ffff, 0x00cff300 } } },
+	[GDT_ENTRY_DEFAULT_USER_CS]	= { { { 0x0000ffff, 0x00affb00 } } },
 #else
-	[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xc09a, 0, 0xfffff),
-	[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_CS]	= GDT_ENTRY_INIT(0xc0fa, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_DS]	= GDT_ENTRY_INIT(0xc0f2, 0, 0xfffff),
+	[GDT_ENTRY_KERNEL_CS]		= { { { 0x0000ffff, 0x00cf9a00 } } },
+	[GDT_ENTRY_KERNEL_DS]		= { { { 0x0000ffff, 0x00cf9200 } } },
+	[GDT_ENTRY_DEFAULT_USER_CS]	= { { { 0x0000ffff, 0x00cffa00 } } },
+	[GDT_ENTRY_DEFAULT_USER_DS]	= { { { 0x0000ffff, 0x00cff200 } } },
 	/*
 	 * Segments used for calling PnP BIOS have byte granularity.
 	 * They code segments and data segments have fixed 64k limits,
 	 * the transfer segment sizes are set at run time.
 	 */
 	/* 32-bit code */
-	[GDT_ENTRY_PNPBIOS_CS32]	= GDT_ENTRY_INIT(0x409a, 0, 0xffff),
+	[GDT_ENTRY_PNPBIOS_CS32]	= { { { 0x0000ffff, 0x00409a00 } } },
 	/* 16-bit code */
-	[GDT_ENTRY_PNPBIOS_CS16]	= GDT_ENTRY_INIT(0x009a, 0, 0xffff),
+	[GDT_ENTRY_PNPBIOS_CS16]	= { { { 0x0000ffff, 0x00009a00 } } },
 	/* 16-bit data */
-	[GDT_ENTRY_PNPBIOS_DS]		= GDT_ENTRY_INIT(0x0092, 0, 0xffff),
+	[GDT_ENTRY_PNPBIOS_DS]		= { { { 0x0000ffff, 0x00009200 } } },
 	/* 16-bit data */
-	[GDT_ENTRY_PNPBIOS_TS1]		= GDT_ENTRY_INIT(0x0092, 0, 0),
+	[GDT_ENTRY_PNPBIOS_TS1]		= { { { 0x00000000, 0x00009200 } } },
 	/* 16-bit data */
-	[GDT_ENTRY_PNPBIOS_TS2]		= GDT_ENTRY_INIT(0x0092, 0, 0),
+	[GDT_ENTRY_PNPBIOS_TS2]		= { { { 0x00000000, 0x00009200 } } },
 	/*
 	 * The APM segments have byte granularity and their bases
 	 * are set at run time.  All have 64k limits.
 	 */
 	/* 32-bit code */
-	[GDT_ENTRY_APMBIOS_BASE]	= GDT_ENTRY_INIT(0x409a, 0, 0xffff),
+	[GDT_ENTRY_APMBIOS_BASE]	= { { { 0x0000ffff, 0x00409a00 } } },
 	/* 16-bit code */
-	[GDT_ENTRY_APMBIOS_BASE+1]	= GDT_ENTRY_INIT(0x009a, 0, 0xffff),
+	[GDT_ENTRY_APMBIOS_BASE+1]	= { { { 0x0000ffff, 0x00009a00 } } },
 	/* data */
-	[GDT_ENTRY_APMBIOS_BASE+2]	= GDT_ENTRY_INIT(0x4092, 0, 0xffff),
+	[GDT_ENTRY_APMBIOS_BASE+2]	= { { { 0x0000ffff, 0x00409200 } } },
 
-	[GDT_ENTRY_ESPFIX_SS]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
-	[GDT_ENTRY_PERCPU]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
+	[GDT_ENTRY_ESPFIX_SS]		= { { { 0x0000ffff, 0x00cf9200 } } },
+	[GDT_ENTRY_PERCPU]		= { { { 0x0000ffff, 0x00cf9200 } } },
 	GDT_STACK_CANARY_INIT
 #endif
 } };
@@ -541,7 +541,7 @@ void __cpuinit cpu_detect(struct cpuinfo_x86 *c)
 	}
 }
 
-void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
+static void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
 {
 	u32 tfms, xlvl;
 	u32 ebx;
@@ -580,7 +580,6 @@ void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
 	if (c->extended_cpuid_level >= 0x80000007)
 		c->x86_power = cpuid_edx(0x80000007);
 
-	init_scattered_cpuid_features(c);
 }
 
 static void __cpuinit identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
@@ -729,6 +728,7 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
 
 	get_model_name(c); /* Default name */
 
+	init_scattered_cpuid_features(c);
 	detect_nopl(c);
 }
 
@@ -816,7 +816,6 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 #endif
 
 	init_hypervisor(c);
-	x86_init_rdrand(c);
 
 	/*
 	 * Clear/Set all flags overriden by options, need do it
@@ -871,7 +870,7 @@ void __init identify_boot_cpu(void)
 #else
 	vgetcpu_set_mode();
 #endif
-	init_hw_perf_events();
+	init_hw_perf_counters();
 }
 
 void __cpuinit identify_secondary_cpu(struct cpuinfo_x86 *c)
@@ -983,25 +982,17 @@ static __init int setup_disablecpuid(char *arg)
 __setup("clearcpuid=", setup_disablecpuid);
 
 #ifdef CONFIG_X86_64
-struct desc_ptr idt_descr = { NR_VECTORS * 16 - 1, (unsigned long) idt_table };
+struct desc_ptr idt_descr = { 256 * 16 - 1, (unsigned long) idt_table };
 
 DEFINE_PER_CPU_FIRST(union irq_stack_union,
 		     irq_stack_union) __aligned(PAGE_SIZE);
 
-/*
- * The following four percpu variables are hot.  Align current_task to
- * cacheline size such that all four fall in the same cacheline.
- */
-DEFINE_PER_CPU(struct task_struct *, current_task) ____cacheline_aligned =
-	&init_task;
-EXPORT_PER_CPU_SYMBOL(current_task);
+DEFINE_PER_CPU(char *, irq_stack_ptr) =
+	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
 
 DEFINE_PER_CPU(unsigned long, kernel_stack) =
 	(unsigned long)&init_thread_union - KERNEL_STACK_OFFSET + THREAD_SIZE;
 EXPORT_PER_CPU_SYMBOL(kernel_stack);
-
-DEFINE_PER_CPU(char *, irq_stack_ptr) =
-	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
 
 DEFINE_PER_CPU(unsigned int, irq_count) = -1;
 
@@ -1017,7 +1008,8 @@ static const unsigned int exception_stack_sizes[N_EXCEPTION_STACKS] = {
 };
 
 static DEFINE_PER_CPU_PAGE_ALIGNED(char, exception_stacks
-	[(N_EXCEPTION_STACKS - 1) * EXCEPTION_STKSZ + DEBUG_STKSZ]);
+	[(N_EXCEPTION_STACKS - 1) * EXCEPTION_STKSZ + DEBUG_STKSZ])
+	__aligned(PAGE_SIZE);
 
 /* May not be marked __init: used by software suspend */
 void syscall_init(void)
@@ -1050,11 +1042,8 @@ DEFINE_PER_CPU(struct orig_ist, orig_ist);
 
 #else	/* CONFIG_X86_64 */
 
-DEFINE_PER_CPU(struct task_struct *, current_task) = &init_task;
-EXPORT_PER_CPU_SYMBOL(current_task);
-
 #ifdef CONFIG_CC_STACKPROTECTOR
-DEFINE_PER_CPU_ALIGNED(struct stack_canary, stack_canary);
+DEFINE_PER_CPU(struct stack_canary, stack_canary) ____cacheline_aligned;
 #endif
 
 /* Make sure %fs and %gs are initialized properly in idle threads */
