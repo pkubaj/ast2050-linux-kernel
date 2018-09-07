@@ -1907,7 +1907,7 @@ static int ast_i2c_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, i2c_dev);
 
 	printk(KERN_INFO "I2C: %s: AST I2C adapter [%d khz]\n",
-	       dev_name(&i2c->adap.dev),i2c_dev->ast_i2c_data->bus_clk/1000);
+	       dev_name(&i2c_dev->adap.dev),i2c_dev->ast_i2c_data->bus_clk/1000);
 
 	return 0;
 
