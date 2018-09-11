@@ -32,6 +32,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 
+#include "e1000_mac.h"
 #include "e1000_regs.h"
 #include "e1000_defines.h"
 
@@ -40,8 +41,6 @@ struct e1000_hw;
 #define E1000_DEV_ID_82576                    0x10C9
 #define E1000_DEV_ID_82576_FIBER              0x10E6
 #define E1000_DEV_ID_82576_SERDES             0x10E7
-#define E1000_DEV_ID_82576_QUAD_COPPER        0x10E8
-#define E1000_DEV_ID_82576_NS                 0x150A
 #define E1000_DEV_ID_82575EB_COPPER           0x10A7
 #define E1000_DEV_ID_82575EB_FIBER_SERDES     0x10A9
 #define E1000_DEV_ID_82575GB_QUAD_COPPER      0x10D6
@@ -273,7 +272,6 @@ struct e1000_host_mng_command_info {
 #include "e1000_mac.h"
 #include "e1000_phy.h"
 #include "e1000_nvm.h"
-#include "e1000_mbx.h"
 
 struct e1000_mac_operations {
 	s32  (*check_for_link)(struct e1000_hw *);
@@ -429,34 +427,6 @@ struct e1000_fc_info {
 	enum e1000_fc_type original_type;
 };
 
-struct e1000_mbx_operations {
-	s32 (*init_params)(struct e1000_hw *hw);
-	s32 (*read)(struct e1000_hw *, u32 *, u16,  u16);
-	s32 (*write)(struct e1000_hw *, u32 *, u16, u16);
-	s32 (*read_posted)(struct e1000_hw *, u32 *, u16,  u16);
-	s32 (*write_posted)(struct e1000_hw *, u32 *, u16, u16);
-	s32 (*check_for_msg)(struct e1000_hw *, u16);
-	s32 (*check_for_ack)(struct e1000_hw *, u16);
-	s32 (*check_for_rst)(struct e1000_hw *, u16);
-};
-
-struct e1000_mbx_stats {
-	u32 msgs_tx;
-	u32 msgs_rx;
-
-	u32 acks;
-	u32 reqs;
-	u32 rsts;
-};
-
-struct e1000_mbx_info {
-	struct e1000_mbx_operations ops;
-	struct e1000_mbx_stats stats;
-	u32 timeout;
-	u32 usec_delay;
-	u16 size;
-};
-
 struct e1000_dev_spec_82575 {
 	bool sgmii_active;
 };
@@ -473,7 +443,6 @@ struct e1000_hw {
 	struct e1000_phy_info  phy;
 	struct e1000_nvm_info  nvm;
 	struct e1000_bus_info  bus;
-	struct e1000_mbx_info mbx;
 	struct e1000_host_mng_dhcp_cookie mng_cookie;
 
 	union {

@@ -87,8 +87,7 @@
 
 #include <linux/bpqether.h>
 
-static const char banner[] __initdata = KERN_INFO \
-	"AX.25: bpqether driver version 004\n";
+static char banner[] __initdata = KERN_INFO "AX.25: bpqether driver version 004\n";
 
 static char bcast_addr[6]={0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
@@ -97,7 +96,7 @@ static char bpq_eth_addr[6];
 static int bpq_rcv(struct sk_buff *, struct net_device *, struct packet_type *, struct net_device *);
 static int bpq_device_event(struct notifier_block *, unsigned long, void *);
 
-static struct packet_type bpq_packet_type __read_mostly = {
+static struct packet_type bpq_packet_type = {
 	.type	= cpu_to_be16(ETH_P_BPQ),
 	.func	= bpq_rcv,
 };
@@ -386,7 +385,6 @@ static int bpq_close(struct net_device *dev)
  *	Proc filesystem
  */
 static void *bpq_seq_start(struct seq_file *seq, loff_t *pos)
-	__acquires(RCU)
 {
 	int i = 1;
 	struct bpqdev *bpqdev;
@@ -419,7 +417,6 @@ static void *bpq_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void bpq_seq_stop(struct seq_file *seq, void *v)
-	__releases(RCU)
 {
 	rcu_read_unlock();
 }

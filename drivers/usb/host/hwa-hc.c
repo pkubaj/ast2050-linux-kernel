@@ -464,7 +464,8 @@ static int __hwahc_dev_set_key(struct wusbhc *wusbhc, u8 port_idx, u32 tkid,
 			port_idx << 8 | iface_no,
 			keyd, keyd_len, 1000 /* FIXME: arbitrary */);
 
-	kzfree(keyd); /* clear keys etc. */
+	memset(keyd, 0, sizeof(*keyd));	/* clear keys etc. */
+	kfree(keyd);
 	return result;
 }
 

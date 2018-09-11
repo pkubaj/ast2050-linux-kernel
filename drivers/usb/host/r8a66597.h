@@ -504,8 +504,6 @@ struct r8a66597 {
 
 	struct list_head child_device;
 	unsigned long child_connect_map[4];
-
-	unsigned bus_suspended:1;
 };
 
 static inline struct r8a66597 *hcd_to_r8a66597(struct usb_hcd *hcd)

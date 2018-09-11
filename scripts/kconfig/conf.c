@@ -11,7 +11,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 
 #define LKC_DIRECT_LINK
 #include "lkc.h"
@@ -465,22 +464,9 @@ int main(int ac, char **av)
 			input_mode = set_yes;
 			break;
 		case 'r':
-		{
-			struct timeval now;
-			unsigned int seed;
-
-			/*
-			 * Use microseconds derived seed,
-			 * compensate for systems where it may be zero
-			 */
-			gettimeofday(&now, NULL);
-
-			seed = (unsigned int)((now.tv_sec + 1) * (now.tv_usec + 1));
-			srand(seed);
-
 			input_mode = set_random;
+			srand(time(NULL));
 			break;
-		}
 		case 'h':
 			printf(_("See README for usage info\n"));
 			exit(0);

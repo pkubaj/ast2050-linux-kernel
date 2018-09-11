@@ -663,7 +663,7 @@ void xprt_connect(struct rpc_task *task)
 			xprt, (xprt_connected(xprt) ? "is" : "is not"));
 
 	if (!xprt_bound(xprt)) {
-		task->tk_status = -EAGAIN;
+		task->tk_status = -EIO;
 		return;
 	}
 	if (!xprt_lock_write(xprt, task))

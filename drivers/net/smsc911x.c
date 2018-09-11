@@ -895,22 +895,22 @@ static void smsc911x_tx_update_txcounters(struct net_device *dev)
 			SMSC_WARNING(HW,
 				"Packet tag reserved bit is high");
 		} else {
-			if (unlikely(tx_stat & TX_STS_ES_)) {
+			if (unlikely(tx_stat & 0x00008000)) {
 				dev->stats.tx_errors++;
 			} else {
 				dev->stats.tx_packets++;
 				dev->stats.tx_bytes += (tx_stat >> 16);
 			}
-			if (unlikely(tx_stat & TX_STS_EXCESS_COL_)) {
+			if (unlikely(tx_stat & 0x00000100)) {
 				dev->stats.collisions += 16;
 				dev->stats.tx_aborted_errors += 1;
 			} else {
 				dev->stats.collisions +=
 				    ((tx_stat >> 3) & 0xF);
 			}
-			if (unlikely(tx_stat & TX_STS_LOST_CARRIER_))
+			if (unlikely(tx_stat & 0x00000800))
 				dev->stats.tx_carrier_errors += 1;
-			if (unlikely(tx_stat & TX_STS_LATE_COL_)) {
+			if (unlikely(tx_stat & 0x00000200)) {
 				dev->stats.collisions++;
 				dev->stats.tx_aborted_errors++;
 			}
@@ -924,17 +924,19 @@ smsc911x_rx_counterrors(struct net_device *dev, unsigned int rxstat)
 {
 	int crc_err = 0;
 
-	if (unlikely(rxstat & RX_STS_ES_)) {
+	if (unlikely(rxstat & 0x00008000)) {
 		dev->stats.rx_errors++;
-		if (unlikely(rxstat & RX_STS_CRC_ERR_)) {
+		if (unlikely(rxstat & 0x00000002)) {
 			dev->stats.rx_crc_errors++;
 			crc_err = 1;
 		}
 	}
 	if (likely(!crc_err)) {
-		if (unlikely((rxstat & RX_STS_FRAME_TYPE_) &&
-			     (rxstat & RX_STS_LENGTH_ERR_)))
+		if (unlikely((rxstat & 0x00001020) == 0x00001020)) {
+			/* Frame type indicates length,
+			 * and length error is set */
 			dev->stats.rx_length_errors++;
+		}
 		if (rxstat & RX_STS_MCAST_)
 			dev->stats.multicast++;
 	}
@@ -953,7 +955,7 @@ smsc911x_rx_fastforward(struct smsc911x_data *pdata, unsigned int pktbytes)
 		do {
 			udelay(1);
 			val = smsc911x_reg_read(pdata, RX_DP_CTRL);
-		} while ((val & RX_DP_CTRL_RX_FFWD_) && --timeout);
+		} while (--timeout && (val & RX_DP_CTRL_RX_FFWD_));
 
 		if (unlikely(timeout == 0))
 			SMSC_WARNING(HW, "Timed out waiting for "
@@ -1119,7 +1121,7 @@ static int smsc911x_soft_reset(struct smsc911x_data *pdata)
 
 /* Sets the device MAC address to dev_addr, called with mac_lock held */
 static void
-smsc911x_set_hw_mac_address(struct smsc911x_data *pdata, u8 dev_addr[6])
+smsc911x_set_mac_address(struct smsc911x_data *pdata, u8 dev_addr[6])
 {
 	u32 mac_high16 = (dev_addr[5] << 8) | dev_addr[4];
 	u32 mac_low32 = (dev_addr[3] << 24) | (dev_addr[2] << 16) |
@@ -1160,8 +1162,8 @@ static int smsc911x_open(struct net_device *dev)
 
 	/* Make sure EEPROM has finished loading before setting GPIO_CFG */
 	timeout = 50;
-	while ((smsc911x_reg_read(pdata, E2P_CMD) & E2P_CMD_EPC_BUSY_) &&
-	       --timeout) {
+	while ((timeout--) &&
+	       (smsc911x_reg_read(pdata, E2P_CMD) & E2P_CMD_EPC_BUSY_)) {
 		udelay(10);
 	}
 
@@ -1174,7 +1176,7 @@ static int smsc911x_open(struct net_device *dev)
 	/* The soft reset above cleared the device's MAC address,
 	 * restore it from local copy (set in probe) */
 	spin_lock_irq(&pdata->mac_lock);
-	smsc911x_set_hw_mac_address(pdata, dev->dev_addr);
+	smsc911x_set_mac_address(pdata, dev->dev_addr);
 	spin_unlock_irq(&pdata->mac_lock);
 
 	/* Initialise irqs, but leave all sources disabled */
@@ -1224,10 +1226,6 @@ static int smsc911x_open(struct net_device *dev)
 
 	dev_info(&dev->dev, "SMSC911x/921x identified at %#08lx, IRQ: %d\n",
 		 (unsigned long)pdata->ioaddr, dev->irq);
-
-	/* Reset the last known duplex and carrier */
-	pdata->last_duplex = -1;
-	pdata->last_carrier = -1;
 
 	/* Bring the PHY up */
 	phy_start(pdata->phy_dev);
@@ -1508,31 +1506,6 @@ static void smsc911x_poll_controller(struct net_device *dev)
 }
 #endif				/* CONFIG_NET_POLL_CONTROLLER */
 
-static int smsc911x_set_mac_address(struct net_device *dev, void *p)
-{
-	struct smsc911x_data *pdata = netdev_priv(dev);
-	struct sockaddr *addr = p;
-
-	/* On older hardware revisions we cannot change the mac address
-	 * registers while receiving data.  Newer devices can safely change
-	 * this at any time. */
-	if (pdata->generation <= 1 && netif_running(dev))
-		return -EBUSY;
-
-	if (!is_valid_ether_addr(addr->sa_data))
-		return -EADDRNOTAVAIL;
-
-	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
-
-	spin_lock_irq(&pdata->mac_lock);
-	smsc911x_set_hw_mac_address(pdata, dev->dev_addr);
-	spin_unlock_irq(&pdata->mac_lock);
-
-	dev_info(&dev->dev, "MAC Address: %pM\n", dev->dev_addr);
-
-	return 0;
-}
-
 /* Standard ioctls for mii-tool */
 static int smsc911x_do_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
@@ -1646,7 +1619,7 @@ static int smsc911x_eeprom_send_cmd(struct smsc911x_data *pdata, u32 op)
 	do {
 		msleep(1);
 		e2cmd = smsc911x_reg_read(pdata, E2P_CMD);
-	} while ((e2cmd & E2P_CMD_EPC_BUSY_) && (--timeout));
+	} while ((e2cmd & E2P_CMD_EPC_BUSY_) && (timeout--));
 
 	if (!timeout) {
 		SMSC_TRACE(DRV, "TIMED OUT");
@@ -1763,7 +1736,7 @@ static const struct net_device_ops smsc911x_netdev_ops = {
 	.ndo_set_multicast_list	= smsc911x_set_multicast_list,
 	.ndo_do_ioctl		= smsc911x_do_ioctl,
 	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_set_mac_address 	= smsc911x_set_mac_address,
+	.ndo_set_mac_address 	= eth_mac_addr,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= smsc911x_poll_controller,
 #endif
@@ -1939,6 +1912,7 @@ static int __devinit smsc911x_drv_probe(struct platform_device *pdev)
 	unsigned int intcfg = 0;
 	int res_size, irq_flags;
 	int retval;
+	DECLARE_MAC_BUF(mac);
 
 	pr_info("%s: Driver version %s.\n", SMSC_CHIPNAME, SMSC_DRV_VERSION);
 
@@ -2051,7 +2025,7 @@ static int __devinit smsc911x_drv_probe(struct platform_device *pdev)
 
 	/* Check if mac address has been specified when bringing interface up */
 	if (is_valid_ether_addr(dev->dev_addr)) {
-		smsc911x_set_hw_mac_address(pdata, dev->dev_addr);
+		smsc911x_set_mac_address(pdata, dev->dev_addr);
 		SMSC_TRACE(PROBE, "MAC Address is specified by configuration");
 	} else {
 		/* Try reading mac address from device. if EEPROM is present
@@ -2065,7 +2039,7 @@ static int __devinit smsc911x_drv_probe(struct platform_device *pdev)
 		} else {
 			/* eeprom values are invalid, generate random MAC */
 			random_ether_addr(dev->dev_addr);
-			smsc911x_set_hw_mac_address(pdata, dev->dev_addr);
+			smsc911x_set_mac_address(pdata, dev->dev_addr);
 			SMSC_TRACE(PROBE,
 				"MAC Address is set to random_ether_addr");
 		}
@@ -2073,7 +2047,8 @@ static int __devinit smsc911x_drv_probe(struct platform_device *pdev)
 
 	spin_unlock_irq(&pdata->mac_lock);
 
-	dev_info(&dev->dev, "MAC Address: %pM\n", dev->dev_addr);
+	dev_info(&dev->dev, "MAC Address: %s\n",
+		 print_mac(mac, dev->dev_addr));
 
 	return 0;
 

@@ -4,7 +4,6 @@
 
 menuconfig NET
 	bool "Networking support"
-	select NLATTR
 	---help---
 	  Unless you really know what you are doing, you should say Y here.
 	  The reason is that some programs need kernel networking support even
@@ -24,6 +23,9 @@ menuconfig NET
 if NET
 
 menu "Networking options"
+
+config COMPAT_NET_DEV_OPS
+       def_bool y
 
 source "net/packet/Kconfig"
 source "net/unix/Kconfig"
@@ -169,7 +171,6 @@ endif
 
 source "net/dccp/Kconfig"
 source "net/sctp/Kconfig"
-source "net/rds/Kconfig"
 source "net/tipc/Kconfig"
 source "net/atm/Kconfig"
 source "net/802/Kconfig"
@@ -219,17 +220,6 @@ config NET_TCPPROBE
 
 	To compile this code as a module, choose M here: the
 	module will be called tcp_probe.
-
-config NET_DROP_MONITOR
-	boolean "Network packet drop alerting service"
-	depends on INET && EXPERIMENTAL && TRACEPOINTS
-	---help---
-	This feature provides an alerting service to userspace in the
-	event that packets are discarded in the network stack.  Alerts
-	are broadcast via netlink socket to any listening user space
-	process.  If you don't need network drop alerts, or if you are ok
-	just checking the various proc files and other utilities for
-	drop statistics, say N here.
 
 endmenu
 

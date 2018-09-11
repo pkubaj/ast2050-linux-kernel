@@ -1381,7 +1381,7 @@ static int __init init_queue(struct driver_data *drv_data)
 
 	INIT_WORK(&drv_data->work, pump_messages);
 	drv_data->workqueue = create_singlethread_workqueue(
-				dev_name(drv_data->master->dev.parent));
+					drv_data->master->dev.parent->bus_id);
 	if (drv_data->workqueue == NULL)
 		return -EBUSY;
 
@@ -1525,8 +1525,7 @@ static int __init spi_imx_probe(struct platform_device *pdev)
 		status = -ENODEV;
 		goto err_no_irqres;
 	}
-	status = request_irq(irq, spi_int, IRQF_DISABLED,
-			     dev_name(dev), drv_data);
+	status = request_irq(irq, spi_int, IRQF_DISABLED, dev->bus_id, drv_data);
 	if (status < 0) {
 		dev_err(&pdev->dev, "probe - cannot get IRQ (%d)\n", status);
 		goto err_no_irqres;

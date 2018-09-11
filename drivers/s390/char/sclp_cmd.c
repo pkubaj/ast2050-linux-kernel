@@ -19,7 +19,6 @@
 #include <linux/memory.h>
 #include <asm/chpid.h>
 #include <asm/sclp.h>
-#include <asm/setup.h>
 
 #include "sclp.h"
 
@@ -475,10 +474,6 @@ static void __init add_memory_merged(u16 rn)
 		goto skip_add;
 	if (start + size > VMEM_MAX_PHYS)
 		size = VMEM_MAX_PHYS - start;
-	if (memory_end_set && (start >= memory_end))
-		goto skip_add;
-	if (memory_end_set && (start + size > memory_end))
-		size = memory_end - start;
 	add_memory(0, start, size);
 skip_add:
 	first_rn = rn;

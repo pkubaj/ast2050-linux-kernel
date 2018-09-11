@@ -274,7 +274,6 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 	int ret;
 
 	BUG_ON(inode->i_state & I_SYNC);
-	WARN_ON(inode->i_state & I_NEW);
 
 	/* Set I_SYNC, reset I_DIRTY */
 	dirty = inode->i_state & I_DIRTY;
@@ -299,7 +298,6 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 	}
 
 	spin_lock(&inode_lock);
-	WARN_ON(inode->i_state & I_NEW);
 	inode->i_state &= ~I_SYNC;
 	if (!(inode->i_state & I_FREEING)) {
 		if (!(inode->i_state & I_DIRTY) &&
@@ -472,11 +470,6 @@ void generic_sync_sb_inodes(struct super_block *sb,
 			break;
 		}
 
-		if (inode->i_state & I_NEW) {
-			requeue_io(inode);
-			continue;
-		}
-
 		if (wbc->nonblocking && bdi_write_congested(bdi)) {
 			wbc->encountered_congestion = 1;
 			if (!sb_is_blkdev_sb(sb))
@@ -538,7 +531,7 @@ void generic_sync_sb_inodes(struct super_block *sb,
 		list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
 			struct address_space *mapping;
 
-			if (inode->i_state & (I_FREEING|I_WILL_FREE|I_NEW))
+			if (inode->i_state & (I_FREEING|I_WILL_FREE))
 				continue;
 			mapping = inode->i_mapping;
 			if (mapping->nrpages == 0)

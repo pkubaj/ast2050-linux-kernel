@@ -3,8 +3,6 @@
 /*
  * Architecture specific compatibility types
  */
-#include <linux/seccomp.h>
-#include <linux/thread_info.h>
 #include <linux/types.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
@@ -219,10 +217,5 @@ struct compat_shmid64_ds {
 	compat_ulong_t	__unused1;
 	compat_ulong_t	__unused2;
 };
-
-static inline int is_compat_task(void)
-{
-	return test_thread_flag(TIF_32BIT);
-}
 
 #endif /* _ASM_COMPAT_H */

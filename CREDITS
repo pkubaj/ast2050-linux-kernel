@@ -2166,6 +2166,7 @@ D: Initial implementation of VC's, pty's and select()
 
 N: Pavel Machek
 E: pavel@ucw.cz
+E: pavel@suse.cz
 D: Softcursor for vga, hypertech cdrom support, vcsa bugfix, nbd
 D: sun4/330 port, capabilities for elf, speedup for rm on ext2, USB,
 D: work on suspend-to-ram/disk, killing duplicates from ioctl32
@@ -3738,7 +3739,7 @@ S: 93149 Nittenau
 S: Germany
 
 N: Gertjan van Wingerde
-E: gwingerde@gmail.com
+E: gwingerde@home.nl
 D: Ralink rt2x00 WLAN driver
 D: Minix V2 file-system
 D: Misc fixes

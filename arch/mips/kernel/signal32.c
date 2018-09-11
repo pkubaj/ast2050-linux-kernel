@@ -349,8 +349,8 @@ asmlinkage int sys32_rt_sigsuspend(nabi_no_regargs struct pt_regs regs)
 	return -ERESTARTNOHAND;
 }
 
-SYSCALL_DEFINE3(32_sigaction, long, sig, const struct sigaction32 __user *, act,
-	struct sigaction32 __user *, oact)
+asmlinkage int sys32_sigaction(int sig, const struct sigaction32 __user *act,
+                               struct sigaction32 __user *oact)
 {
 	struct k_sigaction new_ka, old_ka;
 	int ret;
@@ -704,9 +704,9 @@ struct mips_abi mips_abi_32 = {
 	.restart	= __NR_O32_restart_syscall
 };
 
-SYSCALL_DEFINE4(32_rt_sigaction, int, sig,
-	const struct sigaction32 __user *, act,
-	struct sigaction32 __user *, oact, unsigned int, sigsetsize)
+asmlinkage int sys32_rt_sigaction(int sig, const struct sigaction32 __user *act,
+				  struct sigaction32 __user *oact,
+				  unsigned int sigsetsize)
 {
 	struct k_sigaction new_sa, old_sa;
 	int ret = -EINVAL;
@@ -748,8 +748,8 @@ out:
 	return ret;
 }
 
-SYSCALL_DEFINE4(32_rt_sigprocmask, int, how, compat_sigset_t __user *, set,
-	compat_sigset_t __user *, oset, unsigned int, sigsetsize)
+asmlinkage int sys32_rt_sigprocmask(int how, compat_sigset_t __user *set,
+	compat_sigset_t __user *oset, unsigned int sigsetsize)
 {
 	sigset_t old_set, new_set;
 	int ret;
@@ -770,8 +770,8 @@ SYSCALL_DEFINE4(32_rt_sigprocmask, int, how, compat_sigset_t __user *, set,
 	return ret;
 }
 
-SYSCALL_DEFINE2(32_rt_sigpending, compat_sigset_t __user *, uset,
-	unsigned int, sigsetsize)
+asmlinkage int sys32_rt_sigpending(compat_sigset_t __user *uset,
+	unsigned int sigsetsize)
 {
 	int ret;
 	sigset_t set;
@@ -787,8 +787,7 @@ SYSCALL_DEFINE2(32_rt_sigpending, compat_sigset_t __user *, uset,
 	return ret;
 }
 
-SYSCALL_DEFINE3(32_rt_sigqueueinfo, int, pid, int, sig,
-	compat_siginfo_t __user *, uinfo)
+asmlinkage int sys32_rt_sigqueueinfo(int pid, int sig, compat_siginfo_t __user *uinfo)
 {
 	siginfo_t info;
 	int ret;
@@ -803,9 +802,10 @@ SYSCALL_DEFINE3(32_rt_sigqueueinfo, int, pid, int, sig,
 	return ret;
 }
 
-SYSCALL_DEFINE5(32_waitid, int, which, compat_pid_t, pid,
-	     compat_siginfo_t __user *, uinfo, int, options,
-	     struct compat_rusage __user *, uru)
+asmlinkage long
+sys32_waitid(int which, compat_pid_t pid,
+	     compat_siginfo_t __user *uinfo, int options,
+	     struct compat_rusage __user *uru)
 {
 	siginfo_t info;
 	struct rusage ru;

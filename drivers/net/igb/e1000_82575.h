@@ -40,11 +40,8 @@ extern void igb_rx_fifo_flush_82575(struct e1000_hw *hw);
 #define E1000_SRRCTL_BSIZEHDRSIZE_SHIFT                 2  /* Shift _left_ */
 #define E1000_SRRCTL_DESCTYPE_ADV_ONEBUF                0x02000000
 #define E1000_SRRCTL_DESCTYPE_HDR_SPLIT_ALWAYS          0x0A000000
-#define E1000_SRRCTL_DROP_EN                            0x80000000
 
 #define E1000_MRQC_ENABLE_RSS_4Q            0x00000002
-#define E1000_MRQC_ENABLE_VMDQ              0x00000003
-#define E1000_MRQC_ENABLE_VMDQ_RSS_2Q       0x00000005
 #define E1000_MRQC_RSS_FIELD_IPV4_UDP       0x00400000
 #define E1000_MRQC_RSS_FIELD_IPV6_UDP       0x00800000
 #define E1000_MRQC_RSS_FIELD_IPV6_UDP_EX    0x01000000
@@ -161,45 +158,5 @@ struct e1000_adv_tx_context_desc {
 #define E1000_DCA_RXCTRL_CPUID_MASK_82576 0xFF000000 /* Rx CPUID Mask */
 #define E1000_DCA_TXCTRL_CPUID_SHIFT 24 /* Tx CPUID now in the last byte */
 #define E1000_DCA_RXCTRL_CPUID_SHIFT 24 /* Rx CPUID now in the last byte */
-
-#define MAX_NUM_VFS                   8
-
-#define E1000_DTXSWC_VMDQ_LOOPBACK_EN (1 << 31)  /* global VF LB enable */
-
-/* Easy defines for setting default pool, would normally be left a zero */
-#define E1000_VT_CTL_DEFAULT_POOL_SHIFT 7
-#define E1000_VT_CTL_DEFAULT_POOL_MASK  (0x7 << E1000_VT_CTL_DEFAULT_POOL_SHIFT)
-
-/* Other useful VMD_CTL register defines */
-#define E1000_VT_CTL_IGNORE_MAC         (1 << 28)
-#define E1000_VT_CTL_DISABLE_DEF_POOL   (1 << 29)
-#define E1000_VT_CTL_VM_REPL_EN         (1 << 30)
-
-/* Per VM Offload register setup */
-#define E1000_VMOLR_RLPML_MASK 0x00003FFF /* Long Packet Maximum Length mask */
-#define E1000_VMOLR_LPE        0x00010000 /* Accept Long packet */
-#define E1000_VMOLR_RSSE       0x00020000 /* Enable RSS */
-#define E1000_VMOLR_AUPE       0x01000000 /* Accept untagged packets */
-#define E1000_VMOLR_ROMPE      0x02000000 /* Accept overflow multicast */
-#define E1000_VMOLR_ROPE       0x04000000 /* Accept overflow unicast */
-#define E1000_VMOLR_BAM        0x08000000 /* Accept Broadcast packets */
-#define E1000_VMOLR_MPME       0x10000000 /* Multicast promiscuous mode */
-#define E1000_VMOLR_STRVLAN    0x40000000 /* Vlan stripping enable */
-#define E1000_VMOLR_STRCRC     0x80000000 /* CRC stripping enable */
-
-#define E1000_VLVF_ARRAY_SIZE     32
-#define E1000_VLVF_VLANID_MASK    0x00000FFF
-#define E1000_VLVF_POOLSEL_SHIFT  12
-#define E1000_VLVF_POOLSEL_MASK   (0xFF << E1000_VLVF_POOLSEL_SHIFT)
-#define E1000_VLVF_LVLAN          0x00100000
-#define E1000_VLVF_VLANID_ENABLE  0x80000000
-
-#define E1000_IOVCTL 0x05BBC
-#define E1000_IOVCTL_REUSE_VFQ 0x00000001
-
-#define ALL_QUEUES   0xFFFF
-
-void igb_vmdq_set_loopback_pf(struct e1000_hw *, bool);
-void igb_vmdq_set_replication_pf(struct e1000_hw *, bool);
 
 #endif

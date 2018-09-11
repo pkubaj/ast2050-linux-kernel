@@ -821,8 +821,7 @@ static struct flash_info *__devinit jedec_probe(struct spi_device *spi)
 					if (!(info->flags & IS_POW2PS))
 						return info;
 				}
-			} else
-				return info;
+			}
 		}
 	}
 

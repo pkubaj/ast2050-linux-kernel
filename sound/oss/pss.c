@@ -457,9 +457,10 @@ static void pss_mixer_reset(pss_confdata *devc)
 	}
 }
 
-static int set_volume_mono(unsigned __user *p, unsigned int *aleft)
+static int set_volume_mono(unsigned __user *p, int *aleft)
 {
-	unsigned int left, volume;
+	int left;
+	unsigned volume;
 	if (get_user(volume, p))
 		return -EFAULT;
 	
@@ -470,11 +471,10 @@ static int set_volume_mono(unsigned __user *p, unsigned int *aleft)
 	return 0;
 }
 
-static int set_volume_stereo(unsigned __user *p,
-			     unsigned int *aleft,
-			     unsigned int *aright)
+static int set_volume_stereo(unsigned __user *p, int *aleft, int *aright)
 {
-	unsigned int left, right, volume;
+	int left, right;
+	unsigned volume;
 	if (get_user(volume, p))
 		return -EFAULT;
 

@@ -8,7 +8,8 @@ config XEN
 	depends on PARAVIRT && MCKINLEY && IA64_PAGE_SIZE_16KB && EXPERIMENTAL
 	select XEN_XENCOMM
 	select NO_IDLE_HZ
-	# followings are required to save/restore.
+
+	# those are required to save/restore.
 	select ARCH_SUSPEND_POSSIBLE
 	select SUSPEND
 	select PM_SLEEP

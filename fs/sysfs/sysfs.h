@@ -28,7 +28,6 @@ struct sysfs_elem_attr {
 
 struct sysfs_elem_bin_attr {
 	struct bin_attribute	*bin_attr;
-	struct hlist_head	buffers;
 };
 
 /*
@@ -146,7 +145,6 @@ static inline void __sysfs_put(struct sysfs_dirent *sd)
  * inode.c
  */
 struct inode *sysfs_get_inode(struct sysfs_dirent *sd);
-void sysfs_delete_inode(struct inode *inode);
 int sysfs_setattr(struct dentry *dentry, struct iattr *iattr);
 int sysfs_hash_and_remove(struct sysfs_dirent *dir_sd, const char *name);
 int sysfs_inode_init(void);
@@ -165,7 +163,6 @@ int sysfs_add_file_mode(struct sysfs_dirent *dir_sd,
  * bin.c
  */
 extern const struct file_operations bin_fops;
-void unmap_bin_file(struct sysfs_dirent *attr_sd);
 
 /*
  * symlink.c

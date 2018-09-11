@@ -468,16 +468,6 @@ static int psc_i2s_set_fmt(struct snd_soc_dai *cpu_dai, unsigned int format)
 /**
  * psc_i2s_dai_template: template CPU Digital Audio Interface
  */
-static struct snd_soc_dai_ops psc_i2s_dai_ops = {
-	.startup	= psc_i2s_startup,
-	.hw_params	= psc_i2s_hw_params,
-	.hw_free	= psc_i2s_hw_free,
-	.shutdown	= psc_i2s_shutdown,
-	.trigger	= psc_i2s_trigger,
-	.set_sysclk	= psc_i2s_set_sysclk,
-	.set_fmt	= psc_i2s_set_fmt,
-};
-
 static struct snd_soc_dai psc_i2s_dai_template = {
 	.playback = {
 		.channels_min = 2,
@@ -491,7 +481,15 @@ static struct snd_soc_dai psc_i2s_dai_template = {
 		.rates = PSC_I2S_RATES,
 		.formats = PSC_I2S_FORMATS,
 	},
-	.ops = &psc_i2s_dai_ops,
+	.ops = {
+		.startup = psc_i2s_startup,
+		.hw_params = psc_i2s_hw_params,
+		.hw_free = psc_i2s_hw_free,
+		.shutdown = psc_i2s_shutdown,
+		.trigger = psc_i2s_trigger,
+		.set_sysclk = psc_i2s_set_sysclk,
+		.set_fmt = psc_i2s_set_fmt,
+	},
 };
 
 /* ---------------------------------------------------------------------

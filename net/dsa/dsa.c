@@ -1,6 +1,6 @@
 /*
  * net/dsa/dsa.c - Hardware switch handling
- * Copyright (c) 2008-2009 Marvell Semiconductor
+ * Copyright (c) 2008 Marvell Semiconductor
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -67,13 +67,12 @@ dsa_switch_probe(struct mii_bus *bus, int sw_addr, char **_name)
 
 /* basic switch operations **************************************************/
 static struct dsa_switch *
-dsa_switch_setup(struct dsa_switch_tree *dst, int index,
-		 struct device *parent, struct mii_bus *bus)
+dsa_switch_setup(struct device *parent, struct dsa_platform_data *pd,
+		 struct mii_bus *bus, struct net_device *dev)
 {
-	struct dsa_chip_data *pd = dst->pd->chip + index;
-	struct dsa_switch_driver *drv;
 	struct dsa_switch *ds;
 	int ret;
+	struct dsa_switch_driver *drv;
 	char *name;
 	int i;
 
@@ -82,12 +81,11 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 	 */
 	drv = dsa_switch_probe(bus, pd->sw_addr, &name);
 	if (drv == NULL) {
-		printk(KERN_ERR "%s[%d]: could not detect attached switch\n",
-		       dst->master_netdev->name, index);
+		printk(KERN_ERR "%s: could not detect attached switch\n",
+		       dev->name);
 		return ERR_PTR(-EINVAL);
 	}
-	printk(KERN_INFO "%s[%d]: detected a %s switch\n",
-		dst->master_netdev->name, index, name);
+	printk(KERN_INFO "%s: detected a %s switch\n", dev->name, name);
 
 
 	/*
@@ -97,16 +95,18 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 	if (ds == NULL)
 		return ERR_PTR(-ENOMEM);
 
-	ds->dst = dst;
-	ds->index = index;
-	ds->pd = dst->pd->chip + index;
-	ds->drv = drv;
+	ds->pd = pd;
+	ds->master_netdev = dev;
 	ds->master_mii_bus = bus;
+
+	ds->drv = drv;
+	ds->tag_protocol = drv->tag_protocol;
 
 
 	/*
 	 * Validate supplied switch configuration.
 	 */
+	ds->cpu_port = -1;
 	for (i = 0; i < DSA_MAX_PORTS; i++) {
 		char *name;
 
@@ -115,28 +115,32 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 			continue;
 
 		if (!strcmp(name, "cpu")) {
-			if (dst->cpu_switch != -1) {
+			if (ds->cpu_port != -1) {
 				printk(KERN_ERR "multiple cpu ports?!\n");
 				ret = -EINVAL;
 				goto out;
 			}
-			dst->cpu_switch = index;
-			dst->cpu_port = i;
-		} else if (!strcmp(name, "dsa")) {
-			ds->dsa_port_mask |= 1 << i;
+			ds->cpu_port = i;
 		} else {
-			ds->phys_port_mask |= 1 << i;
+			ds->valid_port_mask |= 1 << i;
 		}
+	}
+
+	if (ds->cpu_port == -1) {
+		printk(KERN_ERR "no cpu port?!\n");
+		ret = -EINVAL;
+		goto out;
 	}
 
 
 	/*
-	 * If the CPU connects to this switch, set the switch tree
-	 * tagging protocol to the preferred tagging format of this
-	 * switch.
+	 * If we use a tagging format that doesn't have an ethertype
+	 * field, make sure that all packets from this point on get
+	 * sent to the tag format's receive function.  (Which will
+	 * discard received packets until we set ds->ports[] below.)
 	 */
-	if (ds->dst->cpu_switch == index)
-		ds->dst->tag_protocol = drv->tag_protocol;
+	wmb();
+	dev->dsa_ptr = (void *)ds;
 
 
 	/*
@@ -146,7 +150,7 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 	if (ret < 0)
 		goto out;
 
-	ret = drv->set_addr(ds, dst->master_netdev->dev_addr);
+	ret = drv->set_addr(ds, dev->dev_addr);
 	if (ret < 0)
 		goto out;
 
@@ -165,18 +169,18 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 	/*
 	 * Create network devices for physical switch ports.
 	 */
+	wmb();
 	for (i = 0; i < DSA_MAX_PORTS; i++) {
 		struct net_device *slave_dev;
 
-		if (!(ds->phys_port_mask & (1 << i)))
+		if (!(ds->valid_port_mask & (1 << i)))
 			continue;
 
 		slave_dev = dsa_slave_create(ds, parent, i, pd->port_names[i]);
 		if (slave_dev == NULL) {
-			printk(KERN_ERR "%s[%d]: can't create dsa "
-			       "slave device for port %d(%s)\n",
-			       dst->master_netdev->name,
-			       index, i, pd->port_names[i]);
+			printk(KERN_ERR "%s: can't create dsa slave "
+			       "device for port %d(%s)\n",
+			       dev->name, i, pd->port_names[i]);
 			continue;
 		}
 
@@ -188,6 +192,7 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 out_free:
 	mdiobus_free(ds->slave_mii_bus);
 out:
+	dev->dsa_ptr = NULL;
 	kfree(ds);
 	return ERR_PTR(ret);
 }
@@ -207,42 +212,35 @@ static void dsa_switch_destroy(struct dsa_switch *ds)
  */
 bool dsa_uses_dsa_tags(void *dsa_ptr)
 {
-	struct dsa_switch_tree *dst = dsa_ptr;
+	struct dsa_switch *ds = dsa_ptr;
 
-	return !!(dst->tag_protocol == htons(ETH_P_DSA));
+	return !!(ds->tag_protocol == htons(ETH_P_DSA));
 }
 
 bool dsa_uses_trailer_tags(void *dsa_ptr)
 {
-	struct dsa_switch_tree *dst = dsa_ptr;
+	struct dsa_switch *ds = dsa_ptr;
 
-	return !!(dst->tag_protocol == htons(ETH_P_TRAILER));
+	return !!(ds->tag_protocol == htons(ETH_P_TRAILER));
 }
 
 
 /* link polling *************************************************************/
 static void dsa_link_poll_work(struct work_struct *ugly)
 {
-	struct dsa_switch_tree *dst;
-	int i;
+	struct dsa_switch *ds;
 
-	dst = container_of(ugly, struct dsa_switch_tree, link_poll_work);
+	ds = container_of(ugly, struct dsa_switch, link_poll_work);
 
-	for (i = 0; i < dst->pd->nr_chips; i++) {
-		struct dsa_switch *ds = dst->ds[i];
-
-		if (ds != NULL && ds->drv->poll_link != NULL)
-			ds->drv->poll_link(ds);
-	}
-
-	mod_timer(&dst->link_poll_timer, round_jiffies(jiffies + HZ));
+	ds->drv->poll_link(ds);
+	mod_timer(&ds->link_poll_timer, round_jiffies(jiffies + HZ));
 }
 
-static void dsa_link_poll_timer(unsigned long _dst)
+static void dsa_link_poll_timer(unsigned long _ds)
 {
-	struct dsa_switch_tree *dst = (void *)_dst;
+	struct dsa_switch *ds = (void *)_ds;
 
-	schedule_work(&dst->link_poll_work);
+	schedule_work(&ds->link_poll_work);
 }
 
 
@@ -305,14 +303,18 @@ static int dsa_probe(struct platform_device *pdev)
 	static int dsa_version_printed;
 	struct dsa_platform_data *pd = pdev->dev.platform_data;
 	struct net_device *dev;
-	struct dsa_switch_tree *dst;
-	int i;
+	struct mii_bus *bus;
+	struct dsa_switch *ds;
 
 	if (!dsa_version_printed++)
 		printk(KERN_NOTICE "Distributed Switch Architecture "
 			"driver version %s\n", dsa_driver_version);
 
-	if (pd == NULL || pd->netdev == NULL)
+	if (pd == NULL || pd->mii_bus == NULL || pd->netdev == NULL)
+		return -EINVAL;
+
+	bus = dev_to_mii_bus(pd->mii_bus);
+	if (bus == NULL)
 		return -EINVAL;
 
 	dev = dev_to_net_device(pd->netdev);
@@ -324,79 +326,36 @@ static int dsa_probe(struct platform_device *pdev)
 		return -EEXIST;
 	}
 
-	dst = kzalloc(sizeof(*dst), GFP_KERNEL);
-	if (dst == NULL) {
+	ds = dsa_switch_setup(&pdev->dev, pd, bus, dev);
+	if (IS_ERR(ds)) {
 		dev_put(dev);
-		return -ENOMEM;
+		return PTR_ERR(ds);
 	}
 
-	platform_set_drvdata(pdev, dst);
-
-	dst->pd = pd;
-	dst->master_netdev = dev;
-	dst->cpu_switch = -1;
-	dst->cpu_port = -1;
-
-	for (i = 0; i < pd->nr_chips; i++) {
-		struct mii_bus *bus;
-		struct dsa_switch *ds;
-
-		bus = dev_to_mii_bus(pd->chip[i].mii_bus);
-		if (bus == NULL) {
-			printk(KERN_ERR "%s[%d]: no mii bus found for "
-				"dsa switch\n", dev->name, i);
-			continue;
-		}
-
-		ds = dsa_switch_setup(dst, i, &pdev->dev, bus);
-		if (IS_ERR(ds)) {
-			printk(KERN_ERR "%s[%d]: couldn't create dsa switch "
-				"instance (error %ld)\n", dev->name, i,
-				PTR_ERR(ds));
-			continue;
-		}
-
-		dst->ds[i] = ds;
-		if (ds->drv->poll_link != NULL)
-			dst->link_poll_needed = 1;
+	if (ds->drv->poll_link != NULL) {
+		INIT_WORK(&ds->link_poll_work, dsa_link_poll_work);
+		init_timer(&ds->link_poll_timer);
+		ds->link_poll_timer.data = (unsigned long)ds;
+		ds->link_poll_timer.function = dsa_link_poll_timer;
+		ds->link_poll_timer.expires = round_jiffies(jiffies + HZ);
+		add_timer(&ds->link_poll_timer);
 	}
 
-	/*
-	 * If we use a tagging format that doesn't have an ethertype
-	 * field, make sure that all packets from this point on get
-	 * sent to the tag format's receive function.
-	 */
-	wmb();
-	dev->dsa_ptr = (void *)dst;
-
-	if (dst->link_poll_needed) {
-		INIT_WORK(&dst->link_poll_work, dsa_link_poll_work);
-		init_timer(&dst->link_poll_timer);
-		dst->link_poll_timer.data = (unsigned long)dst;
-		dst->link_poll_timer.function = dsa_link_poll_timer;
-		dst->link_poll_timer.expires = round_jiffies(jiffies + HZ);
-		add_timer(&dst->link_poll_timer);
-	}
+	platform_set_drvdata(pdev, ds);
 
 	return 0;
 }
 
 static int dsa_remove(struct platform_device *pdev)
 {
-	struct dsa_switch_tree *dst = platform_get_drvdata(pdev);
-	int i;
+	struct dsa_switch *ds = platform_get_drvdata(pdev);
 
-	if (dst->link_poll_needed)
-		del_timer_sync(&dst->link_poll_timer);
+	if (ds->drv->poll_link != NULL)
+		del_timer_sync(&ds->link_poll_timer);
 
 	flush_scheduled_work();
 
-	for (i = 0; i < dst->pd->nr_chips; i++) {
-		struct dsa_switch *ds = dst->ds[i];
-
-		if (ds != NULL)
-			dsa_switch_destroy(ds);
-	}
+	dsa_switch_destroy(ds);
 
 	return 0;
 }

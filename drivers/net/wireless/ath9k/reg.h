@@ -67,7 +67,7 @@
 #define AR_DMASIZE_512B      0x00000007
 
 #define AR_TXCFG             0x0030
-#define AR_TXCFG_DMASZ_MASK  0x00000007
+#define AR_TXCFG_DMASZ_MASK  0x00000003
 #define AR_TXCFG_DMASZ_4B    0
 #define AR_TXCFG_DMASZ_8B    1
 #define AR_TXCFG_DMASZ_16B   2
@@ -157,6 +157,14 @@
 #define AR_CST_TIMEOUT_COUNTER    0x0000FFFF
 #define AR_CST_TIMEOUT_LIMIT      0xFFFF0000
 #define AR_CST_TIMEOUT_LIMIT_S    16
+
+#define AR_SREV_VERSION_9100                  0x014
+
+#define AR_SREV_9100(ah) ((ah->hw_version.macVersion) == AR_SREV_VERSION_9100)
+#define AR_SREV_5416_V20_OR_LATER(_ah) \
+	(AR_SREV_9100((_ah)) || AR_SREV_5416_20_OR_LATER(_ah))
+#define AR_SREV_5416_V22_OR_LATER(_ah) \
+	(AR_SREV_9100((_ah)) || AR_SREV_5416_22_OR_LATER(_ah))
 
 #define AR_ISR               0x0080
 #define AR_ISR_RXOK          0x00000001
@@ -726,7 +734,6 @@
 #define AR_SREV_REVISION_5416_10               0
 #define AR_SREV_REVISION_5416_20               1
 #define AR_SREV_REVISION_5416_22               2
-#define AR_SREV_VERSION_9100                  0x14
 #define AR_SREV_VERSION_9160        	      0x40
 #define AR_SREV_REVISION_9160_10    	      0
 #define AR_SREV_REVISION_9160_11    	      1
@@ -739,23 +746,14 @@
 #define AR_SREV_REVISION_9285_11              1
 #define AR_SREV_REVISION_9285_12              2
 
-#define AR_SREV_5416(_ah) \
-	(((_ah)->hw_version.macVersion == AR_SREV_VERSION_5416_PCI) || \
-	 ((_ah)->hw_version.macVersion == AR_SREV_VERSION_5416_PCIE))
-#define AR_SREV_5416_20_OR_LATER(_ah) \
-	(((AR_SREV_5416(_ah)) && \
-	 ((_ah)->hw_version.macRev >= AR_SREV_REVISION_5416_20)) || \
-	 ((_ah)->hw_version.macVersion >= AR_SREV_VERSION_9100))
-#define AR_SREV_5416_22_OR_LATER(_ah) \
-	(((AR_SREV_5416(_ah)) && \
-	 ((_ah)->hw_version.macRev >= AR_SREV_REVISION_5416_22)) || \
-	 ((_ah)->hw_version.macVersion >= AR_SREV_VERSION_9100))
-
-#define AR_SREV_9100(ah) \
-	((ah->hw_version.macVersion) == AR_SREV_VERSION_9100)
 #define AR_SREV_9100_OR_LATER(_ah) \
-	(((_ah)->hw_version.macVersion >= AR_SREV_VERSION_9100))
-
+	(((_ah)->hw_version.macVersion >= AR_SREV_VERSION_5416_PCIE))
+#define AR_SREV_5416_20_OR_LATER(_ah) \
+	(((_ah)->hw_version.macVersion >= AR_SREV_VERSION_9160) || \
+		((_ah)->hw_version.macRev >= AR_SREV_REVISION_5416_20))
+#define AR_SREV_5416_22_OR_LATER(_ah) \
+	(((_ah)->hw_version.macVersion >= AR_SREV_VERSION_9160) || \
+		((_ah)->hw_version.macRev >= AR_SREV_REVISION_5416_22))
 #define AR_SREV_9160(_ah) \
 	(((_ah)->hw_version.macVersion == AR_SREV_VERSION_9160))
 #define AR_SREV_9160_10_OR_LATER(_ah) \
@@ -780,14 +778,14 @@
 #define AR_SREV_9285_10_OR_LATER(_ah) \
 	(((_ah)->hw_version.macVersion >= AR_SREV_VERSION_9285))
 #define AR_SREV_9285_11(_ah) \
-	(AR_SREV_9285(ah) && \
+	(AR_SREV_9280(ah) && \
 	 ((_ah)->hw_version.macRev == AR_SREV_REVISION_9285_11))
 #define AR_SREV_9285_11_OR_LATER(_ah) \
 	(((_ah)->hw_version.macVersion > AR_SREV_VERSION_9285) || \
 	 (AR_SREV_9285(ah) && ((_ah)->hw_version.macRev >= \
 			       AR_SREV_REVISION_9285_11)))
 #define AR_SREV_9285_12(_ah) \
-	(AR_SREV_9285(ah) && \
+	(AR_SREV_9280(ah) && \
 	 ((_ah)->hw_version.macRev == AR_SREV_REVISION_9285_12))
 #define AR_SREV_9285_12_OR_LATER(_ah) \
 	(((_ah)->hw_version.macVersion > AR_SREV_VERSION_9285) || \
@@ -979,6 +977,8 @@ enum {
 #define AR_RTC_PLL_CLKSEL       0x00000300
 #define AR_RTC_PLL_CLKSEL_S     8
 
+
+
 #define AR_RTC_RESET \
 	((AR_SREV_9100(ah)) ? (AR_RTC_BASE + 0x0040) : 0x7040)
 #define AR_RTC_RESET_EN		(0x00000001)
@@ -1014,12 +1014,6 @@ enum {
 
 #define AR_RTC_INTR_MASK \
 	((AR_SREV_9100(ah)) ? (AR_RTC_BASE + 0x0058) : 0x7058)
-
-/* RTC_DERIVED_* - only for AR9100 */
-
-#define AR_RTC_DERIVED_CLK           (AR_RTC_BASE + 0x0038)
-#define AR_RTC_DERIVED_CLK_PERIOD    0x0000fffe
-#define AR_RTC_DERIVED_CLK_PERIOD_S  1
 
 #define	AR_SEQ_MASK	0x8060
 
@@ -1391,8 +1385,8 @@ enum {
 #define AR_PHY_COUNTMAX        (3 << 22)
 #define AR_MIBCNT_INTRMASK     (3 << 22)
 
-#define AR_TSFOOR_THRESHOLD       0x813c
-#define AR_TSFOOR_THRESHOLD_VAL   0x0000FFFF
+#define AR_TSF_THRESHOLD       0x813c
+#define AR_TSF_THRESHOLD_VAL   0x0000FFFF
 
 #define AR_PHY_ERR_EIFS_MASK   8144
 

@@ -19,8 +19,8 @@
 #include <asm/cio.h>
 #include <asm/chpid.h>
 #include <asm/chsc.h>
-#include <asm/crw.h>
 
+#include "../s390mach.h"
 #include "css.h"
 #include "cio.h"
 #include "cio_debug.h"
@@ -589,7 +589,6 @@ __chsc_do_secm(struct channel_subsystem *css, int enable, void *page)
 	case 0x0102:
 	case 0x0103:
 		ret = -EINVAL;
-		break;
 	default:
 		ret = chsc_error_from_response(secm_area->response.code);
 	}
@@ -821,7 +820,7 @@ int __init chsc_alloc_sei_area(void)
 			      "chsc machine checks!\n");
 		return -ENOMEM;
 	}
-	ret = crw_register_handler(CRW_RSC_CSS, chsc_process_crw);
+	ret = s390_register_crw_handler(CRW_RSC_CSS, chsc_process_crw);
 	if (ret)
 		kfree(sei_page);
 	return ret;
@@ -829,7 +828,7 @@ int __init chsc_alloc_sei_area(void)
 
 void __init chsc_free_sei_area(void)
 {
-	crw_unregister_handler(CRW_RSC_CSS);
+	s390_unregister_crw_handler(CRW_RSC_CSS);
 	kfree(sei_page);
 }
 

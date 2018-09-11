@@ -347,7 +347,8 @@ pcbit_receive(struct pcbit_dev *dev)
 		if (dev->read_frame) {
 			printk(KERN_DEBUG "pcbit_receive: Type 0 frame and read_frame != NULL\n");
 			/* discard previous queued frame */
-			kfree_skb(dev->read_frame->skb);
+			if (dev->read_frame->skb)
+				kfree_skb(dev->read_frame->skb);
 			kfree(dev->read_frame);
 			dev->read_frame = NULL;
 		}
@@ -600,7 +601,8 @@ pcbit_l2_err_recover(unsigned long data)
 	dev->w_busy = dev->r_busy = 1;
 
 	if (dev->read_frame) {
-		kfree_skb(dev->read_frame->skb);
+		if (dev->read_frame->skb)
+			kfree_skb(dev->read_frame->skb);
 		kfree(dev->read_frame);
 		dev->read_frame = NULL;
 	}

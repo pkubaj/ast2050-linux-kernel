@@ -351,8 +351,10 @@ struct rx_queue {
 	int rx_desc_area_size;
 	struct sk_buff **rx_skb;
 
+#ifdef CONFIG_MV643XX_ETH_LRO
 	struct net_lro_mgr lro_mgr;
 	struct net_lro_desc lro_arr[8];
+#endif
 };
 
 struct tx_queue {
@@ -514,6 +516,7 @@ static void txq_maybe_wake(struct tx_queue *txq)
 
 
 /* rx napi ******************************************************************/
+#ifdef CONFIG_MV643XX_ETH_LRO
 static int
 mv643xx_get_skb_header(struct sk_buff *skb, void **iphdr, void **tcph,
 		       u64 *hdr_flags, void *priv)
@@ -539,6 +542,7 @@ mv643xx_get_skb_header(struct sk_buff *skb, void **iphdr, void **tcph,
 
 	return 0;
 }
+#endif
 
 static int rxq_process(struct rx_queue *rxq, int budget)
 {
@@ -608,11 +612,13 @@ static int rxq_process(struct rx_queue *rxq, int budget)
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 		skb->protocol = eth_type_trans(skb, mp->dev);
 
+#ifdef CONFIG_MV643XX_ETH_LRO
 		if (skb->dev->features & NETIF_F_LRO &&
 		    skb->ip_summed == CHECKSUM_UNNECESSARY) {
 			lro_receive_skb(&rxq->lro_mgr, skb, (void *)cmd_sts);
 			lro_flush_needed = 1;
 		} else
+#endif
 			netif_receive_skb(skb);
 
 		continue;
@@ -634,8 +640,10 @@ err:
 		dev_kfree_skb(skb);
 	}
 
+#ifdef CONFIG_MV643XX_ETH_LRO
 	if (lro_flush_needed)
 		lro_flush_all(&rxq->lro_mgr);
+#endif
 
 	if (rx < budget)
 		mp->work_rx &= ~(1 << rxq->index);
@@ -1223,6 +1231,7 @@ static void mv643xx_eth_grab_lro_stats(struct mv643xx_eth_private *mp)
 	u32 lro_no_desc = 0;
 	int i;
 
+#ifdef CONFIG_MV643XX_ETH_LRO
 	for (i = 0; i < mp->rxq_count; i++) {
 		struct rx_queue *rxq = mp->rxq + i;
 
@@ -1230,6 +1239,7 @@ static void mv643xx_eth_grab_lro_stats(struct mv643xx_eth_private *mp)
 		lro_flushed += rxq->lro_mgr.stats.flushed;
 		lro_no_desc += rxq->lro_mgr.stats.no_desc;
 	}
+#endif
 
 	mp->lro_counters.lro_aggregated = lro_aggregated;
 	mp->lro_counters.lro_flushed = lro_flushed;
@@ -1253,7 +1263,7 @@ static void mib_counters_update(struct mv643xx_eth_private *mp)
 {
 	struct mib_counters *p = &mp->mib_counters;
 
-	spin_lock_bh(&mp->mib_counters_lock);
+	spin_lock(&mp->mib_counters_lock);
 	p->good_octets_received += mib_read(mp, 0x00);
 	p->good_octets_received += (u64)mib_read(mp, 0x04) << 32;
 	p->bad_octets_received += mib_read(mp, 0x08);
@@ -1286,7 +1296,7 @@ static void mib_counters_update(struct mv643xx_eth_private *mp)
 	p->bad_crc_event += mib_read(mp, 0x74);
 	p->collision += mib_read(mp, 0x78);
 	p->late_collision += mib_read(mp, 0x7c);
-	spin_unlock_bh(&mp->mib_counters_lock);
+	spin_unlock(&mp->mib_counters_lock);
 
 	mod_timer(&mp->mib_counters_timer, jiffies + 30 * HZ);
 }
@@ -1821,7 +1831,7 @@ oom:
 		return;
 	}
 
-	mc_spec = kmalloc(0x200, GFP_ATOMIC);
+	mc_spec = kmalloc(0x200, GFP_KERNEL);
 	if (mc_spec == NULL)
 		goto oom;
 	mc_other = mc_spec + (0x100 >> 2);
@@ -1929,6 +1939,7 @@ static int rxq_init(struct mv643xx_eth_private *mp, int index)
 					nexti * sizeof(struct rx_desc);
 	}
 
+#ifdef CONFIG_MV643XX_ETH_LRO
 	rxq->lro_mgr.dev = mp->dev;
 	memset(&rxq->lro_mgr.stats, 0, sizeof(rxq->lro_mgr.stats));
 	rxq->lro_mgr.features = LRO_F_NAPI;
@@ -1941,6 +1952,7 @@ static int rxq_init(struct mv643xx_eth_private *mp, int index)
 	rxq->lro_mgr.get_skb_header = mv643xx_get_skb_header;
 
 	memset(&rxq->lro_arr, 0, sizeof(rxq->lro_arr));
+#endif
 
 	return 0;
 
@@ -2289,6 +2301,11 @@ static void port_start(struct mv643xx_eth_private *mp)
 	}
 
 	/*
+	 * Add configured unicast address to address filter table.
+	 */
+	mv643xx_eth_program_unicast_filter(mp->dev);
+
+	/*
 	 * Receive all unmatched unicast, TCP, UDP, BPDU and broadcast
 	 * frames to RX queue #0, and include the pseudo-header when
 	 * calculating receive checksums.
@@ -2299,11 +2316,6 @@ static void port_start(struct mv643xx_eth_private *mp)
 	 * Treat BPDUs as normal multicasts, and disable partition mode.
 	 */
 	wrlp(mp, PORT_CONFIG_EXT, 0x00000000);
-
-	/*
-	 * Add configured unicast addresses to address filter table.
-	 */
-	mv643xx_eth_program_unicast_filter(mp->dev);
 
 	/*
 	 * Enable the receive queues.
@@ -2388,7 +2400,12 @@ static int mv643xx_eth_open(struct net_device *dev)
 		}
 	}
 
+	netif_carrier_off(dev);
+
 	port_start(mp);
+
+	set_rx_coal(mp, 0);
+	set_tx_coal(mp, 0);
 
 	wrlp(mp, INT_MASK_EXT, INT_EXT_LINK_PHY | INT_EXT_TX);
 	wrlp(mp, INT_MASK, INT_TX_END | INT_RX | INT_EXT);
@@ -2440,6 +2457,8 @@ static int mv643xx_eth_stop(struct net_device *dev)
 	wrlp(mp, INT_MASK, 0x00000000);
 	rdlp(mp, INT_MASK);
 
+	del_timer_sync(&mp->mib_counters_timer);
+
 	napi_disable(&mp->napi);
 
 	del_timer_sync(&mp->rx_oom);
@@ -2451,7 +2470,6 @@ static int mv643xx_eth_stop(struct net_device *dev)
 	port_reset(mp);
 	mv643xx_eth_get_stats(dev);
 	mib_counters_update(mp);
-	del_timer_sync(&mp->mib_counters_timer);
 
 	skb_queue_purge(&mp->rx_recycle);
 
@@ -2856,21 +2874,6 @@ static void init_pscr(struct mv643xx_eth_private *mp, int speed, int duplex)
 	wrlp(mp, PORT_SERIAL_CONTROL, pscr);
 }
 
-static const struct net_device_ops mv643xx_eth_netdev_ops = {
-	.ndo_open		= mv643xx_eth_open,
-	.ndo_stop		= mv643xx_eth_stop,
-	.ndo_start_xmit		= mv643xx_eth_xmit,
-	.ndo_set_rx_mode	= mv643xx_eth_set_rx_mode,
-	.ndo_set_mac_address	= mv643xx_eth_set_mac_address,
-	.ndo_do_ioctl		= mv643xx_eth_ioctl,
-	.ndo_change_mtu		= mv643xx_eth_change_mtu,
-	.ndo_tx_timeout		= mv643xx_eth_tx_timeout,
-	.ndo_get_stats		= mv643xx_eth_get_stats,
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	.ndo_poll_controller	= mv643xx_eth_netpoll,
-#endif
-};
-
 static int mv643xx_eth_probe(struct platform_device *pdev)
 {
 	struct mv643xx_eth_platform_data *pd;
@@ -2942,8 +2945,18 @@ static int mv643xx_eth_probe(struct platform_device *pdev)
 	BUG_ON(!res);
 	dev->irq = res->start;
 
-	dev->netdev_ops = &mv643xx_eth_netdev_ops;
-
+	dev->get_stats = mv643xx_eth_get_stats;
+	dev->hard_start_xmit = mv643xx_eth_xmit;
+	dev->open = mv643xx_eth_open;
+	dev->stop = mv643xx_eth_stop;
+	dev->set_rx_mode = mv643xx_eth_set_rx_mode;
+	dev->set_mac_address = mv643xx_eth_set_mac_address;
+	dev->do_ioctl = mv643xx_eth_ioctl;
+	dev->change_mtu = mv643xx_eth_change_mtu;
+	dev->tx_timeout = mv643xx_eth_tx_timeout;
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	dev->poll_controller = mv643xx_eth_netpoll;
+#endif
 	dev->watchdog_timeo = 2 * HZ;
 	dev->base_addr = 0;
 
@@ -2954,11 +2967,6 @@ static int mv643xx_eth_probe(struct platform_device *pdev)
 
 	if (mp->shared->win_protect)
 		wrl(mp, WINDOW_PROTECT(mp->port_num), mp->shared->win_protect);
-
-	netif_carrier_off(dev);
-
-	set_rx_coal(mp, 250);
-	set_tx_coal(mp, 0);
 
 	err = register_netdev(dev);
 	if (err)

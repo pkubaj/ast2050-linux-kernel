@@ -63,13 +63,6 @@ static inline int netpoll_rx(struct sk_buff *skb)
 	return ret;
 }
 
-static inline int netpoll_rx_on(struct sk_buff *skb)
-{
-	struct netpoll_info *npinfo = skb->dev->npinfo;
-
-	return npinfo && (npinfo->rx_np || npinfo->rx_flags);
-}
-
 static inline int netpoll_receive_skb(struct sk_buff *skb)
 {
 	if (!list_empty(&skb->dev->napi_list))
@@ -103,10 +96,6 @@ static inline void netpoll_poll_unlock(void *have)
 
 #else
 static inline int netpoll_rx(struct sk_buff *skb)
-{
-	return 0;
-}
-static inline int netpoll_rx_on(struct sk_buff *skb)
 {
 	return 0;
 }

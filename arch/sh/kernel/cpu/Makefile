@@ -11,7 +11,6 @@ obj-$(CONFIG_CPU_SH5)		= sh5/
 # Special cases for family ancestry.
 
 obj-$(CONFIG_CPU_SH4A)		+= sh4a/
-obj-$(CONFIG_ARCH_SHMOBILE)	+= shmobile/
 
 # Common interfaces.
 

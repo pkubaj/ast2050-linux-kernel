@@ -558,8 +558,6 @@ static void process_fd_request(void);
 static void recalibrate_floppy(void);
 static void floppy_shutdown(unsigned long);
 
-static int floppy_request_regions(int);
-static void floppy_release_regions(int);
 static int floppy_grab_irq_and_dma(void);
 static void floppy_release_irq_and_dma(void);
 
@@ -4135,9 +4133,10 @@ static int have_no_fdc = -ENODEV;
 static ssize_t floppy_cmos_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	struct platform_device *p = to_platform_device(dev);
+	struct platform_device *p;
 	int drive;
 
+	p = container_of(dev, struct platform_device,dev);
 	drive = p->id;
 	return sprintf(buf, "%X\n", UDP->cmos);
 }
@@ -4275,7 +4274,8 @@ static int __init floppy_init(void)
 		FDCS->rawcmd = 2;
 		if (user_reset_fdc(-1, FD_RESET_ALWAYS, 0)) {
 			/* free ioports reserved by floppy_grab_irq_and_dma() */
-			floppy_release_regions(fdc);
+			release_region(FDCS->address + 2, 4);
+			release_region(FDCS->address + 7, 1);
 			FDCS->address = -1;
 			FDCS->version = FDC_NONE;
 			continue;
@@ -4284,7 +4284,8 @@ static int __init floppy_init(void)
 		FDCS->version = get_fdc_version();
 		if (FDCS->version == FDC_NONE) {
 			/* free ioports reserved by floppy_grab_irq_and_dma() */
-			floppy_release_regions(fdc);
+			release_region(FDCS->address + 2, 4);
+			release_region(FDCS->address + 7, 1);
 			FDCS->address = -1;
 			continue;
 		}
@@ -4357,47 +4358,6 @@ out_put_disk:
 
 static DEFINE_SPINLOCK(floppy_usage_lock);
 
-static const struct io_region {
-	int offset;
-	int size;
-} io_regions[] = {
-	{ 2, 1 },
-	/* address + 3 is sometimes reserved by pnp bios for motherboard */
-	{ 4, 2 },
-	/* address + 6 is reserved, and may be taken by IDE.
-	 * Unfortunately, Adaptec doesn't know this :-(, */
-	{ 7, 1 },
-};
-
-static void floppy_release_allocated_regions(int fdc, const struct io_region *p)
-{
-	while (p != io_regions) {
-		p--;
-		release_region(FDCS->address + p->offset, p->size);
-	}
-}
-
-#define ARRAY_END(X) (&((X)[ARRAY_SIZE(X)]))
-
-static int floppy_request_regions(int fdc)
-{
-	const struct io_region *p;
-
-	for (p = io_regions; p < ARRAY_END(io_regions); p++) {
-		if (!request_region(FDCS->address + p->offset, p->size, "floppy")) {
-			DPRINT("Floppy io-port 0x%04lx in use\n", FDCS->address + p->offset);
-			floppy_release_allocated_regions(fdc, p);
-			return -EBUSY;
-		}
-	}
-	return 0;
-}
-
-static void floppy_release_regions(int fdc)
-{
-	floppy_release_allocated_regions(fdc, ARRAY_END(io_regions));
-}
-
 static int floppy_grab_irq_and_dma(void)
 {
 	unsigned long flags;
@@ -4439,8 +4399,18 @@ static int floppy_grab_irq_and_dma(void)
 
 	for (fdc = 0; fdc < N_FDC; fdc++) {
 		if (FDCS->address != -1) {
-			if (floppy_request_regions(fdc))
-				goto cleanup;
+			if (!request_region(FDCS->address + 2, 4, "floppy")) {
+				DPRINT("Floppy io-port 0x%04lx in use\n",
+				       FDCS->address + 2);
+				goto cleanup1;
+			}
+			if (!request_region(FDCS->address + 7, 1, "floppy DIR")) {
+				DPRINT("Floppy io-port 0x%04lx in use\n",
+				       FDCS->address + 7);
+				goto cleanup2;
+			}
+			/* address + 6 is reserved, and may be taken by IDE.
+			 * Unfortunately, Adaptec doesn't know this :-(, */
 		}
 	}
 	for (fdc = 0; fdc < N_FDC; fdc++) {
@@ -4462,11 +4432,15 @@ static int floppy_grab_irq_and_dma(void)
 	fdc = 0;
 	irqdma_allocated = 1;
 	return 0;
-cleanup:
+cleanup2:
+	release_region(FDCS->address + 2, 4);
+cleanup1:
 	fd_free_irq();
 	fd_free_dma();
-	while (--fdc >= 0)
-		floppy_release_regions(fdc);
+	while (--fdc >= 0) {
+		release_region(FDCS->address + 2, 4);
+		release_region(FDCS->address + 7, 1);
+	}
 	spin_lock_irqsave(&floppy_usage_lock, flags);
 	usage_count--;
 	spin_unlock_irqrestore(&floppy_usage_lock, flags);
@@ -4527,8 +4501,10 @@ static void floppy_release_irq_and_dma(void)
 #endif
 	old_fdc = fdc;
 	for (fdc = 0; fdc < N_FDC; fdc++)
-		if (FDCS->address != -1)
-			floppy_release_regions(fdc);
+		if (FDCS->address != -1) {
+			release_region(FDCS->address + 2, 4);
+			release_region(FDCS->address + 7, 1);
+		}
 	fdc = old_fdc;
 }
 

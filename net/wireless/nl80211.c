@@ -7,6 +7,7 @@
 #include <linux/if.h>
 #include <linux/module.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 #include <linux/list.h>
 #include <linux/if_ether.h>
 #include <linux/ieee80211.h>
@@ -141,7 +142,7 @@ static int nl80211_send_wiphy(struct sk_buff *msg, u32 pid, u32 seq, int flags,
 	if (!hdr)
 		return -1;
 
-	NLA_PUT_U32(msg, NL80211_ATTR_WIPHY, dev->wiphy_idx);
+	NLA_PUT_U32(msg, NL80211_ATTR_WIPHY, dev->idx);
 	NLA_PUT_STRING(msg, NL80211_ATTR_WIPHY_NAME, wiphy_name(&dev->wiphy));
 	NLA_PUT_U8(msg, NL80211_ATTR_MAX_NUM_SCAN_SSIDS,
 		   dev->wiphy.max_scan_ssids);
@@ -255,7 +256,7 @@ static int nl80211_dump_wiphy(struct sk_buff *skb, struct netlink_callback *cb)
 	int start = cb->args[0];
 	struct cfg80211_registered_device *dev;
 
-	mutex_lock(&cfg80211_mutex);
+	mutex_lock(&cfg80211_drv_mutex);
 	list_for_each_entry(dev, &cfg80211_drv_list, list) {
 		if (++idx <= start)
 			continue;
@@ -266,7 +267,7 @@ static int nl80211_dump_wiphy(struct sk_buff *skb, struct netlink_callback *cb)
 			break;
 		}
 	}
-	mutex_unlock(&cfg80211_mutex);
+	mutex_unlock(&cfg80211_drv_mutex);
 
 	cb->args[0] = idx;
 
@@ -469,7 +470,7 @@ static int nl80211_dump_interface(struct sk_buff *skb, struct netlink_callback *
 	struct cfg80211_registered_device *dev;
 	struct wireless_dev *wdev;
 
-	mutex_lock(&cfg80211_mutex);
+	mutex_lock(&cfg80211_drv_mutex);
 	list_for_each_entry(dev, &cfg80211_drv_list, list) {
 		if (wp_idx < wp_start) {
 			wp_idx++;
@@ -496,7 +497,7 @@ static int nl80211_dump_interface(struct sk_buff *skb, struct netlink_callback *
 		wp_idx++;
 	}
  out:
-	mutex_unlock(&cfg80211_mutex);
+	mutex_unlock(&cfg80211_drv_mutex);
 
 	cb->args[0] = wp_idx;
 	cb->args[1] = if_idx;
@@ -1205,12 +1206,6 @@ static int nl80211_send_station(struct sk_buff *msg, u32 pid, u32 seq,
 
 		nla_nest_end(msg, txrate);
 	}
-	if (sinfo->filled & STATION_INFO_RX_PACKETS)
-		NLA_PUT_U32(msg, NL80211_STA_INFO_RX_PACKETS,
-			    sinfo->rx_packets);
-	if (sinfo->filled & STATION_INFO_TX_PACKETS)
-		NLA_PUT_U32(msg, NL80211_STA_INFO_TX_PACKETS,
-			    sinfo->tx_packets);
 	nla_nest_end(msg, sinfoattr);
 
 	return genlmsg_end(msg, hdr);
@@ -1905,19 +1900,6 @@ static int nl80211_req_set_reg(struct sk_buff *skb, struct genl_info *info)
 	int r;
 	char *data = NULL;
 
-	/*
-	 * You should only get this when cfg80211 hasn't yet initialized
-	 * completely when built-in to the kernel right between the time
-	 * window between nl80211_init() and regulatory_init(), if that is
-	 * even possible.
-	 */
-	mutex_lock(&cfg80211_mutex);
-	if (unlikely(!cfg80211_regdomain)) {
-		mutex_unlock(&cfg80211_mutex);
-		return -EINPROGRESS;
-	}
-	mutex_unlock(&cfg80211_mutex);
-
 	if (!info->attrs[NL80211_ATTR_REG_ALPHA2])
 		return -EINVAL;
 
@@ -1928,9 +1910,14 @@ static int nl80211_req_set_reg(struct sk_buff *skb, struct genl_info *info)
 	if (is_world_regdom(data))
 		return -EINVAL;
 #endif
-
-	r = regulatory_hint_user(data);
-
+	mutex_lock(&cfg80211_drv_mutex);
+	r = __regulatory_hint(NULL, REGDOM_SET_BY_USER, data, 0, ENVIRON_ANY);
+	mutex_unlock(&cfg80211_drv_mutex);
+	/* This means the regulatory domain was already set, however
+	 * we don't want to confuse userspace with a "successful error"
+	 * message so lets just treat it as a success */
+	if (r == -EALREADY)
+		r = 0;
 	return r;
 }
 
@@ -1949,11 +1936,6 @@ static int nl80211_get_mesh_params(struct sk_buff *skb,
 	err = get_drv_dev_by_info_ifindex(info->attrs, &drv, &dev);
 	if (err)
 		return err;
-
-	if (!drv->ops->get_mesh_params) {
-		err = -EOPNOTSUPP;
-		goto out;
-	}
 
 	/* Get the mesh params */
 	rtnl_lock();
@@ -2064,11 +2046,6 @@ static int nl80211_set_mesh_params(struct sk_buff *skb, struct genl_info *info)
 	if (err)
 		return err;
 
-	if (!drv->ops->set_mesh_params) {
-		err = -EOPNOTSUPP;
-		goto out;
-	}
-
 	/* This makes sure that there aren't more than 32 mesh config
 	 * parameters (otherwise our bitfield scheme would not work.) */
 	BUILD_BUG_ON(NL80211_MESHCONF_ATTR_MAX > 32);
@@ -2113,7 +2090,6 @@ static int nl80211_set_mesh_params(struct sk_buff *skb, struct genl_info *info)
 	err = drv->ops->set_mesh_params(&drv->wiphy, dev, &cfg, mask);
 	rtnl_unlock();
 
- out:
 	/* cleanup */
 	cfg80211_put_dev(drv);
 	dev_put(dev);
@@ -2130,7 +2106,7 @@ static int nl80211_get_reg(struct sk_buff *skb, struct genl_info *info)
 	unsigned int i;
 	int err = -EINVAL;
 
-	mutex_lock(&cfg80211_mutex);
+	mutex_lock(&cfg80211_drv_mutex);
 
 	if (!cfg80211_regdomain)
 		goto out;
@@ -2193,7 +2169,7 @@ nla_put_failure:
 	genlmsg_cancel(msg, hdr);
 	err = -EMSGSIZE;
 out:
-	mutex_unlock(&cfg80211_mutex);
+	mutex_unlock(&cfg80211_drv_mutex);
 	return err;
 }
 
@@ -2252,9 +2228,9 @@ static int nl80211_set_reg(struct sk_buff *skb, struct genl_info *info)
 
 	BUG_ON(rule_idx != num_rules);
 
-	mutex_lock(&cfg80211_mutex);
+	mutex_lock(&cfg80211_drv_mutex);
 	r = set_regdom(rd);
-	mutex_unlock(&cfg80211_mutex);
+	mutex_unlock(&cfg80211_drv_mutex);
 	return r;
 
  bad_reg:
@@ -2310,7 +2286,6 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 	struct wiphy *wiphy;
 	int err, tmp, n_ssids = 0, n_channels = 0, i;
 	enum ieee80211_band band;
-	size_t ie_len;
 
 	err = get_drv_dev_by_info_ifindex(info->attrs, &drv, &dev);
 	if (err)
@@ -2352,15 +2327,9 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 		goto out_unlock;
 	}
 
-	if (info->attrs[NL80211_ATTR_IE])
-		ie_len = nla_len(info->attrs[NL80211_ATTR_IE]);
-	else
-		ie_len = 0;
-
 	request = kzalloc(sizeof(*request)
 			+ sizeof(*ssid) * n_ssids
-			+ sizeof(channel) * n_channels
-			+ ie_len, GFP_KERNEL);
+			+ sizeof(channel) * n_channels, GFP_KERNEL);
 	if (!request) {
 		err = -ENOMEM;
 		goto out_unlock;
@@ -2371,12 +2340,6 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 	if (n_ssids)
 		request->ssids = (void *)(request->channels + n_channels);
 	request->n_ssids = n_ssids;
-	if (ie_len) {
-		if (request->ssids)
-			request->ie = (void *)(request->ssids + n_ssids);
-		else
-			request->ie = (void *)(request->channels + n_channels);
-	}
 
 	if (info->attrs[NL80211_ATTR_SCAN_FREQUENCIES]) {
 		/* user specified, bail out if channel not found */
@@ -2415,12 +2378,6 @@ static int nl80211_trigger_scan(struct sk_buff *skb, struct genl_info *info)
 			request->ssids[i].ssid_len = nla_len(attr);
 			i++;
 		}
-	}
-
-	if (info->attrs[NL80211_ATTR_IE]) {
-		request->ie_len = nla_len(info->attrs[NL80211_ATTR_IE]);
-		memcpy(request->ie, nla_data(info->attrs[NL80211_ATTR_IE]),
-		       request->ie_len);
 	}
 
 	request->ifidx = dev->ifindex;
@@ -2475,7 +2432,7 @@ static int nl80211_send_bss(struct sk_buff *msg, u32 pid, u32 seq, int flags,
 	NLA_PUT_U16(msg, NL80211_BSS_CAPABILITY, res->capability);
 	NLA_PUT_U32(msg, NL80211_BSS_FREQUENCY, res->channel->center_freq);
 
-	switch (rdev->wiphy.signal_type) {
+	switch (res->signal_type) {
 	case CFG80211_SIGNAL_TYPE_MBM:
 		NLA_PUT_U32(msg, NL80211_BSS_SIGNAL_MBM, res->signal);
 		break;
@@ -2644,6 +2601,7 @@ static struct genl_ops nl80211_ops[] = {
 		.doit = nl80211_get_station,
 		.dumpit = nl80211_dump_station,
 		.policy = nl80211_policy,
+		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = NL80211_CMD_SET_STATION,
@@ -2750,9 +2708,6 @@ static struct genl_multicast_group nl80211_config_mcgrp = {
 static struct genl_multicast_group nl80211_scan_mcgrp = {
 	.name = "scan",
 };
-static struct genl_multicast_group nl80211_regulatory_mcgrp = {
-	.name = "regulatory",
-};
 
 /* notification functions */
 
@@ -2784,7 +2739,7 @@ static int nl80211_send_scan_donemsg(struct sk_buff *msg,
 	if (!hdr)
 		return -1;
 
-	NLA_PUT_U32(msg, NL80211_ATTR_WIPHY, rdev->wiphy_idx);
+	NLA_PUT_U32(msg, NL80211_ATTR_WIPHY, rdev->idx);
 	NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, netdev->ifindex);
 
 	/* XXX: we should probably bounce back the request? */
@@ -2832,61 +2787,6 @@ void nl80211_send_scan_aborted(struct cfg80211_registered_device *rdev,
 	genlmsg_multicast(msg, 0, nl80211_scan_mcgrp.id, GFP_KERNEL);
 }
 
-/*
- * This can happen on global regulatory changes or device specific settings
- * based on custom world regulatory domains.
- */
-void nl80211_send_reg_change_event(struct regulatory_request *request)
-{
-	struct sk_buff *msg;
-	void *hdr;
-
-	msg = nlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
-	if (!msg)
-		return;
-
-	hdr = nl80211hdr_put(msg, 0, 0, 0, NL80211_CMD_REG_CHANGE);
-	if (!hdr) {
-		nlmsg_free(msg);
-		return;
-	}
-
-	/* Userspace can always count this one always being set */
-	NLA_PUT_U8(msg, NL80211_ATTR_REG_INITIATOR, request->initiator);
-
-	if (request->alpha2[0] == '0' && request->alpha2[1] == '0')
-		NLA_PUT_U8(msg, NL80211_ATTR_REG_TYPE,
-			   NL80211_REGDOM_TYPE_WORLD);
-	else if (request->alpha2[0] == '9' && request->alpha2[1] == '9')
-		NLA_PUT_U8(msg, NL80211_ATTR_REG_TYPE,
-			   NL80211_REGDOM_TYPE_CUSTOM_WORLD);
-	else if ((request->alpha2[0] == '9' && request->alpha2[1] == '8') ||
-		 request->intersect)
-		NLA_PUT_U8(msg, NL80211_ATTR_REG_TYPE,
-			   NL80211_REGDOM_TYPE_INTERSECTION);
-	else {
-		NLA_PUT_U8(msg, NL80211_ATTR_REG_TYPE,
-			   NL80211_REGDOM_TYPE_COUNTRY);
-		NLA_PUT_STRING(msg, NL80211_ATTR_REG_ALPHA2, request->alpha2);
-	}
-
-	if (wiphy_idx_valid(request->wiphy_idx))
-		NLA_PUT_U32(msg, NL80211_ATTR_WIPHY, request->wiphy_idx);
-
-	if (genlmsg_end(msg, hdr) < 0) {
-		nlmsg_free(msg);
-		return;
-	}
-
-	genlmsg_multicast(msg, 0, nl80211_regulatory_mcgrp.id, GFP_KERNEL);
-
-	return;
-
-nla_put_failure:
-	genlmsg_cancel(msg, hdr);
-	nlmsg_free(msg);
-}
-
 /* initialisation/exit functions */
 
 int nl80211_init(void)
@@ -2908,10 +2808,6 @@ int nl80211_init(void)
 		goto err_out;
 
 	err = genl_register_mc_group(&nl80211_fam, &nl80211_scan_mcgrp);
-	if (err)
-		goto err_out;
-
-	err = genl_register_mc_group(&nl80211_fam, &nl80211_regulatory_mcgrp);
 	if (err)
 		goto err_out;
 

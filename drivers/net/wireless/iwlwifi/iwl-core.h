@@ -224,7 +224,6 @@ struct ieee80211_hw *iwl_alloc_all(struct iwl_cfg *cfg,
 		struct ieee80211_ops *hw_ops);
 void iwl_hw_detect(struct iwl_priv *priv);
 void iwl_reset_qos(struct iwl_priv *priv);
-void iwl_activate_qos(struct iwl_priv *priv, u8 force);
 void iwl_set_rxon_hwcrypto(struct iwl_priv *priv, int hw_decrypt);
 int iwl_check_rxon_cmd(struct iwl_priv *priv);
 int iwl_full_rxon_required(struct iwl_priv *priv);
@@ -249,16 +248,6 @@ int iwl_setup_mac(struct iwl_priv *priv);
 int iwl_set_hw_params(struct iwl_priv *priv);
 int iwl_init_drv(struct iwl_priv *priv);
 void iwl_uninit_drv(struct iwl_priv *priv);
-
-/*****************************************************
- * RX handlers.
- * **************************************************/
-void iwl_rx_pm_sleep_notif(struct iwl_priv *priv,
-			   struct iwl_rx_mem_buffer *rxb);
-void iwl_rx_pm_debug_statistics_notif(struct iwl_priv *priv,
-				      struct iwl_rx_mem_buffer *rxb);
-void iwl_rx_reply_error(struct iwl_priv *priv,
-			struct iwl_rx_mem_buffer *rxb);
 
 /*****************************************************
 * RX
@@ -356,7 +345,6 @@ void iwl_init_scan_params(struct iwl_priv *priv);
 int iwl_scan_cancel(struct iwl_priv *priv);
 int iwl_scan_cancel_timeout(struct iwl_priv *priv, unsigned long ms);
 int iwl_scan_initiate(struct iwl_priv *priv);
-int iwl_mac_hw_scan(struct ieee80211_hw *hw, struct cfg80211_scan_request *req);
 u16 iwl_fill_probe_req(struct iwl_priv *priv, enum ieee80211_band band,
 		       struct ieee80211_mgmt *frame, int left);
 void iwl_setup_rx_scan_handlers(struct iwl_priv *priv);
@@ -391,7 +379,7 @@ void iwl_calib_free_results(struct iwl_priv *priv);
 /*******************************************************************************
  * Spectrum Measureemtns in  iwl-spectrum.c
  ******************************************************************************/
-#ifdef CONFIG_IWLWIFI_SPECTRUM_MEASUREMENT
+#ifdef CONFIG_IWLAGN_SPECTRUM_MEASUREMENT
 void iwl_setup_spectrum_handlers(struct iwl_priv *priv);
 #else
 static inline void iwl_setup_spectrum_handlers(struct iwl_priv *priv) {}
@@ -422,7 +410,6 @@ int iwl_send_card_state(struct iwl_priv *priv, u32 flags,
  *****************************************************/
 void iwl_disable_interrupts(struct iwl_priv *priv);
 void iwl_enable_interrupts(struct iwl_priv *priv);
-irqreturn_t iwl_isr(int irq, void *data);
 static inline u16 iwl_pcie_link_ctl(struct iwl_priv *priv)
 {
 	int pos;

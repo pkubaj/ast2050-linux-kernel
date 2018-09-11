@@ -61,11 +61,9 @@ extern pgm_check_handler_t do_asce_exception;
 #define stack_pointer ({ void **sp; asm("la %0,0(15)" : "=&d" (sp)); sp; })
 
 #ifndef CONFIG_64BIT
-#define LONG "%08lx "
 #define FOURLONG "%08lx %08lx %08lx %08lx\n"
 static int kstack_depth_to_print = 12;
 #else /* CONFIG_64BIT */
-#define LONG "%016lx "
 #define FOURLONG "%016lx %016lx %016lx %016lx\n"
 static int kstack_depth_to_print = 20;
 #endif /* CONFIG_64BIT */
@@ -157,7 +155,7 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 			break;
 		if (i && ((i * sizeof (long) % 32) == 0))
 			printk("\n       ");
-		printk(LONG, *stack++);
+		printk("%p ", (void *)*stack++);
 	}
 	printk("\n");
 	show_trace(task, sp);

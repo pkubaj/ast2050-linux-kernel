@@ -21,7 +21,6 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
 
-#include <mach/irqs.h>
 #include <mach/hardware.h>
 #include <mach/common.h>
 #include <mach/imx-uart.h>

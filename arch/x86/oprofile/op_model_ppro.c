@@ -78,18 +78,8 @@ static void ppro_setup_ctrs(struct op_msrs const * const msrs)
 	if (cpu_has_arch_perfmon) {
 		union cpuid10_eax eax;
 		eax.full = cpuid_eax(0xa);
-
-		/*
-		 * For Core2 (family 6, model 15), don't reset the
-		 * counter width:
-		 */
-		if (!(eax.split.version_id == 0 &&
-			current_cpu_data.x86 == 6 &&
-				current_cpu_data.x86_model == 15)) {
-
-			if (counter_width < eax.split.bit_width)
-				counter_width = eax.split.bit_width;
-		}
+		if (counter_width < eax.split.bit_width)
+			counter_width = eax.split.bit_width;
 	}
 
 	/* clear all counters */

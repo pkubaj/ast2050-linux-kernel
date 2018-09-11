@@ -1091,24 +1091,19 @@ static ssize_t btrfs_file_write(struct file *file, const char __user *buf,
 		WARN_ON(num_pages > nrptrs);
 		memset(pages, 0, sizeof(struct page *) * nrptrs);
 
-		ret = btrfs_check_data_free_space(root, inode, write_bytes);
+		ret = btrfs_check_free_space(root, write_bytes, 0);
 		if (ret)
 			goto out;
 
 		ret = prepare_pages(root, file, pages, num_pages,
 				    pos, first_index, last_index,
 				    write_bytes);
-		if (ret) {
-			btrfs_free_reserved_data_space(root, inode,
-						       write_bytes);
+		if (ret)
 			goto out;
-		}
 
 		ret = btrfs_copy_from_user(pos, num_pages,
 					   write_bytes, pages, buf);
 		if (ret) {
-			btrfs_free_reserved_data_space(root, inode,
-						       write_bytes);
 			btrfs_drop_pages(pages, num_pages);
 			goto out;
 		}
@@ -1116,11 +1111,8 @@ static ssize_t btrfs_file_write(struct file *file, const char __user *buf,
 		ret = dirty_and_release_pages(NULL, root, file, pages,
 					      num_pages, pos, write_bytes);
 		btrfs_drop_pages(pages, num_pages);
-		if (ret) {
-			btrfs_free_reserved_data_space(root, inode,
-						       write_bytes);
+		if (ret)
 			goto out;
-		}
 
 		if (will_write) {
 			btrfs_fdatawrite_range(inode->i_mapping, pos,
@@ -1144,8 +1136,6 @@ static ssize_t btrfs_file_write(struct file *file, const char __user *buf,
 	}
 out:
 	mutex_unlock(&inode->i_mutex);
-	if (ret)
-		err = ret;
 
 out_nolock:
 	kfree(pages);
@@ -1232,7 +1222,7 @@ int btrfs_sync_file(struct file *file, struct dentry *dentry, int datasync)
 	/*
 	 * ok we haven't committed the transaction yet, lets do a commit
 	 */
-	if (file && file->private_data)
+	if (file->private_data)
 		btrfs_ioctl_trans_end(file);
 
 	trans = btrfs_start_transaction(root, 1);
@@ -1241,7 +1231,7 @@ int btrfs_sync_file(struct file *file, struct dentry *dentry, int datasync)
 		goto out;
 	}
 
-	ret = btrfs_log_dentry_safe(trans, root, dentry);
+	ret = btrfs_log_dentry_safe(trans, root, file->f_dentry);
 	if (ret < 0)
 		goto out;
 
@@ -1255,7 +1245,7 @@ int btrfs_sync_file(struct file *file, struct dentry *dentry, int datasync)
 	 * file again, but that will end up using the synchronization
 	 * inside btrfs_sync_log to keep things safe.
 	 */
-	mutex_unlock(&dentry->d_inode->i_mutex);
+	mutex_unlock(&file->f_dentry->d_inode->i_mutex);
 
 	if (ret > 0) {
 		ret = btrfs_commit_transaction(trans, root);
@@ -1263,7 +1253,7 @@ int btrfs_sync_file(struct file *file, struct dentry *dentry, int datasync)
 		btrfs_sync_log(trans, root);
 		ret = btrfs_end_transaction(trans, root);
 	}
-	mutex_lock(&dentry->d_inode->i_mutex);
+	mutex_lock(&file->f_dentry->d_inode->i_mutex);
 out:
 	return ret > 0 ? EIO : ret;
 }

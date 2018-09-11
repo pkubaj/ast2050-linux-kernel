@@ -89,7 +89,6 @@ static struct ixgbe_stats ixgbe_gstrings_stats[] = {
 	{"rx_header_split", IXGBE_STAT(rx_hdr_split)},
 	{"alloc_rx_page_failed", IXGBE_STAT(alloc_rx_page_failed)},
 	{"alloc_rx_buff_failed", IXGBE_STAT(alloc_rx_buff_failed)},
-	{"rx_no_dma_resources", IXGBE_STAT(hw_rx_no_dma_resources)},
 };
 
 #define IXGBE_QUEUE_STATS_LEN \
@@ -470,7 +469,7 @@ static void ixgbe_get_regs(struct net_device *netdev,
 	regs_buff[825] = IXGBE_READ_REG(hw, IXGBE_IP6AT);
 	regs_buff[826] = IXGBE_READ_REG(hw, IXGBE_WUPL);
 	regs_buff[827] = IXGBE_READ_REG(hw, IXGBE_WUPM);
-	regs_buff[828] = IXGBE_READ_REG(hw, IXGBE_FHFT(0));
+	regs_buff[828] = IXGBE_READ_REG(hw, IXGBE_FHFT);
 
 	regs_buff[829] = IXGBE_READ_REG(hw, IXGBE_RMCS);
 	regs_buff[830] = IXGBE_READ_REG(hw, IXGBE_DPMCS);
@@ -909,48 +908,10 @@ static void ixgbe_get_strings(struct net_device *netdev, u32 stringset,
 static void ixgbe_get_wol(struct net_device *netdev,
                           struct ethtool_wolinfo *wol)
 {
-	struct ixgbe_adapter *adapter = netdev_priv(netdev);
-
-	wol->supported = WAKE_UCAST | WAKE_MCAST |
-	                 WAKE_BCAST | WAKE_MAGIC;
+	wol->supported = 0;
 	wol->wolopts = 0;
 
-	if (!device_can_wakeup(&adapter->pdev->dev))
-		return;
-
-	if (adapter->wol & IXGBE_WUFC_EX)
-		wol->wolopts |= WAKE_UCAST;
-	if (adapter->wol & IXGBE_WUFC_MC)
-		wol->wolopts |= WAKE_MCAST;
-	if (adapter->wol & IXGBE_WUFC_BC)
-		wol->wolopts |= WAKE_BCAST;
-	if (adapter->wol & IXGBE_WUFC_MAG)
-		wol->wolopts |= WAKE_MAGIC;
-
 	return;
-}
-
-static int ixgbe_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
-{
-	struct ixgbe_adapter *adapter = netdev_priv(netdev);
-
-	if (wol->wolopts & (WAKE_PHY | WAKE_ARP | WAKE_MAGICSECURE))
-		return -EOPNOTSUPP;
-
-	adapter->wol = 0;
-
-	if (wol->wolopts & WAKE_UCAST)
-		adapter->wol |= IXGBE_WUFC_EX;
-	if (wol->wolopts & WAKE_MCAST)
-		adapter->wol |= IXGBE_WUFC_MC;
-	if (wol->wolopts & WAKE_BCAST)
-		adapter->wol |= IXGBE_WUFC_BC;
-	if (wol->wolopts & WAKE_MAGIC)
-		adapter->wol |= IXGBE_WUFC_MAG;
-
-	device_set_wakeup_enable(&adapter->pdev->dev, adapter->wol);
-
-	return 0;
 }
 
 static int ixgbe_nway_reset(struct net_device *netdev)
@@ -1015,47 +976,40 @@ static int ixgbe_set_coalesce(struct net_device *netdev,
                               struct ethtool_coalesce *ec)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
+	struct ixgbe_hw *hw = &adapter->hw;
 	int i;
 
 	if (ec->tx_max_coalesced_frames_irq)
 		adapter->tx_ring[0].work_limit = ec->tx_max_coalesced_frames_irq;
 
 	if (ec->rx_coalesce_usecs > 1) {
-		/* check the limits */
-		if ((1000000/ec->rx_coalesce_usecs > IXGBE_MAX_INT_RATE) ||
-		    (1000000/ec->rx_coalesce_usecs < IXGBE_MIN_INT_RATE))
-			return -EINVAL;
-
 		/* store the value in ints/second */
 		adapter->eitr_param = 1000000/ec->rx_coalesce_usecs;
 
 		/* static value of interrupt rate */
 		adapter->itr_setting = adapter->eitr_param;
-		/* clear the lower bit as its used for dynamic state */
+		/* clear the lower bit */
 		adapter->itr_setting &= ~1;
 	} else if (ec->rx_coalesce_usecs == 1) {
 		/* 1 means dynamic mode */
 		adapter->eitr_param = 20000;
 		adapter->itr_setting = 1;
 	} else {
-		/*
-		 * any other value means disable eitr, which is best
-		 * served by setting the interrupt rate very high
-		 */
-		adapter->eitr_param = IXGBE_MAX_INT_RATE;
+		/* any other value means disable eitr, which is best
+		 * served by setting the interrupt rate very high */
+		adapter->eitr_param = 3000000;
 		adapter->itr_setting = 0;
 	}
 
 	for (i = 0; i < adapter->num_msix_vectors - NON_Q_VECTORS; i++) {
 		struct ixgbe_q_vector *q_vector = &adapter->q_vector[i];
 		if (q_vector->txr_count && !q_vector->rxr_count)
-			/* tx vector gets half the rate */
 			q_vector->eitr = (adapter->eitr_param >> 1);
 		else
 			/* rx only or mixed */
 			q_vector->eitr = adapter->eitr_param;
-		ixgbe_write_eitr(adapter, i,
-		                 EITR_INTS_PER_SEC_TO_REG(q_vector->eitr));
+		IXGBE_WRITE_REG(hw, IXGBE_EITR(i),
+		                EITR_INTS_PER_SEC_TO_REG(q_vector->eitr));
 	}
 
 	return 0;
@@ -1069,7 +1023,6 @@ static const struct ethtool_ops ixgbe_ethtool_ops = {
 	.get_regs_len           = ixgbe_get_regs_len,
 	.get_regs               = ixgbe_get_regs,
 	.get_wol                = ixgbe_get_wol,
-	.set_wol                = ixgbe_set_wol,
 	.nway_reset             = ixgbe_nway_reset,
 	.get_link               = ethtool_op_get_link,
 	.get_eeprom_len         = ixgbe_get_eeprom_len,

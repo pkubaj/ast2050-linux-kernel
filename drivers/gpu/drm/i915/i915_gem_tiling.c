@@ -299,8 +299,9 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 	}
 	obj_priv->stride = args->stride;
 
-	drm_gem_object_unreference(obj);
 	mutex_unlock(&dev->struct_mutex);
+
+	drm_gem_object_unreference(obj);
 
 	return 0;
 }
@@ -339,8 +340,9 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 		DRM_ERROR("unknown tiling mode\n");
 	}
 
-	drm_gem_object_unreference(obj);
 	mutex_unlock(&dev->struct_mutex);
+
+	drm_gem_object_unreference(obj);
 
 	return 0;
 }

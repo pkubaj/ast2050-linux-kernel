@@ -1692,13 +1692,7 @@ static int ipw2100_up(struct ipw2100_priv *priv, int deferred)
 	u32 lock;
 	u32 ord_len = sizeof(lock);
 
-	/* Age scan list entries found before suspend */
-	if (priv->suspend_time) {
-		ieee80211_networks_age(priv->ieee, priv->suspend_time);
-		priv->suspend_time = 0;
-	}
-
-	/* Quiet if manually disabled. */
+	/* Quite if manually disabled. */
 	if (priv->status & STATUS_RF_KILL_SW) {
 		IPW_DEBUG_INFO("%s: Radio is disabled by Manual Disable "
 			       "switch\n", priv->net_dev->name);
@@ -1916,8 +1910,7 @@ static void isr_indicate_associated(struct ipw2100_priv *priv, u32 status)
 {
 
 #define MAC_ASSOCIATION_READ_DELAY (HZ)
-	int ret;
-	unsigned int len, essid_len;
+	int ret, len, essid_len;
 	char essid[IW_ESSID_MAX_SIZE];
 	u32 txrate;
 	u32 chan;
@@ -2391,14 +2384,13 @@ static void ipw2100_corruption_detected(struct ipw2100_priv *priv, int i)
 #endif
 
 	priv->fatal_error = IPW2100_ERR_C3_CORRUPTION;
-	priv->net_dev->stats.rx_errors++;
+	priv->ieee->stats.rx_errors++;
 	schedule_reset(priv);
 }
 
 static void isr_rx(struct ipw2100_priv *priv, int i,
 			  struct ieee80211_rx_stats *stats)
 {
-	struct net_device *dev = priv->net_dev;
 	struct ipw2100_status *status = &priv->status_queue.drv[i];
 	struct ipw2100_rx_packet *packet = &priv->rx_buffers[i];
 
@@ -2407,14 +2399,14 @@ static void isr_rx(struct ipw2100_priv *priv, int i,
 	if (unlikely(status->frame_size > skb_tailroom(packet->skb))) {
 		IPW_DEBUG_INFO("%s: frame_size (%u) > skb_tailroom (%u)!"
 			       "  Dropping.\n",
-			       dev->name,
+			       priv->net_dev->name,
 			       status->frame_size, skb_tailroom(packet->skb));
-		dev->stats.rx_errors++;
+		priv->ieee->stats.rx_errors++;
 		return;
 	}
 
-	if (unlikely(!netif_running(dev))) {
-		dev->stats.rx_errors++;
+	if (unlikely(!netif_running(priv->net_dev))) {
+		priv->ieee->stats.rx_errors++;
 		priv->wstats.discard.misc++;
 		IPW_DEBUG_DROP("Dropping packet while interface is not up.\n");
 		return;
@@ -2444,10 +2436,10 @@ static void isr_rx(struct ipw2100_priv *priv, int i,
 	if (!ieee80211_rx(priv->ieee, packet->skb, stats)) {
 #ifdef IPW2100_RX_DEBUG
 		IPW_DEBUG_DROP("%s: Non consumed packet:\n",
-			       dev->name);
+			       priv->net_dev->name);
 		printk_buf(IPW_DL_DROP, packet_data, status->frame_size);
 #endif
-		dev->stats.rx_errors++;
+		priv->ieee->stats.rx_errors++;
 
 		/* ieee80211_rx failed, so it didn't free the SKB */
 		dev_kfree_skb_any(packet->skb);
@@ -2458,7 +2450,7 @@ static void isr_rx(struct ipw2100_priv *priv, int i,
 	if (unlikely(ipw2100_alloc_skb(priv, packet))) {
 		printk(KERN_WARNING DRV_NAME ": "
 		       "%s: Unable to allocate SKB onto RBD ring - disabling "
-		       "adapter.\n", dev->name);
+		       "adapter.\n", priv->net_dev->name);
 		/* TODO: schedule adapter shutdown */
 		IPW_DEBUG_INFO("TODO: Shutdown adapter...\n");
 	}
@@ -2472,7 +2464,6 @@ static void isr_rx(struct ipw2100_priv *priv, int i,
 static void isr_rx_monitor(struct ipw2100_priv *priv, int i,
 		   struct ieee80211_rx_stats *stats)
 {
-	struct net_device *dev = priv->net_dev;
 	struct ipw2100_status *status = &priv->status_queue.drv[i];
 	struct ipw2100_rx_packet *packet = &priv->rx_buffers[i];
 
@@ -2490,15 +2481,15 @@ static void isr_rx_monitor(struct ipw2100_priv *priv, int i,
 				sizeof(struct ipw_rt_hdr))) {
 		IPW_DEBUG_INFO("%s: frame_size (%u) > skb_tailroom (%u)!"
 			       "  Dropping.\n",
-			       dev->name,
+			       priv->net_dev->name,
 			       status->frame_size,
 			       skb_tailroom(packet->skb));
-		dev->stats.rx_errors++;
+		priv->ieee->stats.rx_errors++;
 		return;
 	}
 
-	if (unlikely(!netif_running(dev))) {
-		dev->stats.rx_errors++;
+	if (unlikely(!netif_running(priv->net_dev))) {
+		priv->ieee->stats.rx_errors++;
 		priv->wstats.discard.misc++;
 		IPW_DEBUG_DROP("Dropping packet while interface is not up.\n");
 		return;
@@ -2507,7 +2498,7 @@ static void isr_rx_monitor(struct ipw2100_priv *priv, int i,
 	if (unlikely(priv->config & CFG_CRC_CHECK &&
 		     status->flags & IPW_STATUS_FLAG_CRC_ERROR)) {
 		IPW_DEBUG_RX("CRC error in packet.  Dropping.\n");
-		dev->stats.rx_errors++;
+		priv->ieee->stats.rx_errors++;
 		return;
 	}
 
@@ -2529,7 +2520,7 @@ static void isr_rx_monitor(struct ipw2100_priv *priv, int i,
 	skb_put(packet->skb, status->frame_size + sizeof(struct ipw_rt_hdr));
 
 	if (!ieee80211_rx(priv->ieee, packet->skb, stats)) {
-		dev->stats.rx_errors++;
+		priv->ieee->stats.rx_errors++;
 
 		/* ieee80211_rx failed, so it didn't free the SKB */
 		dev_kfree_skb_any(packet->skb);
@@ -2540,7 +2531,7 @@ static void isr_rx_monitor(struct ipw2100_priv *priv, int i,
 	if (unlikely(ipw2100_alloc_skb(priv, packet))) {
 		IPW_DEBUG_WARNING(
 			"%s: Unable to allocate SKB onto RBD ring - disabling "
-			"adapter.\n", dev->name);
+			"adapter.\n", priv->net_dev->name);
 		/* TODO: schedule adapter shutdown */
 		IPW_DEBUG_INFO("TODO: Shutdown adapter...\n");
 	}
@@ -3342,7 +3333,7 @@ static int ipw2100_tx(struct ieee80211_txb *txb, struct net_device *dev,
 
 	if (!(priv->status & STATUS_ASSOCIATED)) {
 		IPW_DEBUG_INFO("Can not transmit when not connected.\n");
-		priv->net_dev->stats.tx_carrier_errors++;
+		priv->ieee->stats.tx_carrier_errors++;
 		netif_stop_queue(dev);
 		goto fail_unlock;
 	}
@@ -4067,7 +4058,7 @@ static ssize_t show_bssinfo(struct device *d, struct device_attribute *attr,
 	u8 bssid[ETH_ALEN];
 	u32 chan = 0;
 	char *out = buf;
-	unsigned int length;
+	int length;
 	int ret;
 
 	if (priv->status & STATUS_RF_KILL_MASK)
@@ -5838,7 +5829,7 @@ static void ipw2100_tx_timeout(struct net_device *dev)
 {
 	struct ipw2100_priv *priv = ieee80211_priv(dev);
 
-	dev->stats.tx_errors++;
+	priv->ieee->stats.tx_errors++;
 
 #ifdef CONFIG_IPW2100_MONITOR
 	if (priv->ieee->iw_mode == IW_MODE_MONITOR)
@@ -6008,17 +5999,6 @@ static void ipw2100_rf_kill(struct work_struct *work)
 
 static void ipw2100_irq_tasklet(struct ipw2100_priv *priv);
 
-static const struct net_device_ops ipw2100_netdev_ops = {
-	.ndo_open		= ipw2100_open,
-	.ndo_stop		= ipw2100_close,
-	.ndo_start_xmit		= ieee80211_xmit,
-	.ndo_change_mtu		= ieee80211_change_mtu,
-	.ndo_init		= ipw2100_net_init,
-	.ndo_tx_timeout		= ipw2100_tx_timeout,
-	.ndo_set_mac_address	= ipw2100_set_address,
-	.ndo_validate_addr	= eth_validate_addr,
-};
-
 /* Look into using netdev destructor to shutdown ieee80211? */
 
 static struct net_device *ipw2100_alloc_device(struct pci_dev *pci_dev,
@@ -6043,11 +6023,15 @@ static struct net_device *ipw2100_alloc_device(struct pci_dev *pci_dev,
 	priv->ieee->perfect_rssi = -20;
 	priv->ieee->worst_rssi = -85;
 
-	dev->netdev_ops = &ipw2100_netdev_ops;
+	dev->open = ipw2100_open;
+	dev->stop = ipw2100_close;
+	dev->init = ipw2100_net_init;
 	dev->ethtool_ops = &ipw2100_ethtool_ops;
+	dev->tx_timeout = ipw2100_tx_timeout;
 	dev->wireless_handlers = &ipw2100_wx_handler_def;
 	priv->wireless_data.ieee80211 = priv->ieee;
 	dev->wireless_data = &priv->wireless_data;
+	dev->set_mac_address = ipw2100_set_address;
 	dev->watchdog_timeo = 3 * HZ;
 	dev->irq = 0;
 
@@ -6430,8 +6414,6 @@ static int ipw2100_suspend(struct pci_dev *pci_dev, pm_message_t state)
 	pci_disable_device(pci_dev);
 	pci_set_power_state(pci_dev, PCI_D3hot);
 
-	priv->suspend_at = get_seconds();
-
 	mutex_unlock(&priv->action_mutex);
 
 	return 0;
@@ -6474,8 +6456,6 @@ static int ipw2100_resume(struct pci_dev *pci_dev)
 	/* Set the device back into the PRESENT state; this will also wake
 	 * the queue of needed */
 	netif_device_attach(dev);
-
-	priv->suspend_time = get_seconds() - priv->suspend_at;
 
 	/* Bring the device back up */
 	if (!(priv->status & STATUS_RF_KILL_SW))
@@ -7142,7 +7122,7 @@ static int ipw2100_wx_get_rate(struct net_device *dev,
 {
 	struct ipw2100_priv *priv = ieee80211_priv(dev);
 	int val;
-	unsigned int len = sizeof(val);
+	int len = sizeof(val);
 	int err = 0;
 
 	if (!(priv->status & STATUS_ENABLED) ||
@@ -8317,7 +8297,7 @@ static void ipw2100_wx_event_work(struct work_struct *work)
 	struct ipw2100_priv *priv =
 		container_of(work, struct ipw2100_priv, wx_event_work.work);
 	union iwreq_data wrqu;
-	unsigned int len = ETH_ALEN;
+	int len = ETH_ALEN;
 
 	if (priv->status & STATUS_STOPPING)
 		return;

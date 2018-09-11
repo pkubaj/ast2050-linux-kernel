@@ -1000,7 +1000,7 @@ static inline void wl3501_md_ind_interrupt(struct net_device *dev,
 	if (!skb) {
 		printk(KERN_WARNING "%s: Can't alloc a sk_buff of size %d.\n",
 		       dev->name, pkt_len);
-		dev->stats.rx_dropped++;
+		this->stats.rx_dropped++;
 	} else {
 		skb->dev = dev;
 		skb_reserve(skb, 2); /* IP headers on 16 bytes boundaries */
@@ -1008,8 +1008,8 @@ static inline void wl3501_md_ind_interrupt(struct net_device *dev,
 		wl3501_receive(this, skb->data, pkt_len);
 		skb_put(skb, pkt_len);
 		skb->protocol	= eth_type_trans(skb, dev);
-		dev->stats.rx_packets++;
-		dev->stats.rx_bytes += skb->len;
+		this->stats.rx_packets++;
+		this->stats.rx_bytes += skb->len;
 		netif_rx(skb);
 	}
 }
@@ -1311,7 +1311,7 @@ out:
 static void wl3501_tx_timeout(struct net_device *dev)
 {
 	struct wl3501_card *this = netdev_priv(dev);
-	struct net_device_stats *stats = &dev->stats;
+	struct net_device_stats *stats = &this->stats;
 	unsigned long flags;
 	int rc;
 
@@ -1346,11 +1346,11 @@ static int wl3501_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (enabled)
 		wl3501_unblock_interrupt(this);
 	if (rc) {
-		++dev->stats.tx_dropped;
+		++this->stats.tx_dropped;
 		netif_stop_queue(dev);
 	} else {
-		++dev->stats.tx_packets;
-		dev->stats.tx_bytes += skb->len;
+		++this->stats.tx_packets;
+		this->stats.tx_bytes += skb->len;
 		kfree_skb(skb);
 
 		if (this->tx_buffer_cnt < 2)
@@ -1398,6 +1398,13 @@ out:
 fail:
 	printk(KERN_WARNING "%s: Can't initialize firmware!\n", dev->name);
 	goto out;
+}
+
+static struct net_device_stats *wl3501_get_stats(struct net_device *dev)
+{
+	struct wl3501_card *this = netdev_priv(dev);
+
+	return &this->stats;
 }
 
 static struct iw_statistics *wl3501_get_wireless_stats(struct net_device *dev)
@@ -1883,16 +1890,6 @@ static const struct iw_handler_def wl3501_handler_def = {
 	.get_wireless_stats = wl3501_get_wireless_stats,
 };
 
-static const struct net_device_ops wl3501_netdev_ops = {
-	.ndo_open		= wl3501_open,
-	.ndo_stop		= wl3501_close,
-	.ndo_start_xmit		= wl3501_hard_start_xmit,
-	.ndo_tx_timeout		= wl3501_tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
-	.ndo_set_mac_address 	= eth_mac_addr,
-	.ndo_validate_addr	= eth_validate_addr,
-};
-
 /**
  * wl3501_attach - creates an "instance" of the driver
  *
@@ -1925,16 +1922,17 @@ static int wl3501_probe(struct pcmcia_device *p_dev)
 	dev = alloc_etherdev(sizeof(struct wl3501_card));
 	if (!dev)
 		goto out_link;
-
-
-	dev->netdev_ops		= &wl3501_netdev_ops;
+	dev->open		= wl3501_open;
+	dev->stop		= wl3501_close;
+	dev->hard_start_xmit	= wl3501_hard_start_xmit;
+	dev->tx_timeout		= wl3501_tx_timeout;
 	dev->watchdog_timeo	= 5 * HZ;
-
+	dev->get_stats		= wl3501_get_stats;
 	this = netdev_priv(dev);
 	this->wireless_data.spy_data = &this->spy_data;
 	this->p_dev = p_dev;
 	dev->wireless_data	= &this->wireless_data;
-	dev->wireless_handlers	= &wl3501_handler_def;
+	dev->wireless_handlers	= (struct iw_handler_def *)&wl3501_handler_def;
 	SET_ETHTOOL_OPS(dev, &ops);
 	netif_stop_queue(dev);
 	p_dev->priv = p_dev->irq.Instance = dev;

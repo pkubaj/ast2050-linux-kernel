@@ -65,7 +65,6 @@
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
-#include <trace/skb.h>
 
 #include "kmap_skb.h"
 
@@ -146,6 +145,14 @@ void skb_under_panic(struct sk_buff *skb, int sz, void *here)
 	BUG();
 }
 EXPORT_SYMBOL(skb_under_panic);
+
+void skb_truesize_bug(struct sk_buff *skb)
+{
+	WARN(net_ratelimit(), KERN_ERR "SKB BUG: Invalid truesize (%u) "
+	       "len=%u, sizeof(sk_buff)=%Zd\n",
+	       skb->truesize, skb->len, sizeof(struct sk_buff));
+}
+EXPORT_SYMBOL(skb_truesize_bug);
 
 /* 	Allocate a new skbuff. We do this ourselves so we can fill in a few
  *	'private' fields and also do memory statistics to find all the
@@ -443,30 +450,9 @@ void kfree_skb(struct sk_buff *skb)
 		smp_rmb();
 	else if (likely(!atomic_dec_and_test(&skb->users)))
 		return;
-	trace_kfree_skb(skb, __builtin_return_address(0));
 	__kfree_skb(skb);
 }
 EXPORT_SYMBOL(kfree_skb);
-
-/**
- *	consume_skb - free an skbuff
- *	@skb: buffer to free
- *
- *	Drop a ref to the buffer and free it if the usage count has hit zero
- *	Functions identically to kfree_skb, but kfree_skb assumes that the frame
- *	is being dropped after a failure and notes that
- */
-void consume_skb(struct sk_buff *skb)
-{
-	if (unlikely(!skb))
-		return;
-	if (likely(atomic_read(&skb->users) == 1))
-		smp_rmb();
-	else if (likely(!atomic_dec_and_test(&skb->users)))
-		return;
-	__kfree_skb(skb);
-}
-EXPORT_SYMBOL(consume_skb);
 
 /**
  *	skb_recycle_check - check if skb can be reused for receive
@@ -1230,7 +1216,8 @@ unsigned char *__pskb_pull_tail(struct sk_buff *skb, int delta)
 					insp = list;
 				}
 				if (!pskb_pull(list, eat)) {
-					kfree_skb(clone);
+					if (clone)
+						kfree_skb(clone);
 					return NULL;
 				}
 				break;

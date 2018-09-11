@@ -20,12 +20,10 @@
 #ifndef __LINUX_DCBNL_H__
 #define __LINUX_DCBNL_H__
 
-#include <linux/types.h>
-
 #define DCB_PROTO_VERSION 1
 
 struct dcbmsg {
-	__u8               dcb_family;
+	unsigned char      dcb_family;
 	__u8               cmd;
 	__u16              dcb_pad;
 };

@@ -32,14 +32,11 @@ struct kmmio_fault_page {
 	struct list_head list;
 	struct kmmio_fault_page *release_next;
 	unsigned long page; /* location of the fault page */
-	bool old_presence; /* page presence prior to arming */
-	bool armed;
 
 	/*
 	 * Number of times this page has been registered as a part
 	 * of a probe. If zero, page is disarmed and this may be freed.
-	 * Used only by writers (RCU) and post_kmmio_handler().
-	 * Protected by kmmio_lock, when linked into kmmio_page_table.
+	 * Used only by writers (RCU).
 	 */
 	int count;
 };
@@ -108,85 +105,57 @@ static struct kmmio_fault_page *get_kmmio_fault_page(unsigned long page)
 	return NULL;
 }
 
-static void set_pmd_presence(pmd_t *pmd, bool present, bool *old)
+static void set_page_present(unsigned long addr, bool present,
+							unsigned int *pglevel)
 {
-	pmdval_t v = pmd_val(*pmd);
-	*old = !!(v & _PAGE_PRESENT);
-	v &= ~_PAGE_PRESENT;
-	if (present)
-		v |= _PAGE_PRESENT;
-	set_pmd(pmd, __pmd(v));
-}
-
-static void set_pte_presence(pte_t *pte, bool present, bool *old)
-{
-	pteval_t v = pte_val(*pte);
-	*old = !!(v & _PAGE_PRESENT);
-	v &= ~_PAGE_PRESENT;
-	if (present)
-		v |= _PAGE_PRESENT;
-	set_pte_atomic(pte, __pte(v));
-}
-
-static int set_page_presence(unsigned long addr, bool present, bool *old)
-{
+	pteval_t pteval;
+	pmdval_t pmdval;
 	unsigned int level;
+	pmd_t *pmd;
 	pte_t *pte = lookup_address(addr, &level);
 
 	if (!pte) {
 		pr_err("kmmio: no pte for page 0x%08lx\n", addr);
-		return -1;
+		return;
 	}
+
+	if (pglevel)
+		*pglevel = level;
 
 	switch (level) {
 	case PG_LEVEL_2M:
-		set_pmd_presence((pmd_t *)pte, present, old);
+		pmd = (pmd_t *)pte;
+		pmdval = pmd_val(*pmd) & ~_PAGE_PRESENT;
+		if (present)
+			pmdval |= _PAGE_PRESENT;
+		set_pmd(pmd, __pmd(pmdval));
 		break;
+
 	case PG_LEVEL_4K:
-		set_pte_presence(pte, present, old);
+		pteval = pte_val(*pte) & ~_PAGE_PRESENT;
+		if (present)
+			pteval |= _PAGE_PRESENT;
+		set_pte_atomic(pte, __pte(pteval));
 		break;
+
 	default:
 		pr_err("kmmio: unexpected page level 0x%x.\n", level);
-		return -1;
+		return;
 	}
 
 	__flush_tlb_one(addr);
-	return 0;
 }
 
-/*
- * Mark the given page as not present. Access to it will trigger a fault.
- *
- * Struct kmmio_fault_page is protected by RCU and kmmio_lock, but the
- * protection is ignored here. RCU read lock is assumed held, so the struct
- * will not disappear unexpectedly. Furthermore, the caller must guarantee,
- * that double arming the same virtual address (page) cannot occur.
- *
- * Double disarming on the other hand is allowed, and may occur when a fault
- * and mmiotrace shutdown happen simultaneously.
- */
-static int arm_kmmio_fault_page(struct kmmio_fault_page *f)
+/** Mark the given page as not present. Access to it will trigger a fault. */
+static void arm_kmmio_fault_page(unsigned long page, unsigned int *pglevel)
 {
-	int ret;
-	WARN_ONCE(f->armed, KERN_ERR "kmmio page already armed.\n");
-	if (f->armed) {
-		pr_warning("kmmio double-arm: page 0x%08lx, ref %d, old %d\n",
-					f->page, f->count, f->old_presence);
-	}
-	ret = set_page_presence(f->page, false, &f->old_presence);
-	WARN_ONCE(ret < 0, KERN_ERR "kmmio arming 0x%08lx failed.\n", f->page);
-	f->armed = true;
-	return ret;
+	set_page_present(page & PAGE_MASK, false, pglevel);
 }
 
-/** Restore the given page to saved presence state. */
-static void disarm_kmmio_fault_page(struct kmmio_fault_page *f)
+/** Mark the given page as present. */
+static void disarm_kmmio_fault_page(unsigned long page, unsigned int *pglevel)
 {
-	bool tmp;
-	int ret = set_page_presence(f->page, f->old_presence, &tmp);
-	WARN_ONCE(ret < 0,
-			KERN_ERR "kmmio disarming 0x%08lx failed.\n", f->page);
-	f->armed = false;
+	set_page_present(page & PAGE_MASK, true, pglevel);
 }
 
 /*
@@ -233,32 +202,28 @@ int kmmio_handler(struct pt_regs *regs, unsigned long addr)
 
 	ctx = &get_cpu_var(kmmio_ctx);
 	if (ctx->active) {
+		disarm_kmmio_fault_page(faultpage->page, NULL);
 		if (addr == ctx->addr) {
 			/*
-			 * A second fault on the same page means some other
-			 * condition needs handling by do_page_fault(), the
-			 * page really not being present is the most common.
+			 * On SMP we sometimes get recursive probe hits on the
+			 * same address. Context is already saved, fall out.
 			 */
-			pr_debug("kmmio: secondary hit for 0x%08lx CPU %d.\n",
-					addr, smp_processor_id());
-
-			if (!faultpage->old_presence)
-				pr_info("kmmio: unexpected secondary hit for "
-					"address 0x%08lx on CPU %d.\n", addr,
-					smp_processor_id());
-		} else {
-			/*
-			 * Prevent overwriting already in-flight context.
-			 * This should not happen, let's hope disarming at
-			 * least prevents a panic.
-			 */
-			pr_emerg("kmmio: recursive probe hit on CPU %d, "
+			pr_debug("kmmio: duplicate probe hit on CPU %d, for "
+						"address 0x%08lx.\n",
+						smp_processor_id(), addr);
+			ret = 1;
+			goto no_kmmio_ctx;
+		}
+		/*
+		 * Prevent overwriting already in-flight context.
+		 * This should not happen, let's hope disarming at least
+		 * prevents a panic.
+		 */
+		pr_emerg("kmmio: recursive probe hit on CPU %d, "
 					"for address 0x%08lx. Ignoring.\n",
 					smp_processor_id(), addr);
-			pr_emerg("kmmio: previous hit was at 0x%08lx.\n",
-						ctx->addr);
-			disarm_kmmio_fault_page(faultpage);
-		}
+		pr_emerg("kmmio: previous hit was at 0x%08lx.\n",
+					ctx->addr);
 		goto no_kmmio_ctx;
 	}
 	ctx->active++;
@@ -279,7 +244,7 @@ int kmmio_handler(struct pt_regs *regs, unsigned long addr)
 	regs->flags &= ~X86_EFLAGS_IF;
 
 	/* Now we set present bit in PTE and single step. */
-	disarm_kmmio_fault_page(ctx->fpage);
+	disarm_kmmio_fault_page(ctx->fpage->page, NULL);
 
 	/*
 	 * If another cpu accesses the same page while we are stepping,
@@ -310,7 +275,7 @@ static int post_kmmio_handler(unsigned long condition, struct pt_regs *regs)
 	struct kmmio_context *ctx = &get_cpu_var(kmmio_ctx);
 
 	if (!ctx->active) {
-		pr_warning("kmmio: spurious debug trap on CPU %d.\n",
+		pr_debug("kmmio: spurious debug trap on CPU %d.\n",
 							smp_processor_id());
 		goto out;
 	}
@@ -318,11 +283,7 @@ static int post_kmmio_handler(unsigned long condition, struct pt_regs *regs)
 	if (ctx->probe && ctx->probe->post_handler)
 		ctx->probe->post_handler(ctx->probe, condition, regs);
 
-	/* Prevent racing against release_kmmio_fault_page(). */
-	spin_lock(&kmmio_lock);
-	if (ctx->fpage->count)
-		arm_kmmio_fault_page(ctx->fpage);
-	spin_unlock(&kmmio_lock);
+	arm_kmmio_fault_page(ctx->fpage->page, NULL);
 
 	regs->flags &= ~X86_EFLAGS_TF;
 	regs->flags |= ctx->saved_flags;
@@ -354,24 +315,20 @@ static int add_kmmio_fault_page(unsigned long page)
 	f = get_kmmio_fault_page(page);
 	if (f) {
 		if (!f->count)
-			arm_kmmio_fault_page(f);
+			arm_kmmio_fault_page(f->page, NULL);
 		f->count++;
 		return 0;
 	}
 
-	f = kzalloc(sizeof(*f), GFP_ATOMIC);
+	f = kmalloc(sizeof(*f), GFP_ATOMIC);
 	if (!f)
 		return -1;
 
 	f->count = 1;
 	f->page = page;
-
-	if (arm_kmmio_fault_page(f)) {
-		kfree(f);
-		return -1;
-	}
-
 	list_add_rcu(&f->list, kmmio_page_list(f->page));
+
+	arm_kmmio_fault_page(f->page, NULL);
 
 	return 0;
 }
@@ -390,7 +347,7 @@ static void release_kmmio_fault_page(unsigned long page,
 	f->count--;
 	BUG_ON(f->count < 0);
 	if (!f->count) {
-		disarm_kmmio_fault_page(f);
+		disarm_kmmio_fault_page(f->page, NULL);
 		f->release_next = *release_list;
 		*release_list = f;
 	}
@@ -451,24 +408,23 @@ static void rcu_free_kmmio_fault_pages(struct rcu_head *head)
 
 static void remove_kmmio_fault_pages(struct rcu_head *head)
 {
-	struct kmmio_delayed_release *dr =
-		container_of(head, struct kmmio_delayed_release, rcu);
+	struct kmmio_delayed_release *dr = container_of(
+						head,
+						struct kmmio_delayed_release,
+						rcu);
 	struct kmmio_fault_page *p = dr->release_list;
 	struct kmmio_fault_page **prevp = &dr->release_list;
 	unsigned long flags;
-
 	spin_lock_irqsave(&kmmio_lock, flags);
 	while (p) {
-		if (!p->count) {
+		if (!p->count)
 			list_del_rcu(&p->list);
-			prevp = &p->release_next;
-		} else {
+		else
 			*prevp = p->release_next;
-		}
+		prevp = &p->release_next;
 		p = p->release_next;
 	}
 	spin_unlock_irqrestore(&kmmio_lock, flags);
-
 	/* This is the real RCU destroy call. */
 	call_rcu(&dr->rcu, rcu_free_kmmio_fault_pages);
 }

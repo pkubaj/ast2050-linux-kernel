@@ -36,9 +36,10 @@ struct onenand_info {
 	struct onenand_chip	onenand;
 };
 
-static int __devinit generic_onenand_probe(struct platform_device *pdev)
+static int __devinit generic_onenand_probe(struct device *dev)
 {
 	struct onenand_info *info;
+	struct platform_device *pdev = to_platform_device(dev);
 	struct flash_platform_data *pdata = pdev->dev.platform_data;
 	struct resource *res = pdev->resource;
 	unsigned long size = res->end - res->start + 1;
@@ -48,7 +49,7 @@ static int __devinit generic_onenand_probe(struct platform_device *pdev)
 	if (!info)
 		return -ENOMEM;
 
-	if (!request_mem_region(res->start, size, pdev->dev.driver->name)) {
+	if (!request_mem_region(res->start, size, dev->driver->name)) {
 		err = -EBUSY;
 		goto out_free_info;
 	}
@@ -81,7 +82,7 @@ static int __devinit generic_onenand_probe(struct platform_device *pdev)
 #endif
 		err = add_mtd_device(&info->mtd);
 
-	platform_set_drvdata(pdev, info);
+	dev_set_drvdata(&pdev->dev, info);
 
 	return 0;
 
@@ -95,13 +96,14 @@ out_free_info:
 	return err;
 }
 
-static int __devexit generic_onenand_remove(struct platform_device *pdev)
+static int __devexit generic_onenand_remove(struct device *dev)
 {
-	struct onenand_info *info = platform_get_drvdata(pdev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct onenand_info *info = dev_get_drvdata(&pdev->dev);
 	struct resource *res = pdev->resource;
 	unsigned long size = res->end - res->start + 1;
 
-	platform_set_drvdata(pdev, NULL);
+	dev_set_drvdata(&pdev->dev, NULL);
 
 	if (info) {
 		if (info->parts)
@@ -118,11 +120,9 @@ static int __devexit generic_onenand_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver generic_onenand_driver = {
-	.driver = {
-		.name		= DRIVER_NAME,
-		.owner		= THIS_MODULE,
-	},
+static struct device_driver generic_onenand_driver = {
+	.name		= DRIVER_NAME,
+	.bus		= &platform_bus_type,
 	.probe		= generic_onenand_probe,
 	.remove		= __devexit_p(generic_onenand_remove),
 };
@@ -131,12 +131,12 @@ MODULE_ALIAS(DRIVER_NAME);
 
 static int __init generic_onenand_init(void)
 {
-	return platform_driver_register(&generic_onenand_driver);
+	return driver_register(&generic_onenand_driver);
 }
 
 static void __exit generic_onenand_exit(void)
 {
-	platform_driver_unregister(&generic_onenand_driver);
+	driver_unregister(&generic_onenand_driver);
 }
 
 module_init(generic_onenand_init);

@@ -9,8 +9,6 @@
  *
  */
 
-#define KMSG_COMPONENT "dasd"
-
 #include <linux/ctype.h>
 #include <linux/init.h>
 
@@ -93,14 +91,14 @@ dasd_default_erp_action(struct dasd_ccw_req *cqr)
 
         /* just retry - there is nothing to save ... I got no sense data.... */
         if (cqr->retries > 0) {
-		DBF_DEV_EVENT(DBF_DEBUG, device,
+		DEV_MESSAGE (KERN_DEBUG, device,
                              "default ERP called (%i retries left)",
                              cqr->retries);
 		cqr->lpm    = LPM_ANYPATH;
 		cqr->status = DASD_CQR_FILLED;
         } else {
-		dev_err(&device->cdev->dev,
-			"default ERP has run out of retries and failed\n");
+                DEV_MESSAGE (KERN_WARNING, device, "%s",
+			     "default ERP called (NO retry left)");
 		cqr->status = DASD_CQR_FAILED;
 		cqr->stopclk = get_clock();
         }
@@ -164,21 +162,8 @@ dasd_log_sense(struct dasd_ccw_req *cqr, struct irb *irb)
 		device->discipline->dump_sense(device, cqr, irb);
 }
 
-void
-dasd_log_sense_dbf(struct dasd_ccw_req *cqr, struct irb *irb)
-{
-	struct dasd_device *device;
-
-	device = cqr->startdev;
-	/* dump sense data to s390 debugfeature*/
-	if (device->discipline && device->discipline->dump_sense_dbf)
-		device->discipline->dump_sense_dbf(device, cqr, irb, "log");
-}
-EXPORT_SYMBOL(dasd_log_sense_dbf);
-
 EXPORT_SYMBOL(dasd_default_erp_action);
 EXPORT_SYMBOL(dasd_default_erp_postaction);
 EXPORT_SYMBOL(dasd_alloc_erp_request);
 EXPORT_SYMBOL(dasd_free_erp_request);
 EXPORT_SYMBOL(dasd_log_sense);
-

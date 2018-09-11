@@ -74,29 +74,15 @@ EXPORT_SYMBOL(uaccess);
  * Machine setup..
  */
 unsigned int console_mode = 0;
-EXPORT_SYMBOL(console_mode);
-
 unsigned int console_devno = -1;
-EXPORT_SYMBOL(console_devno);
-
 unsigned int console_irq = -1;
-EXPORT_SYMBOL(console_irq);
-
 unsigned long machine_flags;
-EXPORT_SYMBOL(machine_flags);
-
 unsigned long elf_hwcap = 0;
 char elf_platform[ELF_PLATFORM_SIZE];
 
 struct mem_chunk __initdata memory_chunk[MEMORY_CHUNKS];
 volatile int __cpu_logical_map[NR_CPUS]; /* logical cpu to cpu address */
-
-int __initdata memory_end_set;
-unsigned long __initdata memory_end;
-
-/* An array with a pointer to the lowcore of every CPU. */
-struct _lowcore *lowcore_ptr[NR_CPUS];
-EXPORT_SYMBOL(lowcore_ptr);
+static unsigned long __initdata memory_end;
 
 /*
  * This is set up by the setup-routine at boot-time
@@ -121,10 +107,13 @@ static struct resource data_resource = {
  */
 void __cpuinit cpu_init(void)
 {
+        int addr = hard_smp_processor_id();
+
         /*
          * Store processor id in lowcore (used e.g. in timer_interrupt)
          */
-	get_cpu_id(&S390_lowcore.cpu_id);
+	get_cpu_id(&S390_lowcore.cpu_data.cpu_id);
+        S390_lowcore.cpu_data.cpu_addr = addr;
 
         /*
          * Force FPU initialization:
@@ -134,7 +123,8 @@ void __cpuinit cpu_init(void)
 
 	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;
-	BUG_ON(current->mm);
+        if (current->mm)
+                BUG();
         enter_lazy_tlb(&init_mm, current);
 }
 
@@ -225,7 +215,7 @@ static void __init conmode_default(void)
 	}
 }
 
-#ifdef CONFIG_ZFCPDUMP
+#if defined(CONFIG_ZFCPDUMP) || defined(CONFIG_ZFCPDUMP_MODULE)
 static void __init setup_zfcpdump(unsigned int console_devno)
 {
 	static char str[41];
@@ -291,13 +281,16 @@ void (*pm_power_off)(void) = machine_power_off;
 static int __init early_parse_mem(char *p)
 {
 	memory_end = memparse(p, &p);
-	memory_end_set = 1;
 	return 0;
 }
 early_param("mem", early_parse_mem);
 
 #ifdef CONFIG_S390_SWITCH_AMODE
+#ifdef CONFIG_PGSTE
+unsigned int switch_amode = 1;
+#else
 unsigned int switch_amode = 0;
+#endif
 EXPORT_SYMBOL_GPL(switch_amode);
 
 static int set_amode_and_uaccess(unsigned long user_amode,
@@ -418,6 +411,7 @@ setup_lowcore(void)
 		PSW_ADDR_AMODE | (unsigned long) mcck_int_handler;
 	lc->io_new_psw.mask = psw_kernel_bits;
 	lc->io_new_psw.addr = PSW_ADDR_AMODE | (unsigned long) io_int_handler;
+	lc->ipl_device = S390_lowcore.ipl_device;
 	lc->clock_comparator = -1ULL;
 	lc->kernel_stack = ((unsigned long) &init_thread_union) + THREAD_SIZE;
 	lc->async_stack = (unsigned long)
@@ -437,7 +431,6 @@ setup_lowcore(void)
 	lc->vdso_per_cpu_data = (unsigned long) &lc->paste[0];
 #endif
 	set_prefix((u32)(unsigned long) lc);
-	lowcore_ptr[0] = lc;
 }
 
 static void __init
@@ -514,11 +507,9 @@ static void __init setup_memory_end(void)
 	unsigned long max_mem;
 	int i;
 
-#ifdef CONFIG_ZFCPDUMP
-	if (ipl_info.type == IPL_TYPE_FCP_DUMP) {
+#if defined(CONFIG_ZFCPDUMP) || defined(CONFIG_ZFCPDUMP_MODULE)
+	if (ipl_info.type == IPL_TYPE_FCP_DUMP)
 		memory_end = ZFCPDUMP_HSA_SIZE;
-		memory_end_set = 1;
-	}
 #endif
 	memory_size = 0;
 	memory_end &= PAGE_MASK;
@@ -681,6 +672,7 @@ setup_memory(void)
 static void __init setup_hwcaps(void)
 {
 	static const int stfl_bits[6] = { 0, 2, 7, 17, 19, 21 };
+	struct cpuinfo_S390 *cpuinfo = &S390_lowcore.cpu_data;
 	unsigned long long facility_list_extended;
 	unsigned int facility_list;
 	int i;
@@ -696,21 +688,14 @@ static void __init setup_hwcaps(void)
 	 *   Bit 17: the message-security assist is installed
 	 *   Bit 19: the long-displacement facility is installed
 	 *   Bit 21: the extended-immediate facility is installed
-	 *   Bit 22: extended-translation facility 3 is installed
-	 *   Bit 30: extended-translation facility 3 enhancement facility
 	 * These get translated to:
 	 *   HWCAP_S390_ESAN3 bit 0, HWCAP_S390_ZARCH bit 1,
 	 *   HWCAP_S390_STFLE bit 2, HWCAP_S390_MSA bit 3,
-	 *   HWCAP_S390_LDISP bit 4, HWCAP_S390_EIMM bit 5 and
-	 *   HWCAP_S390_ETF3EH bit 8 (22 && 30).
+	 *   HWCAP_S390_LDISP bit 4, and HWCAP_S390_EIMM bit 5.
 	 */
 	for (i = 0; i < 6; i++)
 		if (facility_list & (1UL << (31 - stfl_bits[i])))
 			elf_hwcap |= 1UL << i;
-
-	if ((facility_list & (1UL << (31 - 22)))
-	    && (facility_list & (1UL << (31 - 30))))
-		elf_hwcap |= 1UL << 8;
 
 	/*
 	 * Check for additional facilities with store-facility-list-extended.
@@ -720,22 +705,20 @@ static void __init setup_hwcaps(void)
 	 * How many facility words are stored depends on the number of
 	 * doublewords passed to the instruction. The additional facilites
 	 * are:
-	 *   Bit 42: decimal floating point facility is installed
-	 *   Bit 44: perform floating point operation facility is installed
+	 *   Bit 43: decimal floating point facility is installed
 	 * translated to:
-	 *   HWCAP_S390_DFP bit 6 (42 && 44).
+	 *   HWCAP_S390_DFP bit 6.
 	 */
 	if ((elf_hwcap & (1UL << 2)) &&
 	    __stfle(&facility_list_extended, 1) > 0) {
-		if ((facility_list_extended & (1ULL << (63 - 42)))
-		    && (facility_list_extended & (1ULL << (63 - 44))))
+		if (facility_list_extended & (1ULL << (64 - 43)))
 			elf_hwcap |= 1UL << 6;
 	}
 
 	if (MACHINE_HAS_HPAGE)
 		elf_hwcap |= 1UL << 7;
 
-	switch (S390_lowcore.cpu_id.machine) {
+	switch (cpuinfo->cpu_id.machine) {
 	case 0x9672:
 #if !defined(CONFIG_64BIT)
 	default:	/* Use "g5" as default for 31 bit kernels. */
@@ -828,7 +811,7 @@ setup_arch(char **cmdline_p)
 	setup_lowcore();
 
         cpu_init();
-	__cpu_logical_map[0] = stap();
+        __cpu_logical_map[0] = S390_lowcore.cpu_data.cpu_addr;
 	s390_init_cpu_topology();
 
 	/*

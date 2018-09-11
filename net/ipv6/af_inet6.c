@@ -72,10 +72,6 @@ MODULE_LICENSE("GPL");
 static struct list_head inetsw6[SOCK_MAX];
 static DEFINE_SPINLOCK(inetsw6_lock);
 
-static int disable_ipv6 = 0;
-module_param_named(disable, disable_ipv6, int, 0);
-MODULE_PARM_DESC(disable, "Disable IPv6 such that it is non-functional");
-
 static __inline__ struct ipv6_pinfo *inet6_sk_generic(struct sock *sk)
 {
 	const int offset = sk->sk_prot->obj_size - sizeof(struct ipv6_pinfo);
@@ -276,26 +272,11 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
 	/* Check if the address belongs to the host. */
 	if (addr_type == IPV6_ADDR_MAPPED) {
-		int chk_addr_ret;
-
-		/* Binding to v4-mapped address on a v6-only socket
-		 * makes no sense
-		 */
-		if (np->ipv6only) {
-			err = -EINVAL;
+		v4addr = addr->sin6_addr.s6_addr32[3];
+		if (inet_addr_type(net, v4addr) != RTN_LOCAL) {
+			err = -EADDRNOTAVAIL;
 			goto out;
 		}
-
-		/* Reproduce AF_INET checks to make the bindings consitant */
-		v4addr = addr->sin6_addr.s6_addr32[3];
-		chk_addr_ret = inet_addr_type(net, v4addr);
-		if (!sysctl_ip_nonlocal_bind &&
-		    !(inet->freebind || inet->transparent) &&
-		    v4addr != htonl(INADDR_ANY) &&
-		    chk_addr_ret != RTN_LOCAL &&
-		    chk_addr_ret != RTN_MULTICAST &&
-		    chk_addr_ret != RTN_BROADCAST)
-			goto out;
 	} else {
 		if (addr_type != IPV6_ADDR_ANY) {
 			struct net_device *dev = NULL;
@@ -354,11 +335,8 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		goto out;
 	}
 
-	if (addr_type != IPV6_ADDR_ANY) {
+	if (addr_type != IPV6_ADDR_ANY)
 		sk->sk_userlocks |= SOCK_BINDADDR_LOCK;
-		if (addr_type != IPV6_ADDR_MAPPED)
-			np->ipv6only = 1;
-	}
 	if (snum)
 		sk->sk_userlocks |= SOCK_BINDPORT_LOCK;
 	inet->sport = htons(inet->num);
@@ -911,7 +889,7 @@ out_unlock:
 	return err;
 }
 
-static struct packet_type ipv6_packet_type __read_mostly = {
+static struct packet_type ipv6_packet_type = {
 	.type = cpu_to_be16(ETH_P_IPV6),
 	.func = ipv6_rcv,
 	.gso_send_check = ipv6_gso_send_check,
@@ -1023,20 +1001,9 @@ static int __init inet6_init(void)
 {
 	struct sk_buff *dummy_skb;
 	struct list_head *r;
-	int err = 0;
+	int err;
 
 	BUILD_BUG_ON(sizeof(struct inet6_skb_parm) > sizeof(dummy_skb->cb));
-
-	/* Register the socket-side information for inet6_create.  */
-	for(r = &inetsw6[0]; r < &inetsw6[SOCK_MAX]; ++r)
-		INIT_LIST_HEAD(r);
-
-	if (disable_ipv6) {
-		printk(KERN_INFO
-		       "IPv6: Loaded, but administratively disabled, "
-		       "reboot required to enable\n");
-		goto out;
-	}
 
 	err = proto_register(&tcpv6_prot, 1);
 	if (err)
@@ -1054,6 +1021,10 @@ static int __init inet6_init(void)
 	if (err)
 		goto out_unregister_udplite_proto;
 
+
+	/* Register the socket-side information for inet6_create.  */
+	for(r = &inetsw6[0]; r < &inetsw6[SOCK_MAX]; ++r)
+		INIT_LIST_HEAD(r);
 
 	/* We MUST register RAW sockets before we create the ICMP6,
 	 * IGMP6, or NDISC control sockets.
@@ -1220,9 +1191,6 @@ module_init(inet6_init);
 
 static void __exit inet6_exit(void)
 {
-	if (disable_ipv6)
-		return;
-
 	/* First of all disallow new sockets creation. */
 	sock_unregister(PF_INET6);
 	/* Disallow any further netlink messages */

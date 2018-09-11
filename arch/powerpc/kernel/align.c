@@ -367,24 +367,27 @@ static int emulate_multiple(struct pt_regs *regs, unsigned char __user *addr,
 static int emulate_fp_pair(unsigned char __user *addr, unsigned int reg,
 			   unsigned int flags)
 {
-	char *ptr0 = (char *) &current->thread.TS_FPR(reg);
-	char *ptr1 = (char *) &current->thread.TS_FPR(reg+1);
-	int i, ret, sw = 0;
+	char *ptr = (char *) &current->thread.TS_FPR(reg);
+	int i, ret;
 
 	if (!(flags & F))
 		return 0;
 	if (reg & 1)
 		return 0;	/* invalid form: FRS/FRT must be even */
-	if (flags & SW)
-		sw = 7;
-	ret = 0;
-	for (i = 0; i < 8; ++i) {
-		if (!(flags & ST)) {
-			ret |= __get_user(ptr0[i^sw], addr + i);
-			ret |= __get_user(ptr1[i^sw], addr + i + 8);
-		} else {
-			ret |= __put_user(ptr0[i^sw], addr + i);
-			ret |= __put_user(ptr1[i^sw], addr + i + 8);
+	if (!(flags & SW)) {
+		/* not byte-swapped - easy */
+		if (!(flags & ST))
+			ret = __copy_from_user(ptr, addr, 16);
+		else
+			ret = __copy_to_user(addr, ptr, 16);
+	} else {
+		/* each FPR value is byte-swapped separately */
+		ret = 0;
+		for (i = 0; i < 16; ++i) {
+			if (!(flags & ST))
+				ret |= __get_user(ptr[i^7], addr + i);
+			else
+				ret |= __put_user(ptr[i^7], addr + i);
 		}
 	}
 	if (ret)
@@ -643,15 +646,10 @@ static int emulate_vsx(unsigned char __user *addr, unsigned int reg,
 		       unsigned int areg, struct pt_regs *regs,
 		       unsigned int flags, unsigned int length)
 {
-	char *ptr;
+	char *ptr = (char *) &current->thread.TS_FPR(reg);
 	int ret = 0;
 
 	flush_vsx_to_thread(current);
-
-	if (reg < 32)
-		ptr = (char *) &current->thread.TS_FPR(reg);
-	else
-		ptr = (char *) &current->thread.vr[reg - 32];
 
 	if (flags & ST)
 		ret = __copy_to_user(addr, ptr, length);

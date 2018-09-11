@@ -16,13 +16,11 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
-#include <linux/platform_device.h>
 #include <linux/watchdog.h>
 #include <linux/init.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
 #include <linux/spinlock.h>
-#include <plat/orion5x_wdt.h>
 
 /*
  * Watchdog timer block registers.
@@ -31,14 +29,12 @@
 #define  WDT_EN			0x0010
 #define WDT_VAL			(TIMER_VIRT_BASE + 0x0024)
 
-#define WDT_MAX_CYCLE_COUNT	0xffffffff
+#define WDT_MAX_DURATION	(0xffffffff / ORION5X_TCLK)
 #define WDT_IN_USE		0
 #define WDT_OK_TO_CLOSE		1
 
 static int nowayout = WATCHDOG_NOWAYOUT;
-static int heartbeat = -1;		/* module parameter (seconds) */
-static unsigned int wdt_max_duration;	/* (seconds) */
-static unsigned int wdt_tclk;
+static int heartbeat =  WDT_MAX_DURATION;	/* (seconds) */
 static unsigned long wdt_status;
 static spinlock_t wdt_lock;
 
@@ -49,7 +45,7 @@ static void wdt_enable(void)
 	spin_lock(&wdt_lock);
 
 	/* Set watchdog duration */
-	writel(wdt_tclk * heartbeat, WDT_VAL);
+	writel(ORION5X_TCLK * heartbeat, WDT_VAL);
 
 	/* Clear watchdog timer interrupt */
 	reg = readl(BRIDGE_CAUSE);
@@ -91,7 +87,7 @@ static void wdt_disable(void)
 static int orion5x_wdt_get_timeleft(int *time_left)
 {
 	spin_lock(&wdt_lock);
-	*time_left = readl(WDT_VAL) / wdt_tclk;
+	*time_left = readl(WDT_VAL) / ORION5X_TCLK;
 	spin_unlock(&wdt_lock);
 	return 0;
 }
@@ -161,7 +157,7 @@ static long orion5x_wdt_ioctl(struct file *file, unsigned int cmd,
 		if (ret)
 			break;
 
-		if (time <= 0 || time > wdt_max_duration) {
+		if (time <= 0 || time > WDT_MAX_DURATION) {
 			ret = -EINVAL;
 			break;
 		}
@@ -213,69 +209,23 @@ static struct miscdevice orion5x_wdt_miscdev = {
 	.fops		= &orion5x_wdt_fops,
 };
 
-static int __devinit orion5x_wdt_probe(struct platform_device *pdev)
+static int __init orion5x_wdt_init(void)
 {
-	struct orion5x_wdt_platform_data *pdata = pdev->dev.platform_data;
 	int ret;
 
-	if (pdata) {
-		wdt_tclk = pdata->tclk;
-	} else {
-		printk(KERN_ERR "Orion5x Watchdog misses platform data\n");
-		return -ENODEV;
-	}
-
-	if (orion5x_wdt_miscdev.parent)
-		return -EBUSY;
-	orion5x_wdt_miscdev.parent = &pdev->dev;
-
-	wdt_max_duration = WDT_MAX_CYCLE_COUNT / wdt_tclk;
-	if (heartbeat <= 0 || heartbeat > wdt_max_duration)
-		heartbeat = wdt_max_duration;
+	spin_lock_init(&wdt_lock);
 
 	ret = misc_register(&orion5x_wdt_miscdev);
-	if (ret)
-		return ret;
-
-	printk(KERN_INFO "Orion5x Watchdog Timer: Initial timeout %d sec%s\n",
-				heartbeat, nowayout ? ", nowayout" : "");
-	return 0;
-}
-
-static int __devexit orion5x_wdt_remove(struct platform_device *pdev)
-{
-	int ret;
-
-	if (test_bit(WDT_IN_USE, &wdt_status)) {
-		wdt_disable();
-		clear_bit(WDT_IN_USE, &wdt_status);
-	}
-
-	ret = misc_deregister(&orion5x_wdt_miscdev);
-	if (!ret)
-		orion5x_wdt_miscdev.parent = NULL;
+	if (ret == 0)
+		printk("Orion5x Watchdog Timer: heartbeat %d sec\n",
+								heartbeat);
 
 	return ret;
 }
 
-static struct platform_driver orion5x_wdt_driver = {
-	.probe		= orion5x_wdt_probe,
-	.remove		= __devexit_p(orion5x_wdt_remove),
-	.driver		= {
-		.owner	= THIS_MODULE,
-		.name	= "orion5x_wdt",
-	},
-};
-
-static int __init orion5x_wdt_init(void)
-{
-	spin_lock_init(&wdt_lock);
-	return platform_driver_register(&orion5x_wdt_driver);
-}
-
 static void __exit orion5x_wdt_exit(void)
 {
-	platform_driver_unregister(&orion5x_wdt_driver);
+	misc_deregister(&orion5x_wdt_miscdev);
 }
 
 module_init(orion5x_wdt_init);
@@ -285,7 +235,8 @@ MODULE_AUTHOR("Sylver Bruneau <sylver.bruneau@googlemail.com>");
 MODULE_DESCRIPTION("Orion5x Processor Watchdog");
 
 module_param(heartbeat, int, 0);
-MODULE_PARM_DESC(heartbeat, "Watchdog heartbeat in seconds");
+MODULE_PARM_DESC(heartbeat, "Watchdog heartbeat in seconds (default is "
+					__MODULE_STRING(WDT_MAX_DURATION) ")");
 
 module_param(nowayout, int, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started");

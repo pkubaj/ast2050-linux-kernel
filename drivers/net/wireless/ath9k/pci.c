@@ -52,8 +52,8 @@ static void ath_pci_cleanup(struct ath_softc *sc)
 	struct pci_dev *pdev = to_pci_dev(sc->dev);
 
 	pci_iounmap(pdev, sc->mem);
-	pci_disable_device(pdev);
 	pci_release_region(pdev, 0);
+	pci_disable_device(pdev);
 }
 
 static bool ath_pci_eeprom_read(struct ath_hw *ah, u32 off, u16 *data)
@@ -63,8 +63,7 @@ static bool ath_pci_eeprom_read(struct ath_hw *ah, u32 off, u16 *data)
 	if (!ath9k_hw_wait(ah,
 			   AR_EEPROM_STATUS_DATA,
 			   AR_EEPROM_STATUS_DATA_BUSY |
-			   AR_EEPROM_STATUS_DATA_PROT_ACCESS, 0,
-			   AH_WAIT_TIMEOUT)) {
+			   AR_EEPROM_STATUS_DATA_PROT_ACCESS, 0)) {
 		return false;
 	}
 
@@ -83,7 +82,6 @@ static struct ath_bus_ops ath_pci_bus_ops = {
 static int ath_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	void __iomem *mem;
-	struct ath_wiphy *aphy;
 	struct ath_softc *sc;
 	struct ieee80211_hw *hw;
 	u8 csz;
@@ -156,8 +154,7 @@ static int ath_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto bad1;
 	}
 
-	hw = ieee80211_alloc_hw(sizeof(struct ath_wiphy) +
-				sizeof(struct ath_softc), &ath9k_ops);
+	hw = ieee80211_alloc_hw(sizeof(struct ath_softc), &ath9k_ops);
 	if (hw == NULL) {
 		printk(KERN_ERR "ath_pci: no memory for ieee80211_hw\n");
 		goto bad2;
@@ -166,11 +163,7 @@ static int ath_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	SET_IEEE80211_DEV(hw, &pdev->dev);
 	pci_set_drvdata(pdev, hw);
 
-	aphy = hw->priv;
-	sc = (struct ath_softc *) (aphy + 1);
-	aphy->sc = sc;
-	aphy->hw = hw;
-	sc->pri_wiphy = aphy;
+	sc = hw->priv;
 	sc->hw = hw;
 	sc->dev = &pdev->dev;
 	sc->mem = mem;
@@ -220,8 +213,7 @@ bad:
 static void ath_pci_remove(struct pci_dev *pdev)
 {
 	struct ieee80211_hw *hw = pci_get_drvdata(pdev);
-	struct ath_wiphy *aphy = hw->priv;
-	struct ath_softc *sc = aphy->sc;
+	struct ath_softc *sc = hw->priv;
 
 	ath_cleanup(sc);
 }
@@ -231,8 +223,7 @@ static void ath_pci_remove(struct pci_dev *pdev)
 static int ath_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	struct ieee80211_hw *hw = pci_get_drvdata(pdev);
-	struct ath_wiphy *aphy = hw->priv;
-	struct ath_softc *sc = aphy->sc;
+	struct ath_softc *sc = hw->priv;
 
 	ath9k_hw_set_gpio(sc->sc_ah, ATH_LED_PIN, 1);
 
@@ -251,8 +242,7 @@ static int ath_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 static int ath_pci_resume(struct pci_dev *pdev)
 {
 	struct ieee80211_hw *hw = pci_get_drvdata(pdev);
-	struct ath_wiphy *aphy = hw->priv;
-	struct ath_softc *sc = aphy->sc;
+	struct ath_softc *sc = hw->priv;
 	u32 val;
 	int err;
 
@@ -302,7 +292,7 @@ static struct pci_driver ath_pci_driver = {
 #endif /* CONFIG_PM */
 };
 
-int ath_pci_init(void)
+int __init ath_pci_init(void)
 {
 	return pci_register_driver(&ath_pci_driver);
 }

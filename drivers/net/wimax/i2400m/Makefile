@@ -8,7 +8,6 @@ i2400m-y :=		\
 	driver.o	\
 	fw.o		\
 	op-rfkill.o	\
-	sysfs.o		\
 	netdev.o	\
 	tx.o		\
 	rx.o

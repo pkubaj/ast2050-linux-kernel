@@ -286,32 +286,33 @@ static void start_mpc(struct mpoa_client *mpc, struct net_device *dev)
 {
 
 	dprintk("mpoa: (%s) start_mpc:\n", mpc->dev->name);
-	if (!dev->netdev_ops)
-		printk("mpoa: (%s) start_mpc  not starting\n", dev->name);
-	else {
-		mpc->old_ops = dev->netdev_ops;
-		mpc->new_ops = *mpc->old_ops;
-		mpc->new_ops.ndo_start_xmit = mpc_send_packet;
-		dev->netdev_ops = &mpc->new_ops;
+	if (dev->hard_start_xmit == NULL) {
+		printk("mpoa: (%s) start_mpc: dev->hard_start_xmit == NULL, not starting\n",
+		       dev->name);
+		return;
 	}
+	mpc->old_hard_start_xmit = dev->hard_start_xmit;
+	dev->hard_start_xmit = mpc_send_packet;
+
+	return;
 }
 
 static void stop_mpc(struct mpoa_client *mpc)
 {
-	struct net_device *dev = mpc->dev;
+
 	dprintk("mpoa: (%s) stop_mpc:", mpc->dev->name);
 
 	/* Lets not nullify lec device's dev->hard_start_xmit */
-	if (dev->netdev_ops != &mpc->new_ops) {
+	if (mpc->dev->hard_start_xmit != mpc_send_packet) {
 		dprintk(" mpc already stopped, not fatal\n");
 		return;
 	}
 	dprintk("\n");
-
-	dev->netdev_ops = mpc->old_ops;
-	mpc->old_ops = NULL;
-
+	mpc->dev->hard_start_xmit = mpc->old_hard_start_xmit;
+	mpc->old_hard_start_xmit = NULL;
 	/* close_shortcuts(mpc);    ??? FIXME */
+
+	return;
 }
 
 static const char *mpoa_device_type_string(char type) __attribute__ ((unused));
@@ -530,6 +531,7 @@ static int send_via_shortcut(struct sk_buff *skb, struct mpoa_client *mpc)
  */
 static int mpc_send_packet(struct sk_buff *skb, struct net_device *dev)
 {
+	int retval;
 	struct mpoa_client *mpc;
 	struct ethhdr *eth;
 	int i = 0;
@@ -559,7 +561,9 @@ static int mpc_send_packet(struct sk_buff *skb, struct net_device *dev)
 	}
 
  non_ip:
-	return mpc->old_ops->ndo_start_xmit(skb,dev);
+	retval = mpc->old_hard_start_xmit(skb,dev);
+
+	return retval;
 }
 
 static int atm_mpoa_vcc_attach(struct atm_vcc *vcc, void __user *arg)

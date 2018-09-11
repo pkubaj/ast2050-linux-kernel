@@ -153,7 +153,7 @@ static struct resource *iodyn_find_io_region(unsigned long base, int num,
 		unsigned long align, struct pcmcia_socket *s)
 {
 	struct resource *res = make_resource(0, num, IORESOURCE_IO,
-					     dev_name(&s->dev));
+					     s->dev.bus_id);
 	struct pcmcia_align_data data;
 	unsigned long min = base;
 	int ret;

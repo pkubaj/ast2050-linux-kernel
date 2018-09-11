@@ -17,7 +17,7 @@
 #ifndef MAC_H
 #define MAC_H
 
-#define RXSTATUS_RATE(ah, ads) (AR_SREV_5416_20_OR_LATER(ah) ?		\
+#define RXSTATUS_RATE(ah, ads) (AR_SREV_5416_V20_OR_LATER(ah) ?		\
 				MS(ads->ds_rxstatus0, AR_RxRate) :	\
 				(ads->ds_rxstatus3 >> 2) & 0xFF)
 
@@ -566,11 +566,9 @@ enum ath9k_rx_filter {
 	ATH9K_RX_FILTER_BEACON = 0x00000010,
 	ATH9K_RX_FILTER_PROM = 0x00000020,
 	ATH9K_RX_FILTER_PROBEREQ = 0x00000080,
-	ATH9K_RX_FILTER_PHYERR = 0x00000100,
-	ATH9K_RX_FILTER_MYBEACON = 0x00000200,
 	ATH9K_RX_FILTER_PSPOLL = 0x00004000,
+	ATH9K_RX_FILTER_PHYERR = 0x00000100,
 	ATH9K_RX_FILTER_PHYRADAR = 0x00002000,
-	ATH9K_RX_FILTER_MCAST_BCAST_ALL = 0x00008000,
 };
 
 #define ATH9K_RATESERIES_RTS_CTS  0x0001
@@ -589,11 +587,9 @@ struct ath9k_keyval {
 	u8 kv_type;
 	u8 kv_pad;
 	u16 kv_len;
-	u8 kv_val[16]; /* TK */
-	u8 kv_mic[8]; /* Michael MIC key */
-	u8 kv_txmic[8]; /* Michael MIC TX key (used only if the hardware
-			 * supports both MIC keys in the same key cache entry;
-			 * in that case, kv_mic is the RX key) */
+	u8 kv_val[16];
+	u8 kv_mic[8];
+	u8 kv_txmic[8];
 };
 
 enum ath9k_key_type {

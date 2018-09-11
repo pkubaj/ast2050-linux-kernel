@@ -35,8 +35,7 @@
 #define MTU2_TSR_1	0xfffe4385
 #define MTU2_TCNT_1	0xfffe4386	/* 16-bit counter */
 
-#if defined(CONFIG_CPU_SUBTYPE_SH7201) || \
-    defined(CONFIG_CPU_SUBTYPE_SH7203)
+#if defined(CONFIG_CPU_SUBTYPE_SH7201)
 #define MTU2_TGRA_1	0xfffe4388
 #else
 #define MTU2_TGRA_1	0xfffe438a

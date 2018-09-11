@@ -63,9 +63,9 @@
 #define merge_64(r1, r2) ((((r2) & 0xffffffffUL) << 32) + ((r1) & 0xffffffffUL))
 #endif
 
-SYSCALL_DEFINE6(32_mmap2, unsigned long, addr, unsigned long, len,
-	unsigned long, prot, unsigned long, flags, unsigned long, fd,
-	unsigned long, pgoff)
+asmlinkage unsigned long
+sys32_mmap2(unsigned long addr, unsigned long len, unsigned long prot,
+         unsigned long flags, unsigned long fd, unsigned long pgoff)
 {
 	struct file * file = NULL;
 	unsigned long error;
@@ -121,21 +121,21 @@ struct rlimit32 {
 	int	rlim_max;
 };
 
-SYSCALL_DEFINE4(32_truncate64, const char __user *, path,
-	unsigned long, __dummy, unsigned long, a2, unsigned long, a3)
+asmlinkage long sys32_truncate64(const char __user * path,
+	unsigned long __dummy, int a2, int a3)
 {
 	return sys_truncate(path, merge_64(a2, a3));
 }
 
-SYSCALL_DEFINE4(32_ftruncate64, unsigned long, fd, unsigned long, __dummy,
-	unsigned long, a2, unsigned long, a3)
+asmlinkage long sys32_ftruncate64(unsigned int fd, unsigned long __dummy,
+	int a2, int a3)
 {
 	return sys_ftruncate(fd, merge_64(a2, a3));
 }
 
-SYSCALL_DEFINE5(32_llseek, unsigned long, fd, unsigned long, offset_high,
-	unsigned long, offset_low, loff_t __user *, result,
-	unsigned long, origin)
+asmlinkage int sys32_llseek(unsigned int fd, unsigned int offset_high,
+			    unsigned int offset_low, loff_t __user * result,
+			    unsigned int origin)
 {
 	return sys_llseek(fd, offset_high, offset_low, result, origin);
 }
@@ -144,20 +144,20 @@ SYSCALL_DEFINE5(32_llseek, unsigned long, fd, unsigned long, offset_high,
    lseek back to original location.  They fail just like lseek does on
    non-seekable files.  */
 
-SYSCALL_DEFINE6(32_pread, unsigned long, fd, char __user *, buf, size_t, count,
-	unsigned long, unused, unsigned long, a4, unsigned long, a5)
+asmlinkage ssize_t sys32_pread(unsigned int fd, char __user * buf,
+			       size_t count, u32 unused, u64 a4, u64 a5)
 {
 	return sys_pread64(fd, buf, count, merge_64(a4, a5));
 }
 
-SYSCALL_DEFINE6(32_pwrite, unsigned int, fd, const char __user *, buf,
-	size_t, count, u32, unused, u64, a4, u64, a5)
+asmlinkage ssize_t sys32_pwrite(unsigned int fd, const char __user * buf,
+			        size_t count, u32 unused, u64 a4, u64 a5)
 {
 	return sys_pwrite64(fd, buf, count, merge_64(a4, a5));
 }
 
-SYSCALL_DEFINE2(32_sched_rr_get_interval, compat_pid_t, pid,
-	struct compat_timespec __user *, interval)
+asmlinkage int sys32_sched_rr_get_interval(compat_pid_t pid,
+	struct compat_timespec __user *interval)
 {
 	struct timespec t;
 	int ret;
@@ -174,8 +174,8 @@ SYSCALL_DEFINE2(32_sched_rr_get_interval, compat_pid_t, pid,
 
 #ifdef CONFIG_SYSVIPC
 
-SYSCALL_DEFINE6(32_ipc, u32, call, long, first, long, second, long, third,
-	unsigned long, ptr, unsigned long, fifth)
+asmlinkage long
+sys32_ipc(u32 call, int first, int second, int third, u32 ptr, u32 fifth)
 {
 	int version, err;
 
@@ -233,8 +233,8 @@ SYSCALL_DEFINE6(32_ipc, u32, call, long, first, long, second, long, third,
 
 #else
 
-SYSCALL_DEFINE6(32_ipc, u32, call, int, first, int, second, int, third,
-	u32, ptr, u32, fifth)
+asmlinkage long
+sys32_ipc(u32 call, int first, int second, int third, u32 ptr, u32 fifth)
 {
 	return -ENOSYS;
 }
@@ -242,7 +242,7 @@ SYSCALL_DEFINE6(32_ipc, u32, call, int, first, int, second, int, third,
 #endif /* CONFIG_SYSVIPC */
 
 #ifdef CONFIG_MIPS32_N32
-SYSCALL_DEFINE4(n32_semctl, int, semid, int, semnum, int, cmd, u32, arg)
+asmlinkage long sysn32_semctl(int semid, int semnum, int cmd, u32 arg)
 {
 	/* compat_sys_semctl expects a pointer to union semun */
 	u32 __user *uptr = compat_alloc_user_space(sizeof(u32));
@@ -251,14 +251,13 @@ SYSCALL_DEFINE4(n32_semctl, int, semid, int, semnum, int, cmd, u32, arg)
 	return compat_sys_semctl(semid, semnum, cmd, uptr);
 }
 
-SYSCALL_DEFINE4(n32_msgsnd, int, msqid, u32, msgp, unsigned int, msgsz,
-	int, msgflg)
+asmlinkage long sysn32_msgsnd(int msqid, u32 msgp, unsigned msgsz, int msgflg)
 {
 	return compat_sys_msgsnd(msqid, msgsz, msgflg, compat_ptr(msgp));
 }
 
-SYSCALL_DEFINE5(n32_msgrcv, int, msqid, u32, msgp, size_t, msgsz,
-	int, msgtyp, int, msgflg)
+asmlinkage long sysn32_msgrcv(int msqid, u32 msgp, size_t msgsz, int msgtyp,
+			      int msgflg)
 {
 	return compat_sys_msgrcv(msqid, msgsz, msgtyp, msgflg, IPC_64,
 				 compat_ptr(msgp));
@@ -278,7 +277,7 @@ struct sysctl_args32
 
 #ifdef CONFIG_SYSCTL_SYSCALL
 
-SYSCALL_DEFINE1(32_sysctl, struct sysctl_args32 __user *, args)
+asmlinkage long sys32_sysctl(struct sysctl_args32 __user *args)
 {
 	struct sysctl_args32 tmp;
 	int error;
@@ -317,16 +316,9 @@ SYSCALL_DEFINE1(32_sysctl, struct sysctl_args32 __user *, args)
 	return error;
 }
 
-#else
-
-SYSCALL_DEFINE1(32_sysctl, struct sysctl_args32 __user *, args)
-{
-	return -ENOSYS;
-}
-
 #endif /* CONFIG_SYSCTL_SYSCALL */
 
-SYSCALL_DEFINE1(32_newuname, struct new_utsname __user *, name)
+asmlinkage long sys32_newuname(struct new_utsname __user * name)
 {
 	int ret = 0;
 
@@ -342,7 +334,7 @@ SYSCALL_DEFINE1(32_newuname, struct new_utsname __user *, name)
 	return ret;
 }
 
-SYSCALL_DEFINE1(32_personality, unsigned long, personality)
+asmlinkage int sys32_personality(unsigned long personality)
 {
 	int ret;
 	personality &= 0xffffffff;
@@ -365,7 +357,7 @@ struct ustat32 {
 
 extern asmlinkage long sys_ustat(dev_t dev, struct ustat __user * ubuf);
 
-SYSCALL_DEFINE2(32_ustat, dev_t, dev, struct ustat32 __user *, ubuf32)
+asmlinkage int sys32_ustat(dev_t dev, struct ustat32 __user * ubuf32)
 {
 	int err;
 	struct ustat tmp;
@@ -389,8 +381,8 @@ out:
 	return err;
 }
 
-SYSCALL_DEFINE4(32_sendfile, long, out_fd, long, in_fd,
-	compat_off_t __user *, offset, s32, count)
+asmlinkage int sys32_sendfile(int out_fd, int in_fd, compat_off_t __user *offset,
+	s32 count)
 {
 	mm_segment_t old_fs = get_fs();
 	int ret;

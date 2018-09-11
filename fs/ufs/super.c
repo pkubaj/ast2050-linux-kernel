@@ -41,7 +41,7 @@
  * Stefan Reinauer <stepan@home.culture.mipt.ru>
  *
  * Module usage counts added on 96/04/29 by
- * Gertjan van Wingerde <gwingerde@gmail.com>
+ * Gertjan van Wingerde <gertjan@cs.vu.nl>
  *
  * Clean swab support on 19970406 by
  * Francois-Rene Rideau <fare@tunes.org>

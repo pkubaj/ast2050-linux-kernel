@@ -780,7 +780,8 @@ static int sirdev_alloc_buffers(struct sir_dev *dev)
 
 static void sirdev_free_buffers(struct sir_dev *dev)
 {
-	kfree_skb(dev->rx_buff.skb);
+	if (dev->rx_buff.skb)
+		kfree_skb(dev->rx_buff.skb);
 	kfree(dev->tx_buff.head);
 	dev->rx_buff.head = dev->tx_buff.head = NULL;
 	dev->rx_buff.skb = NULL;
@@ -865,12 +866,6 @@ out:
 	return 0;
 }
 
-static const struct net_device_ops sirdev_ops = {
-	.ndo_start_xmit	= sirdev_hard_xmit,
-	.ndo_open	= sirdev_open,
-	.ndo_stop	= sirdev_close,
-	.ndo_do_ioctl	= sirdev_ioctl,
-};
 /* ----------------------------------------------------------------------------- */
 
 struct sir_dev * sirdev_get_instance(const struct sir_driver *drv, const char *name)
@@ -914,7 +909,10 @@ struct sir_dev * sirdev_get_instance(const struct sir_driver *drv, const char *n
 	dev->netdev = ndev;
 
 	/* Override the network functions we need to use */
-	ndev->netdev_ops = &sirdev_ops;
+	ndev->hard_start_xmit = sirdev_hard_xmit;
+	ndev->open = sirdev_open;
+	ndev->stop = sirdev_close;
+	ndev->do_ioctl = sirdev_ioctl;
 
 	if (register_netdev(ndev)) {
 		IRDA_ERROR("%s(), register_netdev() failed!\n", __func__);

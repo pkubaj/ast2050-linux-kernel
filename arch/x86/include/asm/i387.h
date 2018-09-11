@@ -172,13 +172,7 @@ static inline void __save_init_fpu(struct task_struct *tsk)
 
 #else  /* CONFIG_X86_32 */
 
-#ifdef CONFIG_MATH_EMULATION
-extern void finit_task(struct task_struct *tsk);
-#else
-static inline void finit_task(struct task_struct *tsk)
-{
-}
-#endif
+extern void finit(void);
 
 static inline void tolerant_fwait(void)
 {

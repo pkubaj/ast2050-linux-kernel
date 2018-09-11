@@ -54,7 +54,7 @@ MODULE_LICENSE("GPL");
 /* ---------------------------------------------------------------------- */
 /* our structs                                                            */
 
-#define MAXREGS 256
+#define MAXREGS 64
 
 struct CHIPSTATE;
 typedef int  (*getvalue)(int);

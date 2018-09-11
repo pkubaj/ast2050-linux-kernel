@@ -447,7 +447,10 @@ static void pa11_dma_free_consistent (struct device *dev, size_t size, void *vad
 
 static dma_addr_t pa11_dma_map_single(struct device *dev, void *addr, size_t size, enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	if (direction == DMA_NONE) {
+		printk(KERN_ERR "pa11_dma_map_single(PCI_DMA_NONE) called by %p\n", __builtin_return_address(0));
+		BUG();
+	}
 
 	flush_kernel_dcache_range((unsigned long) addr, size);
 	return virt_to_phys(addr);
@@ -455,7 +458,10 @@ static dma_addr_t pa11_dma_map_single(struct device *dev, void *addr, size_t siz
 
 static void pa11_dma_unmap_single(struct device *dev, dma_addr_t dma_handle, size_t size, enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	if (direction == DMA_NONE) {
+		printk(KERN_ERR "pa11_dma_unmap_single(PCI_DMA_NONE) called by %p\n", __builtin_return_address(0));
+		BUG();
+	}
 
 	if (direction == DMA_TO_DEVICE)
 	    return;
@@ -474,7 +480,8 @@ static int pa11_dma_map_sg(struct device *dev, struct scatterlist *sglist, int n
 {
 	int i;
 
-	BUG_ON(direction == DMA_NONE);
+	if (direction == DMA_NONE)
+	    BUG();
 
 	for (i = 0; i < nents; i++, sglist++ ) {
 		unsigned long vaddr = sg_virt_addr(sglist);
@@ -489,7 +496,8 @@ static void pa11_dma_unmap_sg(struct device *dev, struct scatterlist *sglist, in
 {
 	int i;
 
-	BUG_ON(direction == DMA_NONE);
+	if (direction == DMA_NONE)
+	    BUG();
 
 	if (direction == DMA_TO_DEVICE)
 	    return;
@@ -503,14 +511,16 @@ static void pa11_dma_unmap_sg(struct device *dev, struct scatterlist *sglist, in
 
 static void pa11_dma_sync_single_for_cpu(struct device *dev, dma_addr_t dma_handle, unsigned long offset, size_t size, enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	if (direction == DMA_NONE)
+	    BUG();
 
 	flush_kernel_dcache_range((unsigned long) phys_to_virt(dma_handle) + offset, size);
 }
 
 static void pa11_dma_sync_single_for_device(struct device *dev, dma_addr_t dma_handle, unsigned long offset, size_t size, enum dma_data_direction direction)
 {
-	BUG_ON(direction == DMA_NONE);
+	if (direction == DMA_NONE)
+	    BUG();
 
 	flush_kernel_dcache_range((unsigned long) phys_to_virt(dma_handle) + offset, size);
 }

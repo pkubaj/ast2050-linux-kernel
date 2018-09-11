@@ -214,10 +214,21 @@ static int blk_fill_sghdr_rq(struct request_queue *q, struct request *rq,
 	return 0;
 }
 
+/*
+ * unmap a request that was previously mapped to this sg_io_hdr. handles
+ * both sg and non-sg sg_io_hdr.
+ */
+static int blk_unmap_sghdr_rq(struct request *rq, struct sg_io_hdr *hdr)
+{
+	blk_rq_unmap_user(rq->bio);
+	blk_put_request(rq);
+	return 0;
+}
+
 static int blk_complete_sghdr_rq(struct request *rq, struct sg_io_hdr *hdr,
 				 struct bio *bio)
 {
-	int ret = 0;
+	int r, ret = 0;
 
 	/*
 	 * fill in all the output members
@@ -242,10 +253,12 @@ static int blk_complete_sghdr_rq(struct request *rq, struct sg_io_hdr *hdr,
 			ret = -EFAULT;
 	}
 
-	blk_rq_unmap_user(bio);
-	blk_put_request(rq);
+	rq->bio = bio;
+	r = blk_unmap_sghdr_rq(rq, hdr);
+	if (ret)
+		r = ret;
 
-	return ret;
+	return r;
 }
 
 static int sg_io(struct request_queue *q, struct gendisk *bd_disk,

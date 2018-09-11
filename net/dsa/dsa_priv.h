@@ -1,6 +1,6 @@
 /*
  * net/dsa/dsa_priv.h - Hardware switch handling
- * Copyright (c) 2008-2009 Marvell Semiconductor
+ * Copyright (c) 2008 Marvell Semiconductor
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,107 +19,42 @@
 
 struct dsa_switch {
 	/*
-	 * Parent switch tree, and switch index.
-	 */
-	struct dsa_switch_tree	*dst;
-	int			index;
-
-	/*
-	 * Configuration data for this switch.
-	 */
-	struct dsa_chip_data	*pd;
-
-	/*
-	 * The used switch driver.
-	 */
-	struct dsa_switch_driver	*drv;
-
-	/*
-	 * Reference to mii bus to use.
-	 */
-	struct mii_bus		*master_mii_bus;
-
-	/*
-	 * Slave mii_bus and devices for the individual ports.
-	 */
-	u32			dsa_port_mask;
-	u32			phys_port_mask;
-	struct mii_bus		*slave_mii_bus;
-	struct net_device	*ports[DSA_MAX_PORTS];
-};
-
-struct dsa_switch_tree {
-	/*
 	 * Configuration data for the platform device that owns
-	 * this dsa switch tree instance.
+	 * this dsa switch instance.
 	 */
 	struct dsa_platform_data	*pd;
 
 	/*
-	 * Reference to network device to use, and which tagging
-	 * protocol to use.
+	 * References to network device and mii bus to use.
 	 */
-	struct net_device	*master_netdev;
-	__be16			tag_protocol;
+	struct net_device		*master_netdev;
+	struct mii_bus			*master_mii_bus;
 
 	/*
-	 * The switch and port to which the CPU is attached.
+	 * The used switch driver and frame tagging type.
 	 */
-	s8			cpu_switch;
-	s8			cpu_port;
+	struct dsa_switch_driver	*drv;
+	__be16				tag_protocol;
+
+	/*
+	 * Slave mii_bus and devices for the individual ports.
+	 */
+	int				cpu_port;
+	u32				valid_port_mask;
+	struct mii_bus			*slave_mii_bus;
+	struct net_device		*ports[DSA_MAX_PORTS];
 
 	/*
 	 * Link state polling.
 	 */
-	int			link_poll_needed;
-	struct work_struct	link_poll_work;
-	struct timer_list	link_poll_timer;
-
-	/*
-	 * Data for the individual switch chips.
-	 */
-	struct dsa_switch	*ds[DSA_MAX_SWITCHES];
+	struct work_struct		link_poll_work;
+	struct timer_list		link_poll_timer;
 };
 
-static inline bool dsa_is_cpu_port(struct dsa_switch *ds, int p)
-{
-	return !!(ds->index == ds->dst->cpu_switch && p == ds->dst->cpu_port);
-}
-
-static inline u8 dsa_upstream_port(struct dsa_switch *ds)
-{
-	struct dsa_switch_tree *dst = ds->dst;
-
-	/*
-	 * If this is the root switch (i.e. the switch that connects
-	 * to the CPU), return the cpu port number on this switch.
-	 * Else return the (DSA) port number that connects to the
-	 * switch that is one hop closer to the cpu.
-	 */
-	if (dst->cpu_switch == ds->index)
-		return dst->cpu_port;
-	else
-		return ds->pd->rtable[dst->cpu_switch];
-}
-
 struct dsa_slave_priv {
-	/*
-	 * The linux network interface corresponding to this
-	 * switch port.
-	 */
 	struct net_device	*dev;
-
-	/*
-	 * Which switch this port is a part of, and the port index
-	 * for this port.
-	 */
 	struct dsa_switch	*parent;
-	u8			port;
-
-	/*
-	 * The phylib phy_device pointer for the PHY connected
-	 * to this port.
-	 */
+	int			port;
 	struct phy_device	*phy;
 };
 

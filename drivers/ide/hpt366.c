@@ -995,7 +995,7 @@ static void hpt3xx_disable_fast_irq(struct pci_dev *dev, u8 mcr_addr)
 		pci_write_config_byte(dev, mcr_addr + 1, new_mcr);
 }
 
-static int init_chipset_hpt366(struct pci_dev *dev)
+static unsigned int init_chipset_hpt366(struct pci_dev *dev)
 {
 	unsigned long io_base	= pci_resource_start(dev, 4);
 	struct hpt_info *info	= hpt3xx_get_info(&dev->dev);
@@ -1237,7 +1237,7 @@ static int init_chipset_hpt366(struct pci_dev *dev)
 	hpt3xx_disable_fast_irq(dev, 0x50);
 	hpt3xx_disable_fast_irq(dev, 0x54);
 
-	return 0;
+	return dev->irq;
 }
 
 static u8 hpt3xx_cable_detect(ide_hwif_t *hwif)

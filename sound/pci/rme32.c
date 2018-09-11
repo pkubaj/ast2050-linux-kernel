@@ -1941,10 +1941,9 @@ snd_rme32_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
-			      sizeof(struct rme32), &card);
-	if (err < 0)
-		return err;
+	if ((card = snd_card_new(index[dev], id[dev], THIS_MODULE,
+				 sizeof(struct rme32))) == NULL)
+		return -ENOMEM;
 	card->private_free = snd_rme32_card_free;
 	rme32 = (struct rme32 *) card->private_data;
 	rme32->card = card;

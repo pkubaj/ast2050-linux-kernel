@@ -47,7 +47,6 @@
 #define PCI_BIOS32_PARAGRAPH_LEN	16
 #define PCI_ROM_BASE1			0x000F0000
 #define ROM_SIZE			0x10000
-#define HPWDT_VERSION			"1.01"
 
 struct bios32_service_dir {
 	u32 signature;
@@ -131,14 +130,17 @@ static void *cru_rom_addr;
 static struct cmn_registers cmn_regs;
 
 static struct pci_device_id hpwdt_devices[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_COMPAQ, 0xB203) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_HP, 0x3306) },
+	{
+	 .vendor = PCI_VENDOR_ID_COMPAQ,
+	 .device = 0xB203,
+	 .subvendor = PCI_ANY_ID,
+	 .subdevice = PCI_ANY_ID,
+	},
 	{0},			/* terminate list */
 };
 MODULE_DEVICE_TABLE(pci, hpwdt_devices);
 
-extern asmlinkage void asminline_call(struct cmn_registers *pi86Regs,
-						unsigned long *pRomEntry);
+extern asmlinkage void asminline_call(struct cmn_registers *pi86Regs, unsigned long *pRomEntry);
 
 #ifndef CONFIG_X86_64
 /* --32 Bit Bios------------------------------------------------------------ */
@@ -603,7 +605,7 @@ static long hpwdt_ioctl(struct file *file, unsigned int cmd,
 /*
  *	Kernel interfaces
  */
-static const struct file_operations hpwdt_fops = {
+static struct file_operations hpwdt_fops = {
 	.owner = THIS_MODULE,
 	.llseek = no_llseek,
 	.write = hpwdt_write,
@@ -702,11 +704,10 @@ static int __devinit hpwdt_init_one(struct pci_dev *dev,
 	}
 
 	printk(KERN_INFO
-		"hp Watchdog Timer Driver: %s"
+		"hp Watchdog Timer Driver: 1.00"
 		", timer margin: %d seconds (nowayout=%d)"
 		", allow kernel dump: %s (default = 0/OFF).\n",
-		HPWDT_VERSION, soft_margin, nowayout,
-		(allow_kdump == 0) ? "OFF" : "ON");
+		soft_margin, nowayout, (allow_kdump == 0) ? "OFF" : "ON");
 
 	return 0;
 
@@ -756,7 +757,6 @@ static int __init hpwdt_init(void)
 MODULE_AUTHOR("Tom Mingarelli");
 MODULE_DESCRIPTION("hp watchdog driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(HPWDT_VERSION);
 MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 
 module_param(soft_margin, int, 0);

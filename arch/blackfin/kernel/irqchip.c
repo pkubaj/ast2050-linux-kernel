@@ -83,7 +83,7 @@ int show_interrupts(struct seq_file *p, void *v)
 			goto skip;
 		seq_printf(p, "%3d: ", i);
 		for_each_online_cpu(j)
-			seq_printf(p, "%10u ", kstat_irqs_cpu(i, j));
+			seq_printf(p, "%10u ", kstat_cpu(j).irqs[i]);
 		seq_printf(p, " %8s", irq_desc[i].chip->name);
 		seq_printf(p, "  %s", action->name);
 		for (action = action->next; action; action = action->next)
@@ -144,15 +144,11 @@ asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
 #endif
 	generic_handle_irq(irq);
 
-#ifndef CONFIG_IPIPE
-	/*
-	 * If we're the only interrupt running (ignoring IRQ15 which
-	 * is for syscalls), lower our priority to IRQ14 so that
-	 * softirqs run at that level.  If there's another,
-	 * lower-level interrupt, irq_exit will defer softirqs to
-	 * that. If the interrupt pipeline is enabled, we are already
-	 * running at IRQ14 priority, so we don't need this code.
-	 */
+#ifndef CONFIG_IPIPE	/* Useless and bugous over the I-pipe: IRQs are threaded. */
+	/* If we're the only interrupt running (ignoring IRQ15 which is for
+	   syscalls), lower our priority to IRQ14 so that softirqs run at
+	   that level.  If there's another, lower-level interrupt, irq_exit
+	   will defer softirqs to that.  */
 	CSYNC();
 	pending = bfin_read_IPEND() & ~0x8000;
 	other_ints = pending & (pending - 1);

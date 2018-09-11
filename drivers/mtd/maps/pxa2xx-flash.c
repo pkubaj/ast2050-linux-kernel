@@ -41,8 +41,9 @@ struct pxa2xx_flash_info {
 static const char *probes[] = { "RedBoot", "cmdlinepart", NULL };
 
 
-static int __init pxa2xx_flash_probe(struct platform_device *pdev)
+static int __init pxa2xx_flash_probe(struct device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev);
 	struct flash_platform_data *flash = pdev->dev.platform_data;
 	struct pxa2xx_flash_info *info;
 	struct mtd_partition *parts;
@@ -113,15 +114,15 @@ static int __init pxa2xx_flash_probe(struct platform_device *pdev)
 		add_mtd_device(info->mtd);
 	}
 
-	platform_set_drvdata(pdev, info);
+	dev_set_drvdata(dev, info);
 	return 0;
 }
 
-static int __exit pxa2xx_flash_remove(struct platform_device *dev)
+static int __exit pxa2xx_flash_remove(struct device *dev)
 {
-	struct pxa2xx_flash_info *info = platform_get_drvdata(dev);
+	struct pxa2xx_flash_info *info = dev_get_drvdata(dev);
 
-	platform_set_drvdata(dev, NULL);
+	dev_set_drvdata(dev, NULL);
 
 #ifdef CONFIG_MTD_PARTITIONS
 	if (info->nr_parts)
@@ -140,9 +141,9 @@ static int __exit pxa2xx_flash_remove(struct platform_device *dev)
 }
 
 #ifdef CONFIG_PM
-static int pxa2xx_flash_suspend(struct platform_device *dev, pm_message_t state)
+static int pxa2xx_flash_suspend(struct device *dev, pm_message_t state)
 {
-	struct pxa2xx_flash_info *info = platform_get_drvdata(dev);
+	struct pxa2xx_flash_info *info = dev_get_drvdata(dev);
 	int ret = 0;
 
 	if (info->mtd && info->mtd->suspend)
@@ -150,17 +151,17 @@ static int pxa2xx_flash_suspend(struct platform_device *dev, pm_message_t state)
 	return ret;
 }
 
-static int pxa2xx_flash_resume(struct platform_device *dev)
+static int pxa2xx_flash_resume(struct device *dev)
 {
-	struct pxa2xx_flash_info *info = platform_get_drvdata(dev);
+	struct pxa2xx_flash_info *info = dev_get_drvdata(dev);
 
 	if (info->mtd && info->mtd->resume)
 		info->mtd->resume(info->mtd);
 	return 0;
 }
-static void pxa2xx_flash_shutdown(struct platform_device *dev)
+static void pxa2xx_flash_shutdown(struct device *dev)
 {
-	struct pxa2xx_flash_info *info = platform_get_drvdata(dev);
+	struct pxa2xx_flash_info *info = dev_get_drvdata(dev);
 
 	if (info && info->mtd->suspend(info->mtd) == 0)
 		info->mtd->resume(info->mtd);
@@ -171,13 +172,11 @@ static void pxa2xx_flash_shutdown(struct platform_device *dev)
 #define pxa2xx_flash_shutdown NULL
 #endif
 
-static struct platform_driver pxa2xx_flash_driver = {
-	.driver = {
-		.name		= "pxa2xx-flash",
-		.owner		= THIS_MODULE,
-	},
+static struct device_driver pxa2xx_flash_driver = {
+	.name		= "pxa2xx-flash",
+	.bus		= &platform_bus_type,
 	.probe		= pxa2xx_flash_probe,
-	.remove		= __devexit_p(pxa2xx_flash_remove),
+	.remove		= __exit_p(pxa2xx_flash_remove),
 	.suspend	= pxa2xx_flash_suspend,
 	.resume		= pxa2xx_flash_resume,
 	.shutdown	= pxa2xx_flash_shutdown,
@@ -185,12 +184,12 @@ static struct platform_driver pxa2xx_flash_driver = {
 
 static int __init init_pxa2xx_flash(void)
 {
-	return platform_driver_register(&pxa2xx_flash_driver);
+	return driver_register(&pxa2xx_flash_driver);
 }
 
 static void __exit cleanup_pxa2xx_flash(void)
 {
-	platform_driver_unregister(&pxa2xx_flash_driver);
+	driver_unregister(&pxa2xx_flash_driver);
 }
 
 module_init(init_pxa2xx_flash);

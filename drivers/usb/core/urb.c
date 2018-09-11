@@ -295,7 +295,7 @@ int usb_submit_urb(struct urb *urb, gfp_t mem_flags)
 	if (!urb || urb->hcpriv || !urb->complete)
 		return -EINVAL;
 	dev = urb->dev;
-	if ((!dev) || (dev->state < USB_STATE_UNAUTHENTICATED))
+	if ((!dev) || (dev->state < USB_STATE_DEFAULT))
 		return -ENODEV;
 
 	/* For now, get the endpoint from the pipe.  Eventually drivers
@@ -370,7 +370,7 @@ int usb_submit_urb(struct urb *urb, gfp_t mem_flags)
 	}
 
 	/* the I/O buffer must be mapped/unmapped, except when length=0 */
-	if (urb->transfer_buffer_length > INT_MAX)
+	if (urb->transfer_buffer_length < 0)
 		return -EMSGSIZE;
 
 #ifdef DEBUG

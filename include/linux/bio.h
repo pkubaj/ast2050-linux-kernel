@@ -171,6 +171,8 @@ struct bio {
 #define BIO_RW_FAILFAST_TRANSPORT	8
 #define BIO_RW_FAILFAST_DRIVER		9
 
+#define BIO_RW_SYNC	(BIO_RW_SYNCIO | BIO_RW_UNPLUG)
+
 #define bio_rw_flagged(bio, flag)	((bio)->bi_rw & (1 << (flag)))
 
 /*
@@ -426,6 +428,9 @@ struct bio_set {
 	unsigned int front_pad;
 
 	mempool_t *bio_pool;
+#if defined(CONFIG_BLK_DEV_INTEGRITY)
+	mempool_t *bio_integrity_pool;
+#endif
 	mempool_t *bvec_pool;
 };
 
@@ -516,8 +521,9 @@ static inline int bio_has_data(struct bio *bio)
 
 #define bio_integrity(bio) (bio->bi_integrity != NULL)
 
+extern struct bio_integrity_payload *bio_integrity_alloc_bioset(struct bio *, gfp_t, unsigned int, struct bio_set *);
 extern struct bio_integrity_payload *bio_integrity_alloc(struct bio *, gfp_t, unsigned int);
-extern void bio_integrity_free(struct bio *);
+extern void bio_integrity_free(struct bio *, struct bio_set *);
 extern int bio_integrity_add_page(struct bio *, struct page *, unsigned int, unsigned int);
 extern int bio_integrity_enabled(struct bio *bio);
 extern int bio_integrity_set_tag(struct bio *, void *, unsigned int);
@@ -527,21 +533,27 @@ extern void bio_integrity_endio(struct bio *, int);
 extern void bio_integrity_advance(struct bio *, unsigned int);
 extern void bio_integrity_trim(struct bio *, unsigned int, unsigned int);
 extern void bio_integrity_split(struct bio *, struct bio_pair *, int);
-extern int bio_integrity_clone(struct bio *, struct bio *, gfp_t);
+extern int bio_integrity_clone(struct bio *, struct bio *, struct bio_set *);
+extern int bioset_integrity_create(struct bio_set *, int);
+extern void bioset_integrity_free(struct bio_set *);
+extern void bio_integrity_init_slab(void);
 
 #else /* CONFIG_BLK_DEV_INTEGRITY */
 
 #define bio_integrity(a)		(0)
+#define bioset_integrity_create(a, b)	(0)
 #define bio_integrity_prep(a)		(0)
 #define bio_integrity_enabled(a)	(0)
 #define bio_integrity_clone(a, b, c)	(0)
-#define bio_integrity_free(a)		do { } while (0)
+#define bioset_integrity_free(a)	do { } while (0)
+#define bio_integrity_free(a, b)	do { } while (0)
 #define bio_integrity_endio(a, b)	do { } while (0)
 #define bio_integrity_advance(a, b)	do { } while (0)
 #define bio_integrity_trim(a, b, c)	do { } while (0)
 #define bio_integrity_split(a, b, c)	do { } while (0)
 #define bio_integrity_set_tag(a, b, c)	do { } while (0)
 #define bio_integrity_get_tag(a, b, c)	do { } while (0)
+#define bio_integrity_init_slab(a)	do { } while (0)
 
 #endif /* CONFIG_BLK_DEV_INTEGRITY */
 

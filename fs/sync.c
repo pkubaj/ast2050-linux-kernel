@@ -42,21 +42,9 @@ SYSCALL_DEFINE0(sync)
 	return 0;
 }
 
-static void do_sync_work(struct work_struct *work)
-{
-	do_sync(0);
-	kfree(work);
-}
-
 void emergency_sync(void)
 {
-	struct work_struct *work;
-
-	work = kmalloc(sizeof(*work), GFP_ATOMIC);
-	if (work) {
-		INIT_WORK(work, do_sync_work);
-		schedule_work(work);
-	}
+	pdflush_operation(do_sync, 0);
 }
 
 /*

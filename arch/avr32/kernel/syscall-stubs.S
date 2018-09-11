@@ -61,7 +61,7 @@ __sys_execve:
 __sys_mmap2:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_mmap2
+	rcall	sys_mmap2
 	sub	sp, -4
 	popm	pc
 
@@ -70,7 +70,7 @@ __sys_mmap2:
 __sys_sendto:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_sendto
+	rcall	sys_sendto
 	sub	sp, -4
 	popm	pc
 
@@ -79,7 +79,7 @@ __sys_sendto:
 __sys_recvfrom:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_recvfrom
+	rcall	sys_recvfrom
 	sub	sp, -4
 	popm	pc
 
@@ -88,7 +88,7 @@ __sys_recvfrom:
 __sys_pselect6:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_pselect6
+	rcall	sys_pselect6
 	sub	sp, -4
 	popm	pc
 
@@ -97,7 +97,7 @@ __sys_pselect6:
 __sys_splice:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_splice
+	rcall	sys_splice
 	sub	sp, -4
 	popm	pc
 
@@ -106,7 +106,7 @@ __sys_splice:
 __sys_epoll_pwait:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_epoll_pwait
+	rcall	sys_epoll_pwait
 	sub	sp, -4
 	popm	pc
 
@@ -115,6 +115,6 @@ __sys_epoll_pwait:
 __sys_sync_file_range:
 	pushm	lr
 	st.w	--sp, ARG6
-	call	sys_sync_file_range
+	rcall	sys_sync_file_range
 	sub	sp, -4
 	popm	pc

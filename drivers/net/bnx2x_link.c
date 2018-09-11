@@ -2258,11 +2258,6 @@ static void bnx2x_bcm8726_external_rom_boot(struct link_params *params)
 		       MDIO_PMA_REG_GEN_CTRL,
 		       MDIO_PMA_REG_GEN_CTRL_ROM_MICRO_RESET);
 
-	bnx2x_cl45_write(bp, port, ext_phy_type, ext_phy_addr,
-		       MDIO_PMA_DEVAD,
-		       MDIO_PMA_REG_GEN_CTRL2,
-		       0x73A0);
-
 	/* Clear soft reset.
 	Will automatically reset micro-controller re-boot */
 	bnx2x_cl45_write(bp, port, ext_phy_type, ext_phy_addr,
@@ -2270,8 +2265,8 @@ static void bnx2x_bcm8726_external_rom_boot(struct link_params *params)
 		       MDIO_PMA_REG_GEN_CTRL,
 		       MDIO_PMA_REG_GEN_CTRL_ROM_RESET_INTERNAL_MP);
 
-	/* wait for 150ms for microcode load */
-	msleep(150);
+	/* wait for 100ms for microcode load */
+	msleep(100);
 
 	/* Disable serial boot control, tristates pins SS_N, SCK, MOSI, MISO */
 	bnx2x_cl45_write(bp, port, ext_phy_type, ext_phy_addr,
@@ -2529,7 +2524,7 @@ static u8 bnx2x_bcm8726_set_limiting_mode(struct link_params *params,
 	u8 ext_phy_addr = ((params->ext_phy_config &
 			    PORT_HW_CFG_XGXS_EXT_PHY_ADDR_MASK) >>
 			   PORT_HW_CFG_XGXS_EXT_PHY_ADDR_SHIFT);
-	u16 cur_limiting_mode;
+
 	if (bnx2x_read_sfp_module_eeprom(params,
 				       SFP_EEPROM_OPTIONS_ADDR,
 				       SFP_EEPROM_OPTIONS_SIZE,
@@ -2540,16 +2535,6 @@ static u8 bnx2x_bcm8726_set_limiting_mode(struct link_params *params,
 	}
 	limiting_mode = !(options[0] &
 			  SFP_EEPROM_OPTIONS_LINEAR_RX_OUT_MASK);
-
-	bnx2x_cl45_read(bp, port,
-		      PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8726,
-		      ext_phy_addr,
-		      MDIO_PMA_DEVAD,
-		      MDIO_PMA_REG_ROM_VER2,
-		      &cur_limiting_mode);
-	DP(NETIF_MSG_LINK, "Current Limiting mode is 0x%x\n",
-		 cur_limiting_mode);
-
 	if (limiting_mode &&
 	    (module_type != SFP_MODULE_TYPE_PASSIVE_COPPER_CABLE)) {
 		DP(NETIF_MSG_LINK,
@@ -2562,9 +2547,16 @@ static u8 bnx2x_bcm8726_set_limiting_mode(struct link_params *params,
 			       MDIO_PMA_REG_ROM_VER2,
 			       SFP_LIMITING_MODE_VALUE);
 	} else { /* LRM mode ( default )*/
-
+		u16 cur_limiting_mode;
 		DP(NETIF_MSG_LINK, "Module options = 0x%x.Setting LRM MODE\n",
 			 options[0]);
+
+		bnx2x_cl45_read(bp, port,
+			       PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8726,
+			       ext_phy_addr,
+			       MDIO_PMA_DEVAD,
+			       MDIO_PMA_REG_ROM_VER2,
+			       &cur_limiting_mode);
 
 		/* Changing to LRM mode takes quite few seconds.
 		So do it only if current mode is limiting
@@ -2668,7 +2660,11 @@ static u8 bnx2x_sfp_module_detection(struct link_params *params)
 			  params->port);
 
 	/* Check and set limiting mode / LRM mode */
-	bnx2x_bcm8726_set_limiting_mode(params, module_type);
+	if (bnx2x_bcm8726_set_limiting_mode(params, module_type)
+	     != 0) {
+		DP(NETIF_MSG_LINK, "Setting limiting mode failed!!\n");
+		return -EINVAL;
+	}
 
 	/* Enable transmit for this module */
 	bnx2x_bcm8726_set_transmitter(bp, params->port,
@@ -3033,9 +3029,10 @@ static u8 bnx2x_ext_phy_init(struct link_params *params, struct link_vars *vars)
 				       MDIO_WIS_DEVAD,
 				       MDIO_WIS_REG_LASI_CNTL, 0x1);
 
-			/* BCM8705 doesn't have microcode, hence the 0 */
-			bnx2x_save_spirom_version(bp, params->port,
-						params->shmem_base, 0);
+			bnx2x_save_bcm_spirom_ver(bp, params->port,
+						ext_phy_type,
+						ext_phy_addr,
+						params->shmem_base);
 			break;
 
 		case PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8706:
@@ -4244,7 +4241,6 @@ u8 bnx2x_get_ext_phy_fw_version(struct link_params *params, u8 driver_loaded,
 	case PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8705:
 	case PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8706:
 	case PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8726:
-	case PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8481:
 		status = bnx2x_format_ver(spirom_ver, version, len);
 		break;
 	case PORT_HW_CFG_XGXS_EXT_PHY_TYPE_DIRECT:
@@ -4624,13 +4620,13 @@ static u8 bnx2x_link_initialize(struct link_params *params,
 
 	/* init ext phy and enable link state int */
 	non_ext_phy = ((ext_phy_type == PORT_HW_CFG_XGXS_EXT_PHY_TYPE_DIRECT) ||
-		       (params->loopback_mode == LOOPBACK_XGXS_10));
+		       (params->loopback_mode == LOOPBACK_XGXS_10) ||
+		       (params->loopback_mode == LOOPBACK_EXT_PHY));
 
 	if (non_ext_phy ||
 	    (ext_phy_type == PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8705) ||
 	    (ext_phy_type == PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8726) ||
-	    (ext_phy_type == PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8481) ||
-	    (params->loopback_mode == LOOPBACK_EXT_PHY)) {
+	    (ext_phy_type == PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM8481)) {
 		if (params->req_line_speed == SPEED_AUTO_NEG)
 			bnx2x_set_parallel_detection(params, vars->phy_flags);
 		bnx2x_init_internal_phy(params, vars);

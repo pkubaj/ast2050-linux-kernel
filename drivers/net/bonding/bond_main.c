@@ -1002,10 +1002,6 @@ static void bond_mc_swap(struct bonding *bond, struct slave *new_active, struct 
 static void bond_do_fail_over_mac(struct bonding *bond,
 				  struct slave *new_active,
 				  struct slave *old_active)
-	__releases(&bond->curr_slave_lock)
-	__releases(&bond->lock)
-	__acquires(&bond->lock)
-	__acquires(&bond->curr_slave_lock)
 {
 	u8 tmp_mac[ETH_ALEN];
 	struct sockaddr saddr;
@@ -1714,7 +1710,6 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	case BOND_MODE_ALB:
 		new_slave->state = BOND_STATE_ACTIVE;
 		bond_set_slave_inactive_flags(new_slave);
-		bond_select_active_slave(bond);
 		break;
 	default:
 		pr_debug("This slave is always active in trunk mode\n");
@@ -3198,8 +3193,6 @@ out:
 #ifdef CONFIG_PROC_FS
 
 static void *bond_info_seq_start(struct seq_file *seq, loff_t *pos)
-	__acquires(&dev_base_lock)
-	__acquires(&bond->lock)
 {
 	struct bonding *bond = seq->private;
 	loff_t off = 0;
@@ -3239,8 +3232,6 @@ static void *bond_info_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void bond_info_seq_stop(struct seq_file *seq, void *v)
-	__releases(&bond->lock)
-	__releases(&dev_base_lock)
 {
 	struct bonding *bond = seq->private;
 
@@ -3546,26 +3537,11 @@ static int bond_slave_netdev_event(unsigned long event, struct net_device *slave
 		}
 		break;
 	case NETDEV_CHANGE:
-		if (bond->params.mode == BOND_MODE_8023AD || bond_is_lb(bond)) {
-			struct slave *slave;
-
-			slave = bond_get_slave_by_dev(bond, slave_dev);
-			if (slave) {
-				u16 old_speed = slave->speed;
-				u16 old_duplex = slave->duplex;
-
-				bond_update_speed_duplex(slave);
-
-				if (bond_is_lb(bond))
-					break;
-
-				if (old_speed != slave->speed)
-					bond_3ad_adapter_speed_changed(slave);
-				if (old_duplex != slave->duplex)
-					bond_3ad_adapter_duplex_changed(slave);
-			}
-		}
-
+		/*
+		 * TODO: is this what we get if somebody
+		 * sets up a hierarchical bond, then rmmod's
+		 * one of the slave bonding devices?
+		 */
 		break;
 	case NETDEV_DOWN:
 		/*
@@ -4137,7 +4113,7 @@ static int bond_neigh_setup(struct net_device *dev, struct neigh_parms *parms)
 		const struct net_device_ops *slave_ops
 			= slave->dev->netdev_ops;
 		if (slave_ops->ndo_neigh_setup)
-			return slave_ops->ndo_neigh_setup(slave->dev, parms);
+			return slave_ops->ndo_neigh_setup(dev, parms);
 	}
 	return 0;
 }
@@ -4748,7 +4724,7 @@ static void bond_free_all(void)
  */
 int bond_parse_parm(const char *buf, const struct bond_parm_tbl *tbl)
 {
-	int modeint = -1, i, rv;
+	int mode = -1, i, rv;
 	char *p, modestr[BOND_MAX_MODENAME_LEN + 1] = { 0, };
 
 	for (p = (char *)buf; *p; p++)
@@ -4758,13 +4734,13 @@ int bond_parse_parm(const char *buf, const struct bond_parm_tbl *tbl)
 	if (*p)
 		rv = sscanf(buf, "%20s", modestr);
 	else
-		rv = sscanf(buf, "%d", &modeint);
+		rv = sscanf(buf, "%d", &mode);
 
 	if (!rv)
 		return -1;
 
 	for (i = 0; tbl[i].modename; i++) {
-		if (modeint == tbl[i].mode)
+		if (mode == tbl[i].mode)
 			return tbl[i].mode;
 		if (strcmp(modestr, tbl[i].modename) == 0)
 			return tbl[i].mode;

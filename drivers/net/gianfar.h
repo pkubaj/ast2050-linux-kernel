@@ -738,8 +738,7 @@ struct gfar_private {
 	spinlock_t rxlock;
 
 	struct device_node *node;
-	struct net_device *ndev;
-	struct of_device *ofdev;
+	struct net_device *dev;
 	struct napi_struct napi;
 
 	/* skb array and index */

@@ -157,7 +157,6 @@ ppp_asynctty_open(struct tty_struct *tty)
 {
 	struct asyncppp *ap;
 	int err;
-	int speed;
 
 	if (tty->ops->write == NULL)
 		return -EOPNOTSUPP;
@@ -188,8 +187,6 @@ ppp_asynctty_open(struct tty_struct *tty)
 	ap->chan.private = ap;
 	ap->chan.ops = &async_ops;
 	ap->chan.mtu = PPP_MRU;
-	speed = tty_get_baud_rate(tty);
-	ap->chan.speed = speed;
 	err = ppp_register_channel(&ap->chan);
 	if (err)
 		goto out_free;
@@ -236,9 +233,11 @@ ppp_asynctty_close(struct tty_struct *tty)
 	tasklet_kill(&ap->tsk);
 
 	ppp_unregister_channel(&ap->chan);
-	kfree_skb(ap->rpkt);
+	if (ap->rpkt)
+		kfree_skb(ap->rpkt);
 	skb_queue_purge(&ap->rqueue);
-	kfree_skb(ap->tpkt);
+	if (ap->tpkt)
+		kfree_skb(ap->tpkt);
 	kfree(ap);
 }
 

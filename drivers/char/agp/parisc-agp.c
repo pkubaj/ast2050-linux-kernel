@@ -359,16 +359,9 @@ fail:
 	return error;
 }
 
-static int
-find_quicksilver(struct device *dev, void *data)
-{
-	struct parisc_device **lba = data;
-	struct parisc_device *padev = to_parisc_device(dev);
-
-	if (IS_QUICKSILVER(padev))
-		*lba = padev;
-
-	return 0;
+static struct device *next_device(struct klist_iter *i) {
+	struct klist_node * n = klist_next(i);
+	return n ? container_of(n, struct device, knode_parent) : NULL;
 }
 
 static int
@@ -379,6 +372,8 @@ parisc_agp_init(void)
 	int err = -1;
 	struct parisc_device *sba = NULL, *lba = NULL;
 	struct lba_device *lbadev = NULL;
+	struct device *dev = NULL;
+	struct klist_iter i;
 
 	if (!sba_list)
 		goto out;
@@ -391,7 +386,13 @@ parisc_agp_init(void)
 	}
 
 	/* Now search our Pluto for our precious AGP device... */
-	device_for_each_child(&sba->dev, &lba, find_quicksilver);
+	klist_iter_init(&sba->dev.klist_children, &i);
+	while ((dev = next_device(&i))) {
+		struct parisc_device *padev = to_parisc_device(dev);
+		if (IS_QUICKSILVER(padev))
+			lba = padev;
+	}
+	klist_iter_exit(&i);
 
 	if (!lba) {
 		printk(KERN_INFO DRVPFX "No AGP devices found.\n");

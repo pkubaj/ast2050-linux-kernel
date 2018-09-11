@@ -119,7 +119,7 @@ static struct bclink *bclink = NULL;
 static struct link *bcl = NULL;
 static DEFINE_SPINLOCK(bc_lock);
 
-const char tipc_bclink_name[] = "multicast-link";
+char tipc_bclink_name[] = "multicast-link";
 
 
 static u32 buf_seqno(struct sk_buff *buf)
@@ -800,7 +800,7 @@ int tipc_bclink_init(void)
 	tipc_link_set_queue_limits(bcl, BCLINK_WIN_DEFAULT);
 	bcl->b_ptr = &bcbearer->bearer;
 	bcl->state = WORKING_WORKING;
-	strlcpy(bcl->name, tipc_bclink_name, TIPC_MAX_LINK_NAME);
+	sprintf(bcl->name, tipc_bclink_name);
 
 	if (BCLINK_LOG_BUF_SIZE) {
 		char *pb = kmalloc(BCLINK_LOG_BUF_SIZE, GFP_ATOMIC);

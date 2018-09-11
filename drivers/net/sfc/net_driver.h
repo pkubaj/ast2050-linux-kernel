@@ -336,8 +336,6 @@ enum efx_rx_alloc_method {
  * @eventq_read_ptr: Event queue read pointer
  * @last_eventq_read_ptr: Last event queue read pointer value.
  * @eventq_magic: Event queue magic value for driver-generated test events
- * @irq_count: Number of IRQs since last adaptive moderation decision
- * @irq_mod_score: IRQ moderation score
  * @rx_alloc_level: Watermark based heuristic counter for pushing descriptors
  *	and diagnostic counters
  * @rx_alloc_push_pages: RX allocation method currently in use for pushing
@@ -366,9 +364,6 @@ struct efx_channel {
 	unsigned int last_eventq_read_ptr;
 	unsigned int eventq_magic;
 
-	unsigned int irq_count;
-	unsigned int irq_mod_score;
-
 	int rx_alloc_level;
 	int rx_alloc_push_pages;
 
@@ -390,11 +385,13 @@ struct efx_channel {
 
 /**
  * struct efx_blinker - S/W LED blinking context
+ * @led_num: LED ID (board-specific meaning)
  * @state: Current state - on or off
  * @resubmit: Timer resubmission flag
  * @timer: Control timer for blinking
  */
 struct efx_blinker {
+	int led_num;
 	bool state;
 	bool resubmit;
 	struct timer_list timer;
@@ -407,8 +404,8 @@ struct efx_blinker {
  * @major: Major rev. ('A', 'B' ...)
  * @minor: Minor rev. (0, 1, ...)
  * @init: Initialisation function
- * @init_leds: Sets up board LEDs. May be called repeatedly.
- * @set_id_led: Turns the identification LED on or off
+ * @init_leds: Sets up board LEDs
+ * @set_fault_led: Turns the fault LED on or off
  * @blink: Starts/stops blinking
  * @monitor: Board-specific health check function
  * @fini: Cleanup function
@@ -424,9 +421,9 @@ struct efx_board {
 	/* As the LEDs are typically attached to the PHY, LEDs
 	 * have a separate init callback that happens later than
 	 * board init. */
-	void (*init_leds)(struct efx_nic *efx);
-	void (*set_id_led) (struct efx_nic *efx, bool state);
+	int (*init_leds)(struct efx_nic *efx);
 	int (*monitor) (struct efx_nic *nic);
+	void (*set_fault_led) (struct efx_nic *efx, bool state);
 	void (*blink) (struct efx_nic *efx, bool start);
 	void (*fini) (struct efx_nic *nic);
 	struct efx_blinker blinker;
@@ -453,7 +450,6 @@ enum phy_type {
 	PHY_TYPE_QT2022C2 = 4,
 	PHY_TYPE_PM8358 = 6,
 	PHY_TYPE_SFT9001A = 8,
-	PHY_TYPE_QT2025C = 9,
 	PHY_TYPE_SFT9001B = 10,
 	PHY_TYPE_MAX	/* Insert any new items before this */
 };
@@ -708,8 +704,6 @@ union efx_multicast_hash {
  * @membase: Memory BAR value
  * @biu_lock: BIU (bus interface unit) lock
  * @interrupt_mode: Interrupt mode
- * @irq_rx_adaptive: Adaptive IRQ moderation enabled for RX event queues
- * @irq_rx_moderation: IRQ moderation time for RX event queues
  * @i2c_adap: I2C adapter
  * @board_info: Board-level information
  * @state: Device state flag. Serialised by the rtnl_lock.
@@ -791,8 +785,6 @@ struct efx_nic {
 	void __iomem *membase;
 	spinlock_t biu_lock;
 	enum efx_int_mode interrupt_mode;
-	bool irq_rx_adaptive;
-	unsigned int irq_rx_moderation;
 
 	struct i2c_adapter i2c_adap;
 	struct efx_board board_info;

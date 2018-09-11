@@ -193,7 +193,7 @@ static int rio_match_bus(struct device *dev, struct device_driver *drv)
 }
 
 static struct device rio_bus = {
-	.init_name = "rapidio",
+	.bus_id = "rapidio",
 };
 
 struct bus_type rio_bus_type = {

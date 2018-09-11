@@ -57,21 +57,8 @@ struct igb_adapter;
 #define IGB_MIN_ITR_USECS                 10
 
 /* Transmit and receive queues */
-#define IGB_MAX_RX_QUEUES     (adapter->vfs_allocated_count ? \
-                               (adapter->vfs_allocated_count > 6 ? 1 : 2) : 4)
-#define IGB_MAX_TX_QUEUES     IGB_MAX_RX_QUEUES
-#define IGB_ABS_MAX_TX_QUEUES     4
-
-#define IGB_MAX_VF_MC_ENTRIES              30
-#define IGB_MAX_VF_FUNCTIONS               8
-#define IGB_MAX_VFTA_ENTRIES               128
-
-struct vf_data_storage {
-	unsigned char vf_mac_addresses[ETH_ALEN];
-	u16 vf_mc_hashes[IGB_MAX_VF_MC_ENTRIES];
-	u16 num_vf_mc_hashes;
-	bool clear_to_send;
-};
+#define IGB_MAX_RX_QUEUES                  4
+#define IGB_MAX_TX_QUEUES                  4
 
 /* RX descriptor control thresholds.
  * PTHRESH - MAC will consider prefetch if it has fewer than this number of
@@ -99,7 +86,8 @@ struct vf_data_storage {
 #define IGB_RXBUFFER_2048  2048
 #define IGB_RXBUFFER_16384 16384
 
-#define MAX_STD_JUMBO_FRAME_SIZE 9234
+/* Packet Buffer allocations */
+
 
 /* How many Tx Descriptors do we need to call netif_wake_queue ? */
 #define IGB_TX_QUEUE_WAKE	16
@@ -181,6 +169,10 @@ struct igb_ring {
 
 	char name[IFNAMSIZ + 5];
 };
+
+#define IGB_DESC_UNUSED(R) \
+	((((R)->next_to_clean > (R)->next_to_use) ? 0 : (R)->count) + \
+	(R)->next_to_clean - (R)->next_to_use - 1)
 
 #define E1000_RX_DESC_ADV(R, i)	    \
 	(&(((union e1000_adv_rx_desc *)((R).desc))[i]))
@@ -275,11 +267,9 @@ struct igb_adapter {
 	unsigned int flags;
 	u32 eeprom_wol;
 
-	struct igb_ring *multi_tx_table[IGB_ABS_MAX_TX_QUEUES];
+	struct igb_ring *multi_tx_table[IGB_MAX_TX_QUEUES];
 	unsigned int tx_ring_count;
 	unsigned int rx_ring_count;
-	unsigned int vfs_allocated_count;
-	struct vf_data_storage *vf_data;
 };
 
 #define IGB_FLAG_HAS_MSI           (1 << 0)

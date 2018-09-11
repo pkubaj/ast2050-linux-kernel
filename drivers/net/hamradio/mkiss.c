@@ -976,9 +976,9 @@ static struct tty_ldisc_ops ax_ldisc = {
 	.write_wakeup	= mkiss_write_wakeup
 };
 
-static const char banner[] __initdata = KERN_INFO \
+static char banner[] __initdata = KERN_INFO \
 	"mkiss: AX.25 Multikiss, Hans Albas PE1AYX\n";
-static const char msg_regfail[] __initdata = KERN_ERR \
+static char msg_regfail[] __initdata = KERN_ERR \
 	"mkiss: can't register line discipline (err = %d)\n";
 
 static int __init mkiss_init_driver(void)
@@ -987,9 +987,8 @@ static int __init mkiss_init_driver(void)
 
 	printk(banner);
 
-	status = tty_register_ldisc(N_AX25, &ax_ldisc);
-	if (status != 0)
-		printk(msg_regfail, status);
+	if ((status = tty_register_ldisc(N_AX25, &ax_ldisc)) != 0)
+		printk(msg_regfail);
 
 	return status;
 }

@@ -169,19 +169,6 @@ static void tc589_detach(struct pcmcia_device *p_dev);
 
 ======================================================================*/
 
-static const struct net_device_ops el3_netdev_ops = {
-	.ndo_open 		= el3_open,
-	.ndo_stop 		= el3_close,
-	.ndo_start_xmit		= el3_start_xmit,
-	.ndo_tx_timeout 	= el3_tx_timeout,
-	.ndo_set_config		= el3_config,
-	.ndo_get_stats		= el3_get_stats,
-	.ndo_set_multicast_list = set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
-	.ndo_set_mac_address 	= eth_mac_addr,
-	.ndo_validate_addr	= eth_validate_addr,
-};
-
 static int tc589_probe(struct pcmcia_device *link)
 {
     struct el3_private *lp;
@@ -208,9 +195,17 @@ static int tc589_probe(struct pcmcia_device *link)
     link->conf.IntType = INT_MEMORY_AND_IO;
     link->conf.ConfigIndex = 1;
 
-    dev->netdev_ops = &el3_netdev_ops;
+    /* The EL3-specific entries in the device structure. */
+    dev->hard_start_xmit = &el3_start_xmit;
+    dev->set_config = &el3_config;
+    dev->get_stats = &el3_get_stats;
+    dev->set_multicast_list = &set_multicast_list;
+    dev->open = &el3_open;
+    dev->stop = &el3_close;
+#ifdef HAVE_TX_TIMEOUT
+    dev->tx_timeout = el3_tx_timeout;
     dev->watchdog_timeo = TX_TIMEOUT;
-
+#endif
     SET_ETHTOOL_OPS(dev, &netdev_ethtool_ops);
 
     return tc589_config(link);
@@ -862,8 +857,7 @@ static int el3_rx(struct net_device *dev)
     DEBUG(3, "%s: in rx_packet(), status %4.4x, rx_status %4.4x.\n",
 	  dev->name, inw(ioaddr+EL3_STATUS), inw(ioaddr+RX_STATUS));
     while (!((rx_status = inw(ioaddr + RX_STATUS)) & 0x8000) &&
-		    worklimit > 0) {
-	worklimit--;
+	   (--worklimit >= 0)) {
 	if (rx_status & 0x4000) { /* Error, update stats. */
 	    short error = rx_status & 0x3800;
 	    dev->stats.rx_errors++;

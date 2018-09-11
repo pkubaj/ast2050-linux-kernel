@@ -877,10 +877,6 @@ static int atmel_startup(struct uart_port *port)
 		}
 	}
 
-	/* Save current CSR for comparison in atmel_tasklet_func() */
-	atmel_port->irq_status_prev = UART_GET_CSR(port);
-	atmel_port->irq_status = atmel_port->irq_status_prev;
-
 	/*
 	 * Finally, enable the serial port
 	 */

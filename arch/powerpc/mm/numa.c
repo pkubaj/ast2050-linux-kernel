@@ -19,7 +19,6 @@
 #include <linux/notifier.h>
 #include <linux/lmb.h>
 #include <linux/of.h>
-#include <linux/pfn.h>
 #include <asm/sparsemem.h>
 #include <asm/prom.h>
 #include <asm/system.h>
@@ -883,7 +882,7 @@ static void mark_reserved_regions_for_nid(int nid)
 		unsigned long physbase = lmb.reserved.region[i].base;
 		unsigned long size = lmb.reserved.region[i].size;
 		unsigned long start_pfn = physbase >> PAGE_SHIFT;
-		unsigned long end_pfn = PFN_UP(physbase + size);
+		unsigned long end_pfn = ((physbase + size) >> PAGE_SHIFT);
 		struct node_active_region node_ar;
 		unsigned long node_end_pfn = node->node_start_pfn +
 					     node->node_spanned_pages;
@@ -909,7 +908,7 @@ static void mark_reserved_regions_for_nid(int nid)
 			 */
 			if (end_pfn > node_ar.end_pfn)
 				reserve_size = (node_ar.end_pfn << PAGE_SHIFT)
-					- physbase;
+					- (start_pfn << PAGE_SHIFT);
 			/*
 			 * Only worry about *this* node, others may not
 			 * yet have valid NODE_DATA().

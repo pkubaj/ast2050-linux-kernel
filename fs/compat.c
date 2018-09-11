@@ -1402,7 +1402,6 @@ int compat_do_execve(char * filename,
 	retval = mutex_lock_interruptible(&current->cred_exec_mutex);
 	if (retval < 0)
 		goto out_free;
-	current->in_execve = 1;
 
 	retval = -ENOMEM;
 	bprm->cred = prepare_exec_creds();
@@ -1455,7 +1454,6 @@ int compat_do_execve(char * filename,
 		goto out;
 
 	/* execve succeeded */
-	current->in_execve = 0;
 	mutex_unlock(&current->cred_exec_mutex);
 	acct_update_integrals(current);
 	free_bprm(bprm);
@@ -1472,7 +1470,6 @@ out_file:
 	}
 
 out_unlock:
-	current->in_execve = 0;
 	mutex_unlock(&current->cred_exec_mutex);
 
 out_free:

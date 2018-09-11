@@ -1135,10 +1135,7 @@ vortex_adbdma_setbuffers(vortex_t * vortex, int adbdma,
 			snd_pcm_sgbuf_get_addr(dma->substream, 0));
 		break;
 	}
-	/*
-	printk(KERN_DEBUG "vortex: cfg0 = 0x%x\nvortex: cfg1=0x%x\n",
-	       dma->cfg0, dma->cfg1);
-	*/
+	//printk("vortex: cfg0 = 0x%x\nvortex: cfg1=0x%x\n", dma->cfg0, dma->cfg1);
 	hwwrite(vortex->mmio, VORTEX_ADBDMA_BUFCFG0 + (adbdma << 3), dma->cfg0);
 	hwwrite(vortex->mmio, VORTEX_ADBDMA_BUFCFG1 + (adbdma << 3), dma->cfg1);
 
@@ -1962,7 +1959,7 @@ vortex_connect_codecplay(vortex_t * vortex, int en, unsigned char mixers[])
 					  ADB_CODECOUT(0 + 4));
 		vortex_connection_mix_adb(vortex, en, 0x11, mixers[3],
 					  ADB_CODECOUT(1 + 4));
-		/* printk(KERN_DEBUG "SDAC detected "); */
+		//printk("SDAC detected ");
 	}
 #else
 	// Use plain direct output to codec.
@@ -2016,11 +2013,7 @@ vortex_adb_checkinout(vortex_t * vortex, int resmap[], int out, int restype)
 					resmap[restype] |= (1 << i);
 				else
 					vortex->dma_adb[i].resources[restype] |= (1 << i);
-				/*
-				printk(KERN_DEBUG
-				       "vortex: ResManager: type %d out %d\n",
-				       restype, i);
-				*/
+				//printk("vortex: ResManager: type %d out %d\n", restype, i);
 				return i;
 			}
 		}
@@ -2031,11 +2024,7 @@ vortex_adb_checkinout(vortex_t * vortex, int resmap[], int out, int restype)
 		for (i = 0; i < qty; i++) {
 			if (resmap[restype] & (1 << i)) {
 				resmap[restype] &= ~(1 << i);
-				/*
-				printk(KERN_DEBUG
-				       "vortex: ResManager: type %d in %d\n",
-				       restype, i);
-				*/
+				//printk("vortex: ResManager: type %d in %d\n",restype, i);
 				return i;
 			}
 		}
@@ -2800,7 +2789,7 @@ vortex_translateformat(vortex_t * vortex, char bits, char nch, int encod)
 {
 	int a, this_194;
 
-	if ((bits != 8) && (bits != 16))
+	if ((bits != 8) || (bits != 16))
 		return -1;
 
 	switch (encod) {

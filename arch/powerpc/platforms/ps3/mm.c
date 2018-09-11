@@ -328,7 +328,7 @@ static int __init ps3_mm_add_memory(void)
 	return result;
 }
 
-device_initcall(ps3_mm_add_memory);
+core_initcall(ps3_mm_add_memory);
 
 /*============================================================================*/
 /* dma routines                                                               */

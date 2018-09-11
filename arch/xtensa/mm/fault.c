@@ -14,7 +14,6 @@
 
 #include <linux/mm.h>
 #include <linux/module.h>
-#include <linux/hardirq.h>
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/hardirq.h>

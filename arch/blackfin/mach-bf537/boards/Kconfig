@@ -33,4 +33,9 @@ config CAMSIG_MINOTAUR
 	help
 	  Board supply package for CSP Minotaur
 
+config GENERIC_BF537_BOARD
+	bool "Generic"
+	help
+	  Generic or Custom board support.
+
 endchoice

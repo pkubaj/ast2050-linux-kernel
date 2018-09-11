@@ -8,7 +8,6 @@
 
 #include <linux/seccomp.h>
 #include <linux/sched.h>
-#include <linux/compat.h>
 
 /* #define SECCOMP_DEBUG 1 */
 #define NR_SECCOMP_MODES 1
@@ -23,7 +22,7 @@ static int mode1_syscalls[] = {
 	0, /* null terminated */
 };
 
-#ifdef CONFIG_COMPAT
+#ifdef TIF_32BIT
 static int mode1_syscalls_32[] = {
 	__NR_seccomp_read_32, __NR_seccomp_write_32, __NR_seccomp_exit_32, __NR_seccomp_sigreturn_32,
 	0, /* null terminated */
@@ -38,8 +37,8 @@ void __secure_computing(int this_syscall)
 	switch (mode) {
 	case 1:
 		syscall = mode1_syscalls;
-#ifdef CONFIG_COMPAT
-		if (is_compat_task())
+#ifdef TIF_32BIT
+		if (test_thread_flag(TIF_32BIT))
 			syscall = mode1_syscalls_32;
 #endif
 		do {

@@ -179,69 +179,6 @@ static void ath9k_hw_get_legacy_target_powers(struct ath_hw *ah,
 	}
 }
 
-static void ath9k_get_txgain_index(struct ath_hw *ah,
-		struct ath9k_channel *chan,
-		struct calDataPerFreqOpLoop *rawDatasetOpLoop,
-		u8 *calChans,  u16 availPiers, u8 *pwr, u8 *pcdacIdx)
-{
-	u8 pcdac, i = 0;
-	u16 idxL = 0, idxR = 0, numPiers;
-	bool match;
-	struct chan_centers centers;
-
-	ath9k_hw_get_channel_centers(ah, chan, &centers);
-
-	for (numPiers = 0; numPiers < availPiers; numPiers++)
-		if (calChans[numPiers] == AR5416_BCHAN_UNUSED)
-			break;
-
-	match = ath9k_hw_get_lower_upper_index(
-			(u8)FREQ2FBIN(centers.synth_center, IS_CHAN_2GHZ(chan)),
-			calChans, numPiers, &idxL, &idxR);
-	if (match) {
-		pcdac = rawDatasetOpLoop[idxL].pcdac[0][0];
-		*pwr = rawDatasetOpLoop[idxL].pwrPdg[0][0];
-	} else {
-		pcdac = rawDatasetOpLoop[idxR].pcdac[0][0];
-		*pwr = (rawDatasetOpLoop[idxL].pwrPdg[0][0] +
-				rawDatasetOpLoop[idxR].pwrPdg[0][0])/2;
-	}
-
-	while (pcdac > ah->originalGain[i] &&
-			i < (AR9280_TX_GAIN_TABLE_SIZE - 1))
-		i++;
-
-	*pcdacIdx = i;
-	return;
-}
-
-static void ath9k_olc_get_pdadcs(struct ath_hw *ah,
-				u32 initTxGain,
-				int txPower,
-				u8 *pPDADCValues)
-{
-	u32 i;
-	u32 offset;
-
-	REG_RMW_FIELD(ah, AR_PHY_TX_PWRCTRL6_0,
-			AR_PHY_TX_PWRCTRL_ERR_EST_MODE, 3);
-	REG_RMW_FIELD(ah, AR_PHY_TX_PWRCTRL6_1,
-			AR_PHY_TX_PWRCTRL_ERR_EST_MODE, 3);
-
-	REG_RMW_FIELD(ah, AR_PHY_TX_PWRCTRL7,
-			AR_PHY_TX_PWRCTRL_INIT_TX_GAIN, initTxGain);
-
-	offset = txPower;
-	for (i = 0; i < AR5416_NUM_PDADC_VALUES; i++)
-		if (i < offset)
-			pPDADCValues[i] = 0x0;
-		else
-			pPDADCValues[i] = 0xFF;
-}
-
-
-
-
 static void ath9k_hw_get_target_powers(struct ath_hw *ah,
 				       struct ath9k_channel *chan,
 				       struct cal_target_power_ht *powInfo,
@@ -502,7 +439,7 @@ static u32 ath9k_hw_4k_get_eeprom(struct ath_hw *ah,
 
 	switch (param) {
 	case EEP_NFTHRESH_2:
-		return pModal->noiseFloorThreshCh[0];
+		return pModal[1].noiseFloorThreshCh[0];
 	case AR_EEPROM_MAC(0):
 		return pBase->macAddr[0] << 8 | pBase->macAddr[1];
 	case AR_EEPROM_MAC(1):
@@ -529,8 +466,6 @@ static u32 ath9k_hw_4k_get_eeprom(struct ath_hw *ah,
 		return pBase->txMask;
 	case EEP_RX_MASK:
 		return pBase->rxMask;
-	case EEP_FRAC_N_5G:
-		return 0;
 	default:
 		return 0;
 	}
@@ -640,7 +575,7 @@ static void ath9k_hw_get_4k_gain_boundaries_pdadcs(struct ath_hw *ah,
 		pPdGainBoundaries[i] =
 			min((u16)AR5416_MAX_RATE_POWER, pPdGainBoundaries[i]);
 
-		if ((i == 0) && !AR_SREV_5416_20_OR_LATER(ah)) {
+		if ((i == 0) && !AR_SREV_5416_V20_OR_LATER(ah)) {
 			minDelta = pPdGainBoundaries[0] - 23;
 			pPdGainBoundaries[0] = 23;
 		} else {
@@ -679,7 +614,7 @@ static void ath9k_hw_get_4k_gain_boundaries_pdadcs(struct ath_hw *ah,
 				    vpdTableI[i][sizeCurrVpdTable - 2]);
 		vpdStep = (int16_t)((vpdStep < 1) ? 1 : vpdStep);
 
-		if (tgtIndex >= maxIndex) {
+		if (tgtIndex > maxIndex) {
 			while ((ss <= tgtIndex) &&
 			       (k < (AR5416_NUM_PDADC_VALUES - 1))) {
 				tmpVal = (int16_t) TMP_VAL_VPD_TABLE;
@@ -713,11 +648,11 @@ static bool ath9k_hw_set_4k_power_cal_table(struct ath_hw *ah,
 	u8 *pCalBChans = NULL;
 	u16 pdGainOverlap_t2;
 	static u8 pdadcValues[AR5416_NUM_PDADC_VALUES];
-	u16 gainBoundaries[AR5416_EEP4K_PD_GAINS_IN_MASK];
+	u16 gainBoundaries[AR5416_PD_GAINS_IN_MASK];
 	u16 numPiers, i, j;
 	int16_t tMinCalPower;
 	u16 numXpdGain, xpdMask;
-	u16 xpdGainValues[AR5416_EEP4K_NUM_PD_GAINS] = { 0, 0 };
+	u16 xpdGainValues[AR5416_NUM_PD_GAINS] = { 0, 0, 0, 0 };
 	u32 reg32, regOffset, regChainOffset;
 
 	xpdMask = pEepData->modalHeader.xpdGain;
@@ -732,16 +667,16 @@ static bool ath9k_hw_set_4k_power_cal_table(struct ath_hw *ah,
 	}
 
 	pCalBChans = pEepData->calFreqPier2G;
-	numPiers = AR5416_EEP4K_NUM_2G_CAL_PIERS;
+	numPiers = AR5416_NUM_2G_CAL_PIERS;
 
 	numXpdGain = 0;
 
-	for (i = 1; i <= AR5416_EEP4K_PD_GAINS_IN_MASK; i++) {
-		if ((xpdMask >> (AR5416_EEP4K_PD_GAINS_IN_MASK - i)) & 1) {
-			if (numXpdGain >= AR5416_EEP4K_NUM_PD_GAINS)
+	for (i = 1; i <= AR5416_PD_GAINS_IN_MASK; i++) {
+		if ((xpdMask >> (AR5416_PD_GAINS_IN_MASK - i)) & 1) {
+			if (numXpdGain >= AR5416_NUM_PD_GAINS)
 				break;
 			xpdGainValues[numXpdGain] =
-				(u16)(AR5416_EEP4K_PD_GAINS_IN_MASK - i);
+				(u16)(AR5416_PD_GAINS_IN_MASK - i);
 			numXpdGain++;
 		}
 	}
@@ -752,10 +687,11 @@ static bool ath9k_hw_set_4k_power_cal_table(struct ath_hw *ah,
 		      xpdGainValues[0]);
 	REG_RMW_FIELD(ah, AR_PHY_TPCRG1, AR_PHY_TPCRG1_PD_GAIN_2,
 		      xpdGainValues[1]);
-	REG_RMW_FIELD(ah, AR_PHY_TPCRG1, AR_PHY_TPCRG1_PD_GAIN_3, 0);
+	REG_RMW_FIELD(ah, AR_PHY_TPCRG1, AR_PHY_TPCRG1_PD_GAIN_3,
+		      xpdGainValues[2]);
 
-	for (i = 0; i < AR5416_EEP4K_MAX_CHAINS; i++) {
-		if (AR_SREV_5416_20_OR_LATER(ah) &&
+	for (i = 0; i < AR5416_MAX_CHAINS; i++) {
+		if (AR_SREV_5416_V20_OR_LATER(ah) &&
 		    (ah->rxchainmask == 5 || ah->txchainmask == 5) &&
 		    (i != 0)) {
 			regChainOffset = (i == 1) ? 0x2000 : 0x1000;
@@ -771,7 +707,7 @@ static bool ath9k_hw_set_4k_power_cal_table(struct ath_hw *ah,
 					    &tMinCalPower, gainBoundaries,
 					    pdadcValues, numXpdGain);
 
-			if ((i == 0) || AR_SREV_5416_20_OR_LATER(ah)) {
+			if ((i == 0) || AR_SREV_5416_V20_OR_LATER(ah)) {
 				REG_WRITE(ah, AR_PHY_TPCRG5 + regChainOffset,
 					  SM(pdGainOverlap_t2,
 					     AR_PHY_TPCRG5_PD_GAIN_OVERLAP)
@@ -1404,7 +1340,7 @@ static u8 ath9k_hw_4k_get_num_ant_config(struct ath_hw *ah,
 	return 1;
 }
 
-static u16 ath9k_hw_4k_get_spur_channel(struct ath_hw *ah, u16 i, bool is2GHz)
+u16 ath9k_hw_4k_get_spur_channel(struct ath_hw *ah, u16 i, bool is2GHz)
 {
 #define EEP_MAP4K_SPURCHAN \
 	(ah->eeprom.map4k.modalHeader.spurChans[i].spurChan)
@@ -1433,7 +1369,7 @@ static u16 ath9k_hw_4k_get_spur_channel(struct ath_hw *ah, u16 i, bool is2GHz)
 #undef EEP_MAP4K_SPURCHAN
 }
 
-static struct eeprom_ops eep_4k_ops = {
+struct eeprom_ops eep_4k_ops = {
 	.check_eeprom		= ath9k_hw_4k_check_eeprom,
 	.get_eeprom		= ath9k_hw_4k_get_eeprom,
 	.fill_eeprom		= ath9k_hw_4k_fill_eeprom,
@@ -1658,24 +1594,9 @@ static u32 ath9k_hw_def_get_eeprom(struct ath_hw *ah,
 		return pBase->rxGainType;
 	case EEP_TXGAIN_TYPE:
 		return pBase->txGainType;
-	case EEP_OL_PWRCTRL:
-		if (AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_19)
-			return pBase->openLoopPwrCntl ? true : false;
-		else
-			return false;
-	case EEP_RC_CHAIN_MASK:
-		if (AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_19)
-			return pBase->rcChainMask;
-		else
-			return 0;
 	case EEP_DAC_HPWR_5G:
 		if (AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_20)
 			return pBase->dacHiPwrMode_5G;
-		else
-			return 0;
-	case EEP_FRAC_N_5G:
-		if (AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_22)
-			return pBase->frac_n_5g;
 		else
 			return 0;
 	default:
@@ -1707,7 +1628,7 @@ static bool ath9k_hw_def_set_board_values(struct ath_hw *ah,
 				break;
 		}
 
-		if (AR_SREV_5416_20_OR_LATER(ah) &&
+		if (AR_SREV_5416_V20_OR_LATER(ah) &&
 		    (ah->rxchainmask == 5 || ah->txchainmask == 5)
 		    && (i != 0))
 			regChainOffset = (i == 1) ? 0x2000 : 0x1000;
@@ -1728,7 +1649,7 @@ static bool ath9k_hw_def_set_board_values(struct ath_hw *ah,
 			  SM(pModal->iqCalQCh[i],
 			     AR_PHY_TIMING_CTRL4_IQCORR_Q_Q_COFF));
 
-		if ((i == 0) || AR_SREV_5416_20_OR_LATER(ah)) {
+		if ((i == 0) || AR_SREV_5416_V20_OR_LATER(ah)) {
 			if (AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_3) {
 				txRxAttenLocal = pModal->txRxAttenCh[i];
 				if (AR_SREV_9280_10_OR_LATER(ah)) {
@@ -1911,15 +1832,8 @@ static bool ath9k_hw_def_set_board_values(struct ath_hw *ah,
 				      pModal->swSettleHt40);
 	}
 
-	if (AR_SREV_9280_20_OR_LATER(ah) &&
-			AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_19)
-		REG_RMW_FIELD(ah, AR_PHY_CCK_TX_CTRL,
-				AR_PHY_CCK_TX_CTRL_TX_DAC_SCALE_CCK,
-				pModal->miscBits);
-
-
 	if (AR_SREV_9280_20(ah) && AR5416_VER_MASK >= AR5416_EEP_MINOR_VER_20) {
-		if (IS_CHAN_2GHZ(chan))
+		if (IS_CHAN_HT20(chan))
 			REG_RMW_FIELD(ah, AR_AN_TOP1, AR_AN_TOP1_DACIPMODE,
 					eep->baseEepHeader.dacLpMode);
 		else if (eep->baseEepHeader.dacHiPwrMode_5G)
@@ -1930,10 +1844,6 @@ static bool ath9k_hw_def_set_board_values(struct ath_hw *ah,
 
 		REG_RMW_FIELD(ah, AR_PHY_FRAME_CTL, AR_PHY_FRAME_CTL_TX_CLIP,
 				pModal->miscBits >> 2);
-
-		REG_RMW_FIELD(ah, AR_PHY_TX_PWRCTRL9,
-				AR_PHY_TX_DESIRED_SCALE_CCK,
-				eep->baseEepHeader.desiredScaleCCK);
 	}
 
 	return true;
@@ -2094,7 +2004,7 @@ static void ath9k_hw_get_def_gain_boundaries_pdadcs(struct ath_hw *ah,
 		pPdGainBoundaries[i] =
 			min((u16)AR5416_MAX_RATE_POWER, pPdGainBoundaries[i]);
 
-		if ((i == 0) && !AR_SREV_5416_20_OR_LATER(ah)) {
+		if ((i == 0) && !AR_SREV_5416_V20_OR_LATER(ah)) {
 			minDelta = pPdGainBoundaries[0] - 23;
 			pPdGainBoundaries[0] = 23;
 		} else {
@@ -2163,10 +2073,6 @@ static bool ath9k_hw_set_def_power_cal_table(struct ath_hw *ah,
 				  struct ath9k_channel *chan,
 				  int16_t *pTxPowerIndexOffset)
 {
-#define SM_PD_GAIN(x) SM(0x38, AR_PHY_TPCRG5_PD_GAIN_BOUNDARY_##x)
-#define SM_PDGAIN_B(x, y) \
-		SM((gainBoundaries[x]), AR_PHY_TPCRG5_PD_GAIN_BOUNDARY_##y)
-
 	struct ar5416_eeprom_def *pEepData = &ah->eeprom.def;
 	struct cal_data_per_freq *pRawDataset;
 	u8 *pCalBChans = NULL;
@@ -2200,12 +2106,6 @@ static bool ath9k_hw_set_def_power_cal_table(struct ath_hw *ah,
 		numPiers = AR5416_NUM_5G_CAL_PIERS;
 	}
 
-	if (OLC_FOR_AR9280_20_LATER && IS_CHAN_2GHZ(chan)) {
-		pRawDataset = pEepData->calPierData2G[0];
-		ah->initPDADC = ((struct calDataPerFreqOpLoop *)
-				 pRawDataset)->vpdPdg[0][0];
-	}
-
 	numXpdGain = 0;
 
 	for (i = 1; i <= AR5416_PD_GAINS_IN_MASK; i++) {
@@ -2228,7 +2128,7 @@ static bool ath9k_hw_set_def_power_cal_table(struct ath_hw *ah,
 		      xpdGainValues[2]);
 
 	for (i = 0; i < AR5416_MAX_CHAINS; i++) {
-		if (AR_SREV_5416_20_OR_LATER(ah) &&
+		if (AR_SREV_5416_V20_OR_LATER(ah) &&
 		    (ah->rxchainmask == 5 || ah->txchainmask == 5) &&
 		    (i != 0)) {
 			regChainOffset = (i == 1) ? 0x2000 : 0x1000;
@@ -2241,45 +2141,25 @@ static bool ath9k_hw_set_def_power_cal_table(struct ath_hw *ah,
 			else
 				pRawDataset = pEepData->calPierData5G[i];
 
+			ath9k_hw_get_def_gain_boundaries_pdadcs(ah, chan,
+					    pRawDataset, pCalBChans,
+					    numPiers, pdGainOverlap_t2,
+					    &tMinCalPower, gainBoundaries,
+					    pdadcValues, numXpdGain);
 
-			if (OLC_FOR_AR9280_20_LATER) {
-				u8 pcdacIdx;
-				u8 txPower;
-
-				ath9k_get_txgain_index(ah, chan,
-				(struct calDataPerFreqOpLoop *)pRawDataset,
-				pCalBChans, numPiers, &txPower, &pcdacIdx);
-				ath9k_olc_get_pdadcs(ah, pcdacIdx,
-						     txPower/2, pdadcValues);
-			} else {
-				ath9k_hw_get_def_gain_boundaries_pdadcs(ah,
-							chan, pRawDataset,
-							pCalBChans, numPiers,
-							pdGainOverlap_t2,
-							&tMinCalPower,
-							gainBoundaries,
-							pdadcValues,
-							numXpdGain);
-			}
-
-			if ((i == 0) || AR_SREV_5416_20_OR_LATER(ah)) {
-				if (OLC_FOR_AR9280_20_LATER) {
-					REG_WRITE(ah,
-						AR_PHY_TPCRG5 + regChainOffset,
-						SM(0x6,
-						AR_PHY_TPCRG5_PD_GAIN_OVERLAP) |
-						SM_PD_GAIN(1) | SM_PD_GAIN(2) |
-						SM_PD_GAIN(3) | SM_PD_GAIN(4));
-				} else {
-					REG_WRITE(ah,
-						AR_PHY_TPCRG5 + regChainOffset,
-						SM(pdGainOverlap_t2,
-						AR_PHY_TPCRG5_PD_GAIN_OVERLAP)|
-						SM_PDGAIN_B(0, 1) |
-						SM_PDGAIN_B(1, 2) |
-						SM_PDGAIN_B(2, 3) |
-						SM_PDGAIN_B(3, 4));
-				}
+			if ((i == 0) || AR_SREV_5416_V20_OR_LATER(ah)) {
+				REG_WRITE(ah,
+					  AR_PHY_TPCRG5 + regChainOffset,
+					  SM(pdGainOverlap_t2,
+					     AR_PHY_TPCRG5_PD_GAIN_OVERLAP)
+					  | SM(gainBoundaries[0],
+					       AR_PHY_TPCRG5_PD_GAIN_BOUNDARY_1)
+					  | SM(gainBoundaries[1],
+					       AR_PHY_TPCRG5_PD_GAIN_BOUNDARY_2)
+					  | SM(gainBoundaries[2],
+					       AR_PHY_TPCRG5_PD_GAIN_BOUNDARY_3)
+					  | SM(gainBoundaries[3],
+				       AR_PHY_TPCRG5_PD_GAIN_BOUNDARY_4));
 			}
 
 			regOffset = AR_PHY_BASE + (672 << 2) + regChainOffset;
@@ -2313,8 +2193,6 @@ static bool ath9k_hw_set_def_power_cal_table(struct ath_hw *ah,
 	*pTxPowerIndexOffset = 0;
 
 	return true;
-#undef SM_PD_GAIN
-#undef SM_PDGAIN_B
 }
 
 static bool ath9k_hw_set_def_power_per_rate_table(struct ath_hw *ah,
@@ -2615,14 +2493,13 @@ static int ath9k_hw_def_set_txpower(struct ath_hw *ah,
 				    u8 twiceMaxRegulatoryPower,
 				    u8 powerLimit)
 {
-#define RT_AR_DELTA(x) (ratesArray[x] - cck_ofdm_delta)
 	struct ar5416_eeprom_def *pEepData = &ah->eeprom.def;
 	struct modal_eep_header *pModal =
 		&(pEepData->modalHeader[IS_CHAN_2GHZ(chan)]);
 	int16_t ratesArray[Ar5416RateSize];
 	int16_t txPowerIndexOffset = 0;
 	u8 ht40PowerIncForPdadc = 2;
-	int i, cck_ofdm_delta = 0;
+	int i;
 
 	memset(ratesArray, 0, sizeof(ratesArray));
 
@@ -2671,30 +2548,16 @@ static int ath9k_hw_def_set_txpower(struct ath_hw *ah,
 		  | ATH9K_POW_SM(ratesArray[rate24mb], 0));
 
 	if (IS_CHAN_2GHZ(chan)) {
-		if (OLC_FOR_AR9280_20_LATER) {
-			cck_ofdm_delta = 2;
-			REG_WRITE(ah, AR_PHY_POWER_TX_RATE3,
-				ATH9K_POW_SM(RT_AR_DELTA(rate2s), 24)
-				| ATH9K_POW_SM(RT_AR_DELTA(rate2l), 16)
-				| ATH9K_POW_SM(ratesArray[rateXr], 8)
-				| ATH9K_POW_SM(RT_AR_DELTA(rate1l), 0));
-			REG_WRITE(ah, AR_PHY_POWER_TX_RATE4,
-				ATH9K_POW_SM(RT_AR_DELTA(rate11s), 24)
-				| ATH9K_POW_SM(RT_AR_DELTA(rate11l), 16)
-				| ATH9K_POW_SM(RT_AR_DELTA(rate5_5s), 8)
-				| ATH9K_POW_SM(RT_AR_DELTA(rate5_5l), 0));
-		} else {
-			REG_WRITE(ah, AR_PHY_POWER_TX_RATE3,
-				ATH9K_POW_SM(ratesArray[rate2s], 24)
-				| ATH9K_POW_SM(ratesArray[rate2l], 16)
-				| ATH9K_POW_SM(ratesArray[rateXr], 8)
-				| ATH9K_POW_SM(ratesArray[rate1l], 0));
-			REG_WRITE(ah, AR_PHY_POWER_TX_RATE4,
-				ATH9K_POW_SM(ratesArray[rate11s], 24)
-				| ATH9K_POW_SM(ratesArray[rate11l], 16)
-				| ATH9K_POW_SM(ratesArray[rate5_5s], 8)
-				| ATH9K_POW_SM(ratesArray[rate5_5l], 0));
-		}
+		REG_WRITE(ah, AR_PHY_POWER_TX_RATE3,
+			  ATH9K_POW_SM(ratesArray[rate2s], 24)
+			  | ATH9K_POW_SM(ratesArray[rate2l], 16)
+			  | ATH9K_POW_SM(ratesArray[rateXr], 8)
+			  | ATH9K_POW_SM(ratesArray[rate1l], 0));
+		REG_WRITE(ah, AR_PHY_POWER_TX_RATE4,
+			  ATH9K_POW_SM(ratesArray[rate11s], 24)
+			  | ATH9K_POW_SM(ratesArray[rate11l], 16)
+			  | ATH9K_POW_SM(ratesArray[rate5_5s], 8)
+			  | ATH9K_POW_SM(ratesArray[rate5_5l], 0));
 	}
 
 	REG_WRITE(ah, AR_PHY_POWER_TX_RATE5,
@@ -2727,19 +2590,12 @@ static int ath9k_hw_def_set_txpower(struct ath_hw *ah,
 					 ht40PowerIncForPdadc, 8)
 			  | ATH9K_POW_SM(ratesArray[rateHt40_4] +
 					 ht40PowerIncForPdadc, 0));
-		if (OLC_FOR_AR9280_20_LATER) {
-			REG_WRITE(ah, AR_PHY_POWER_TX_RATE9,
-				ATH9K_POW_SM(ratesArray[rateExtOfdm], 24)
-				| ATH9K_POW_SM(RT_AR_DELTA(rateExtCck), 16)
-				| ATH9K_POW_SM(ratesArray[rateDupOfdm], 8)
-				| ATH9K_POW_SM(RT_AR_DELTA(rateDupCck), 0));
-		} else {
-			REG_WRITE(ah, AR_PHY_POWER_TX_RATE9,
-				ATH9K_POW_SM(ratesArray[rateExtOfdm], 24)
-				| ATH9K_POW_SM(ratesArray[rateExtCck], 16)
-				| ATH9K_POW_SM(ratesArray[rateDupOfdm], 8)
-				| ATH9K_POW_SM(ratesArray[rateDupCck], 0));
-		}
+
+		REG_WRITE(ah, AR_PHY_POWER_TX_RATE9,
+			  ATH9K_POW_SM(ratesArray[rateExtOfdm], 24)
+			  | ATH9K_POW_SM(ratesArray[rateExtCck], 16)
+			  | ATH9K_POW_SM(ratesArray[rateDupOfdm], 8)
+			  | ATH9K_POW_SM(ratesArray[rateDupCck], 0));
 	}
 
 	REG_WRITE(ah, AR_PHY_POWER_TX_SUB,
@@ -2758,21 +2614,6 @@ static int ath9k_hw_def_set_txpower(struct ath_hw *ah,
 			ratesArray[i] + AR5416_PWR_TABLE_OFFSET * 2;
 	else
 		ah->regulatory.max_power_level = ratesArray[i];
-
-	switch(ar5416_get_ntxchains(ah->txchainmask)) {
-	case 1:
-		break;
-	case 2:
-		ah->regulatory.max_power_level += INCREASE_MAXPOW_BY_TWO_CHAIN;
-		break;
-	case 3:
-		ah->regulatory.max_power_level += INCREASE_MAXPOW_BY_THREE_CHAIN;
-		break;
-	default:
-		DPRINTF(ah->ah_sc, ATH_DBG_EEPROM,
-			"Invalid chainmask configuration\n");
-		break;
-	}
 
 	return 0;
 }
@@ -2805,7 +2646,7 @@ static u16 ath9k_hw_def_get_eeprom_antenna_cfg(struct ath_hw *ah,
 	return pModal->antCtrlCommon & 0xFFFF;
 }
 
-static u16 ath9k_hw_def_get_spur_channel(struct ath_hw *ah, u16 i, bool is2GHz)
+u16 ath9k_hw_def_get_spur_channel(struct ath_hw *ah, u16 i, bool is2GHz)
 {
 #define EEP_DEF_SPURCHAN \
 	(ah->eeprom.def.modalHeader[is2GHz].spurChans[i].spurChan)
@@ -2834,7 +2675,7 @@ static u16 ath9k_hw_def_get_spur_channel(struct ath_hw *ah, u16 i, bool is2GHz)
 #undef EEP_DEF_SPURCHAN
 }
 
-static struct eeprom_ops eep_def_ops = {
+struct eeprom_ops eep_def_ops = {
 	.check_eeprom		= ath9k_hw_def_check_eeprom,
 	.get_eeprom		= ath9k_hw_def_get_eeprom,
 	.fill_eeprom		= ath9k_hw_def_fill_eeprom,

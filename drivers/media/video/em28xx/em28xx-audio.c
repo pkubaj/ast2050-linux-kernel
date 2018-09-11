@@ -448,10 +448,9 @@ static int em28xx_audio_init(struct em28xx *dev)
 	printk(KERN_INFO "em28xx-audio.c: Copyright (C) 2006 Markus "
 			 "Rechberger\n");
 
-	err = snd_card_create(index[devnr], "Em28xx Audio", THIS_MODULE, 0,
-			      &card);
-	if (err < 0)
-		return err;
+	card = snd_card_new(index[devnr], "Em28xx Audio", THIS_MODULE, 0);
+	if (card == NULL)
+		return -ENOMEM;
 
 	spin_lock_init(&adev->slock);
 	err = snd_pcm_new(card, "Em28xx Audio", 0, 0, 1, &pcm);
@@ -464,8 +463,6 @@ static int em28xx_audio_init(struct em28xx *dev)
 	pcm->info_flags = 0;
 	pcm->private_data = dev;
 	strcpy(pcm->name, "Empia 28xx Capture");
-
-	snd_card_set_dev(card, &dev->udev->dev);
 	strcpy(card->driver, "Empia Em28xx Audio");
 	strcpy(card->shortname, "Em28xx Audio");
 	strcpy(card->longname, "Empia Em28xx Audio");

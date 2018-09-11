@@ -950,7 +950,6 @@ static struct strip *strip_get_idx(loff_t pos)
 }
 
 static void *strip_seq_start(struct seq_file *seq, loff_t *pos)
-	__acquires(RCU)
 {
 	rcu_read_lock();
 	return *pos ? strip_get_idx(*pos - 1) : SEQ_START_TOKEN;
@@ -974,7 +973,6 @@ static void *strip_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void strip_seq_stop(struct seq_file *seq, void *v)
-	__releases(RCU)
 {
 	rcu_read_unlock();
 }
@@ -2477,16 +2475,6 @@ static const struct header_ops strip_header_ops = {
 	.rebuild = strip_rebuild_header,
 };
 
-
-static const struct net_device_ops strip_netdev_ops = {
-	.ndo_open 	= strip_open_low,
-	.ndo_stop 	= strip_close_low,
-	.ndo_start_xmit = strip_xmit,
-	.ndo_set_mac_address = strip_set_mac_address,
-	.ndo_get_stats	= strip_get_stats,
-	.ndo_change_mtu = strip_change_mtu,
-};
-
 /*
  * This routine is called by DDI when the
  * (dynamically assigned) device is registered
@@ -2513,8 +2501,18 @@ static void strip_dev_setup(struct net_device *dev)
 	dev->dev_addr[0] = 0;
 	dev->addr_len = sizeof(MetricomAddress);
 
-	dev->header_ops = &strip_header_ops,
-	dev->netdev_ops = &strip_netdev_ops;
+	/*
+	 * Pointers to interface service routines.
+	 */
+
+	dev->open = strip_open_low;
+	dev->stop = strip_close_low;
+	dev->hard_start_xmit = strip_xmit;
+	dev->header_ops = &strip_header_ops;
+
+	dev->set_mac_address = strip_set_mac_address;
+	dev->get_stats = strip_get_stats;
+	dev->change_mtu = strip_change_mtu;
 }
 
 /*

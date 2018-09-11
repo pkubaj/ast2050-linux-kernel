@@ -803,10 +803,9 @@ static int __devinit cx88_audio_initdev(struct pci_dev *pci,
 		return (-ENOENT);
 	}
 
-	err = snd_card_create(index[devno], id[devno], THIS_MODULE,
-			      sizeof(snd_cx88_card_t), &card);
-	if (err < 0)
-		return err;
+	card = snd_card_new(index[devno], id[devno], THIS_MODULE, sizeof(snd_cx88_card_t));
+	if (!card)
+		return (-ENOMEM);
 
 	card->private_free = snd_cx88_dev_free;
 

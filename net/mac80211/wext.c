@@ -132,17 +132,122 @@ static int ieee80211_ioctl_siwgenie(struct net_device *dev,
 	if (sdata->flags & IEEE80211_SDATA_USERSPACE_MLME)
 		return -EOPNOTSUPP;
 
-	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+	if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+	    sdata->vif.type == NL80211_IFTYPE_ADHOC) {
 		int ret = ieee80211_sta_set_extra_ie(sdata, extra, data->length);
 		if (ret)
 			return ret;
-		sdata->u.mgd.flags &= ~IEEE80211_STA_AUTO_BSSID_SEL;
-		ieee80211_sta_req_auth(sdata);
+		sdata->u.sta.flags &= ~IEEE80211_STA_AUTO_BSSID_SEL;
+		ieee80211_sta_req_auth(sdata, &sdata->u.sta);
 		return 0;
 	}
 
 	return -EOPNOTSUPP;
 }
+
+static u8 ieee80211_get_wstats_flags(struct ieee80211_local *local)
+{
+	u8 wstats_flags = 0;
+
+	wstats_flags |= local->hw.flags & (IEEE80211_HW_SIGNAL_UNSPEC |
+					   IEEE80211_HW_SIGNAL_DBM) ?
+				IW_QUAL_QUAL_UPDATED : IW_QUAL_QUAL_INVALID;
+	wstats_flags |= local->hw.flags & IEEE80211_HW_NOISE_DBM ?
+				IW_QUAL_NOISE_UPDATED : IW_QUAL_NOISE_INVALID;
+	if (local->hw.flags & IEEE80211_HW_SIGNAL_DBM)
+		wstats_flags |= IW_QUAL_DBM;
+
+	return wstats_flags;
+}
+
+static int ieee80211_ioctl_giwrange(struct net_device *dev,
+				 struct iw_request_info *info,
+				 struct iw_point *data, char *extra)
+{
+	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
+	struct iw_range *range = (struct iw_range *) extra;
+	enum ieee80211_band band;
+	int c = 0;
+
+	data->length = sizeof(struct iw_range);
+	memset(range, 0, sizeof(struct iw_range));
+
+	range->we_version_compiled = WIRELESS_EXT;
+	range->we_version_source = 21;
+	range->retry_capa = IW_RETRY_LIMIT;
+	range->retry_flags = IW_RETRY_LIMIT;
+	range->min_retry = 0;
+	range->max_retry = 255;
+	range->min_rts = 0;
+	range->max_rts = 2347;
+	range->min_frag = 256;
+	range->max_frag = 2346;
+
+	range->encoding_size[0] = 5;
+	range->encoding_size[1] = 13;
+	range->num_encoding_sizes = 2;
+	range->max_encoding_tokens = NUM_DEFAULT_KEYS;
+
+	/* cfg80211 requires this, and enforces 0..100 */
+	if (local->hw.flags & IEEE80211_HW_SIGNAL_UNSPEC)
+		range->max_qual.level = 100;
+	else if  (local->hw.flags & IEEE80211_HW_SIGNAL_DBM)
+		range->max_qual.level = -110;
+	else
+		range->max_qual.level = 0;
+
+	if (local->hw.flags & IEEE80211_HW_NOISE_DBM)
+		range->max_qual.noise = -110;
+	else
+		range->max_qual.noise = 0;
+
+	range->max_qual.qual = 100;
+	range->max_qual.updated = ieee80211_get_wstats_flags(local);
+
+	range->avg_qual.qual = 50;
+	/* not always true but better than nothing */
+	range->avg_qual.level = range->max_qual.level / 2;
+	range->avg_qual.noise = range->max_qual.noise / 2;
+	range->avg_qual.updated = ieee80211_get_wstats_flags(local);
+
+	range->enc_capa = IW_ENC_CAPA_WPA | IW_ENC_CAPA_WPA2 |
+			  IW_ENC_CAPA_CIPHER_TKIP | IW_ENC_CAPA_CIPHER_CCMP;
+
+
+	for (band = 0; band < IEEE80211_NUM_BANDS; band ++) {
+		int i;
+		struct ieee80211_supported_band *sband;
+
+		sband = local->hw.wiphy->bands[band];
+
+		if (!sband)
+			continue;
+
+		for (i = 0; i < sband->n_channels && c < IW_MAX_FREQUENCIES; i++) {
+			struct ieee80211_channel *chan = &sband->channels[i];
+
+			if (!(chan->flags & IEEE80211_CHAN_DISABLED)) {
+				range->freq[c].i =
+					ieee80211_frequency_to_channel(
+						chan->center_freq);
+				range->freq[c].m = chan->center_freq;
+				range->freq[c].e = 6;
+				c++;
+			}
+		}
+	}
+	range->num_channels = c;
+	range->num_frequency = c;
+
+	IW_EVENT_CAPA_SET_KERNEL(range->event_capa);
+	IW_EVENT_CAPA_SET(range->event_capa, SIOCGIWAP);
+	IW_EVENT_CAPA_SET(range->event_capa, SIOCGIWSCAN);
+
+	range->scan_capa |= IW_SCAN_CAPA_ESSID;
+
+	return 0;
+}
+
 
 static int ieee80211_ioctl_siwfreq(struct net_device *dev,
 				   struct iw_request_info *info,
@@ -150,19 +255,16 @@ static int ieee80211_ioctl_siwfreq(struct net_device *dev,
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 
-	if (sdata->vif.type == NL80211_IFTYPE_ADHOC)
-		sdata->u.ibss.flags &= ~IEEE80211_IBSS_AUTO_CHANNEL_SEL;
-	else if (sdata->vif.type == NL80211_IFTYPE_STATION)
-		sdata->u.mgd.flags &= ~IEEE80211_STA_AUTO_CHANNEL_SEL;
+	if (sdata->vif.type == NL80211_IFTYPE_ADHOC ||
+	    sdata->vif.type == NL80211_IFTYPE_STATION)
+		sdata->u.sta.flags &= ~IEEE80211_STA_AUTO_CHANNEL_SEL;
 
 	/* freq->e == 0: freq->m = channel; otherwise freq = m * 10^e */
 	if (freq->e == 0) {
 		if (freq->m < 0) {
-			if (sdata->vif.type == NL80211_IFTYPE_ADHOC)
-				sdata->u.ibss.flags |=
-					IEEE80211_IBSS_AUTO_CHANNEL_SEL;
-			else if (sdata->vif.type == NL80211_IFTYPE_STATION)
-				sdata->u.mgd.flags |=
+			if (sdata->vif.type == NL80211_IFTYPE_ADHOC ||
+			    sdata->vif.type == NL80211_IFTYPE_STATION)
+				sdata->u.sta.flags |=
 					IEEE80211_STA_AUTO_CHANNEL_SEL;
 			return 0;
 		} else
@@ -199,35 +301,32 @@ static int ieee80211_ioctl_siwessid(struct net_device *dev,
 {
 	struct ieee80211_sub_if_data *sdata;
 	size_t len = data->length;
-	int ret;
 
 	/* iwconfig uses nul termination in SSID.. */
 	if (len > 0 && ssid[len - 1] == '\0')
 		len--;
 
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
-	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+	if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+	    sdata->vif.type == NL80211_IFTYPE_ADHOC) {
+		int ret;
 		if (sdata->flags & IEEE80211_SDATA_USERSPACE_MLME) {
 			if (len > IEEE80211_MAX_SSID_LEN)
 				return -EINVAL;
-			memcpy(sdata->u.mgd.ssid, ssid, len);
-			sdata->u.mgd.ssid_len = len;
+			memcpy(sdata->u.sta.ssid, ssid, len);
+			sdata->u.sta.ssid_len = len;
 			return 0;
 		}
-
 		if (data->flags)
-			sdata->u.mgd.flags &= ~IEEE80211_STA_AUTO_SSID_SEL;
+			sdata->u.sta.flags &= ~IEEE80211_STA_AUTO_SSID_SEL;
 		else
-			sdata->u.mgd.flags |= IEEE80211_STA_AUTO_SSID_SEL;
-
+			sdata->u.sta.flags |= IEEE80211_STA_AUTO_SSID_SEL;
 		ret = ieee80211_sta_set_ssid(sdata, ssid, len);
 		if (ret)
 			return ret;
-
-		ieee80211_sta_req_auth(sdata);
+		ieee80211_sta_req_auth(sdata, &sdata->u.sta);
 		return 0;
-	} else if (sdata->vif.type == NL80211_IFTYPE_ADHOC)
-		return ieee80211_ibss_set_ssid(sdata, ssid, len);
+	}
 
 	return -EOPNOTSUPP;
 }
@@ -241,16 +340,9 @@ static int ieee80211_ioctl_giwessid(struct net_device *dev,
 
 	struct ieee80211_sub_if_data *sdata;
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
-	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+	if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+	    sdata->vif.type == NL80211_IFTYPE_ADHOC) {
 		int res = ieee80211_sta_get_ssid(sdata, ssid, &len);
-		if (res == 0) {
-			data->length = len;
-			data->flags = 1;
-		} else
-			data->flags = 0;
-		return res;
-	} else if (sdata->vif.type == NL80211_IFTYPE_ADHOC) {
-		int res = ieee80211_ibss_get_ssid(sdata, ssid, &len);
 		if (res == 0) {
 			data->length = len;
 			data->flags = 1;
@@ -270,35 +362,26 @@ static int ieee80211_ioctl_siwap(struct net_device *dev,
 	struct ieee80211_sub_if_data *sdata;
 
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
-	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+	if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+	    sdata->vif.type == NL80211_IFTYPE_ADHOC) {
 		int ret;
 		if (sdata->flags & IEEE80211_SDATA_USERSPACE_MLME) {
-			memcpy(sdata->u.mgd.bssid, (u8 *) &ap_addr->sa_data,
+			memcpy(sdata->u.sta.bssid, (u8 *) &ap_addr->sa_data,
 			       ETH_ALEN);
 			return 0;
 		}
 		if (is_zero_ether_addr((u8 *) &ap_addr->sa_data))
-			sdata->u.mgd.flags |= IEEE80211_STA_AUTO_BSSID_SEL |
+			sdata->u.sta.flags |= IEEE80211_STA_AUTO_BSSID_SEL |
 				IEEE80211_STA_AUTO_CHANNEL_SEL;
 		else if (is_broadcast_ether_addr((u8 *) &ap_addr->sa_data))
-			sdata->u.mgd.flags |= IEEE80211_STA_AUTO_BSSID_SEL;
+			sdata->u.sta.flags |= IEEE80211_STA_AUTO_BSSID_SEL;
 		else
-			sdata->u.mgd.flags &= ~IEEE80211_STA_AUTO_BSSID_SEL;
+			sdata->u.sta.flags &= ~IEEE80211_STA_AUTO_BSSID_SEL;
 		ret = ieee80211_sta_set_bssid(sdata, (u8 *) &ap_addr->sa_data);
 		if (ret)
 			return ret;
-		ieee80211_sta_req_auth(sdata);
+		ieee80211_sta_req_auth(sdata, &sdata->u.sta);
 		return 0;
-	} else if (sdata->vif.type == NL80211_IFTYPE_ADHOC) {
-		if (is_zero_ether_addr((u8 *) &ap_addr->sa_data))
-			sdata->u.ibss.flags |= IEEE80211_IBSS_AUTO_BSSID_SEL |
-					       IEEE80211_IBSS_AUTO_CHANNEL_SEL;
-		else if (is_broadcast_ether_addr((u8 *) &ap_addr->sa_data))
-			sdata->u.ibss.flags |= IEEE80211_IBSS_AUTO_BSSID_SEL;
-		else
-			sdata->u.ibss.flags &= ~IEEE80211_IBSS_AUTO_BSSID_SEL;
-
-		return ieee80211_ibss_set_bssid(sdata, (u8 *) &ap_addr->sa_data);
 	} else if (sdata->vif.type == NL80211_IFTYPE_WDS) {
 		/*
 		 * If it is necessary to update the WDS peer address
@@ -327,20 +410,17 @@ static int ieee80211_ioctl_giwap(struct net_device *dev,
 	struct ieee80211_sub_if_data *sdata;
 
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
-	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
-		if (sdata->u.mgd.state == IEEE80211_STA_MLME_ASSOCIATED) {
+	if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+	    sdata->vif.type == NL80211_IFTYPE_ADHOC) {
+		if (sdata->u.sta.state == IEEE80211_STA_MLME_ASSOCIATED ||
+		    sdata->u.sta.state == IEEE80211_STA_MLME_IBSS_JOINED) {
 			ap_addr->sa_family = ARPHRD_ETHER;
-			memcpy(&ap_addr->sa_data, sdata->u.mgd.bssid, ETH_ALEN);
-		} else
+			memcpy(&ap_addr->sa_data, sdata->u.sta.bssid, ETH_ALEN);
+			return 0;
+		} else {
 			memset(&ap_addr->sa_data, 0, ETH_ALEN);
-		return 0;
-	} else if (sdata->vif.type == NL80211_IFTYPE_ADHOC) {
-		if (sdata->u.ibss.state == IEEE80211_IBSS_MLME_JOINED) {
-			ap_addr->sa_family = ARPHRD_ETHER;
-			memcpy(&ap_addr->sa_data, sdata->u.ibss.bssid, ETH_ALEN);
-		} else
-			memset(&ap_addr->sa_data, 0, ETH_ALEN);
-		return 0;
+			return 0;
+		}
 	} else if (sdata->vif.type == NL80211_IFTYPE_WDS) {
 		ap_addr->sa_family = ARPHRD_ETHER;
 		memcpy(&ap_addr->sa_data, sdata->u.wds.remote_addr, ETH_ALEN);
@@ -406,7 +486,7 @@ static int ieee80211_ioctl_giwrate(struct net_device *dev,
 
 	rcu_read_lock();
 
-	sta = sta_info_get(local, sdata->u.mgd.bssid);
+	sta = sta_info_get(local, sdata->u.sta.bssid);
 
 	if (sta && !(sta->last_tx_rate.flags & IEEE80211_TX_RC_MCS))
 		rate->value = sband->bitrates[sta->last_tx_rate.idx].bitrate;
@@ -607,7 +687,8 @@ static int ieee80211_ioctl_siwmlme(struct net_device *dev,
 	struct iw_mlme *mlme = (struct iw_mlme *) extra;
 
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
-	if (!(sdata->vif.type == NL80211_IFTYPE_STATION))
+	if (sdata->vif.type != NL80211_IFTYPE_STATION &&
+	    sdata->vif.type != NL80211_IFTYPE_ADHOC)
 		return -EINVAL;
 
 	switch (mlme->cmd) {
@@ -703,7 +784,8 @@ static int ieee80211_ioctl_giwencode(struct net_device *dev,
 	erq->flags |= IW_ENCODE_ENABLED;
 
 	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
-		switch (sdata->u.mgd.auth_alg) {
+		struct ieee80211_if_sta *ifsta = &sdata->u.sta;
+		switch (ifsta->auth_alg) {
 		case WLAN_AUTH_OPEN:
 		case WLAN_AUTH_LEAP:
 			erq->flags |= IW_ENCODE_OPEN;
@@ -767,7 +849,7 @@ static int ieee80211_ioctl_siwpower(struct net_device *dev,
 		ret = ieee80211_hw_config(local,
 					  IEEE80211_CONF_CHANGE_DYNPS_TIMEOUT);
 
-	if (!(sdata->u.mgd.flags & IEEE80211_STA_ASSOCIATED))
+	if (!(sdata->u.sta.flags & IEEE80211_STA_ASSOCIATED))
 		return ret;
 
 	if (conf->dynamic_ps_timeout > 0 &&
@@ -826,10 +908,10 @@ static int ieee80211_ioctl_siwauth(struct net_device *dev,
 		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
 			if (data->value & (IW_AUTH_CIPHER_WEP40 |
 			    IW_AUTH_CIPHER_WEP104 | IW_AUTH_CIPHER_TKIP))
-				sdata->u.mgd.flags |=
+				sdata->u.sta.flags |=
 					IEEE80211_STA_TKIP_WEP_USED;
 			else
-				sdata->u.mgd.flags &=
+				sdata->u.sta.flags &=
 					~IEEE80211_STA_TKIP_WEP_USED;
 		}
 		break;
@@ -840,20 +922,21 @@ static int ieee80211_ioctl_siwauth(struct net_device *dev,
 		if (sdata->vif.type != NL80211_IFTYPE_STATION)
 			ret = -EINVAL;
 		else {
-			sdata->u.mgd.flags &= ~IEEE80211_STA_PRIVACY_INVOKED;
+			sdata->u.sta.flags &= ~IEEE80211_STA_PRIVACY_INVOKED;
 			/*
 			 * Privacy invoked by wpa_supplicant, store the
 			 * value and allow associating to a protected
 			 * network without having a key up front.
 			 */
 			if (data->value)
-				sdata->u.mgd.flags |=
+				sdata->u.sta.flags |=
 					IEEE80211_STA_PRIVACY_INVOKED;
 		}
 		break;
 	case IW_AUTH_80211_AUTH_ALG:
-		if (sdata->vif.type == NL80211_IFTYPE_STATION)
-			sdata->u.mgd.auth_algs = data->value;
+		if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+		    sdata->vif.type == NL80211_IFTYPE_ADHOC)
+			sdata->u.sta.auth_algs = data->value;
 		else
 			ret = -EOPNOTSUPP;
 		break;
@@ -862,16 +945,17 @@ static int ieee80211_ioctl_siwauth(struct net_device *dev,
 			ret = -EOPNOTSUPP;
 			break;
 		}
-		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+		if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+		    sdata->vif.type == NL80211_IFTYPE_ADHOC) {
 			switch (data->value) {
 			case IW_AUTH_MFP_DISABLED:
-				sdata->u.mgd.mfp = IEEE80211_MFP_DISABLED;
+				sdata->u.sta.mfp = IEEE80211_MFP_DISABLED;
 				break;
 			case IW_AUTH_MFP_OPTIONAL:
-				sdata->u.mgd.mfp = IEEE80211_MFP_OPTIONAL;
+				sdata->u.sta.mfp = IEEE80211_MFP_OPTIONAL;
 				break;
 			case IW_AUTH_MFP_REQUIRED:
-				sdata->u.mgd.mfp = IEEE80211_MFP_REQUIRED;
+				sdata->u.sta.mfp = IEEE80211_MFP_REQUIRED;
 				break;
 			default:
 				ret = -EINVAL;
@@ -896,9 +980,9 @@ static struct iw_statistics *ieee80211_get_wireless_stats(struct net_device *dev
 
 	rcu_read_lock();
 
-	if (sdata->vif.type == NL80211_IFTYPE_STATION)
-		sta = sta_info_get(local, sdata->u.mgd.bssid);
-
+	if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+	    sdata->vif.type == NL80211_IFTYPE_ADHOC)
+		sta = sta_info_get(local, sdata->u.sta.bssid);
 	if (!sta) {
 		wstats->discard.fragment = 0;
 		wstats->discard.misc = 0;
@@ -907,45 +991,10 @@ static struct iw_statistics *ieee80211_get_wireless_stats(struct net_device *dev
 		wstats->qual.noise = 0;
 		wstats->qual.updated = IW_QUAL_ALL_INVALID;
 	} else {
-		wstats->qual.updated = 0;
-		/*
-		 * mirror what cfg80211 does for iwrange/scan results,
-		 * otherwise userspace gets confused.
-		 */
-		if (local->hw.flags & (IEEE80211_HW_SIGNAL_UNSPEC |
-				       IEEE80211_HW_SIGNAL_DBM)) {
-			wstats->qual.updated |= IW_QUAL_LEVEL_UPDATED;
-			wstats->qual.updated |= IW_QUAL_QUAL_UPDATED;
-		} else {
-			wstats->qual.updated |= IW_QUAL_LEVEL_INVALID;
-			wstats->qual.updated |= IW_QUAL_QUAL_INVALID;
-		}
-
-		if (local->hw.flags & IEEE80211_HW_SIGNAL_UNSPEC) {
-			wstats->qual.level = sta->last_signal;
-			wstats->qual.qual = sta->last_signal;
-		} else if (local->hw.flags & IEEE80211_HW_SIGNAL_DBM) {
-			int sig = sta->last_signal;
-
-			wstats->qual.updated |= IW_QUAL_DBM;
-			wstats->qual.level = sig;
-			if (sig < -110)
-				sig = -110;
-			else if (sig > -40)
-				sig = -40;
-			wstats->qual.qual = sig + 110;
-		}
-
-		if (local->hw.flags & IEEE80211_HW_NOISE_DBM) {
-			/*
-			 * This assumes that if driver reports noise, it also
-			 * reports signal in dBm.
-			 */
-			wstats->qual.noise = sta->last_noise;
-			wstats->qual.updated |= IW_QUAL_NOISE_UPDATED;
-		} else {
-			wstats->qual.updated |= IW_QUAL_NOISE_INVALID;
-		}
+		wstats->qual.level = sta->last_signal;
+		wstats->qual.qual = sta->last_qual;
+		wstats->qual.noise = sta->last_noise;
+		wstats->qual.updated = ieee80211_get_wstats_flags(local);
 	}
 
 	rcu_read_unlock();
@@ -962,8 +1011,9 @@ static int ieee80211_ioctl_giwauth(struct net_device *dev,
 
 	switch (data->flags & IW_AUTH_INDEX) {
 	case IW_AUTH_80211_AUTH_ALG:
-		if (sdata->vif.type == NL80211_IFTYPE_STATION)
-			data->value = sdata->u.mgd.auth_algs;
+		if (sdata->vif.type == NL80211_IFTYPE_STATION ||
+		    sdata->vif.type == NL80211_IFTYPE_ADHOC)
+			data->value = sdata->u.sta.auth_algs;
 		else
 			ret = -EOPNOTSUPP;
 		break;
@@ -1066,7 +1116,7 @@ static const iw_handler ieee80211_handler[] =
 	(iw_handler) NULL,				/* SIOCSIWSENS */
 	(iw_handler) NULL,				/* SIOCGIWSENS */
 	(iw_handler) NULL /* not used */,		/* SIOCSIWRANGE */
-	(iw_handler) cfg80211_wext_giwrange,		/* SIOCGIWRANGE */
+	(iw_handler) ieee80211_ioctl_giwrange,		/* SIOCGIWRANGE */
 	(iw_handler) NULL /* not used */,		/* SIOCSIWPRIV */
 	(iw_handler) NULL /* kernel code */,		/* SIOCGIWPRIV */
 	(iw_handler) NULL /* not used */,		/* SIOCSIWSTATS */

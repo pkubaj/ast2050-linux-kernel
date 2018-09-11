@@ -150,8 +150,7 @@ int t3_mac_reset(struct cmac *mac)
 static int t3b2_mac_reset(struct cmac *mac)
 {
 	struct adapter *adap = mac->adapter;
-	unsigned int oft = mac->offset, store;
-	int idx = macidx(mac);
+	unsigned int oft = mac->offset;
 	u32 val;
 
 	if (!macidx(mac))
@@ -159,28 +158,14 @@ static int t3b2_mac_reset(struct cmac *mac)
 	else
 		t3_set_reg_field(adap, A_MPS_CFG, F_PORT1ACTIVE, 0);
 
-	/* Stop NIC traffic to reduce the number of TXTOGGLES */
-	t3_set_reg_field(adap, A_MPS_CFG, F_ENFORCEPKT, 0);
-	/* Ensure TX drains */
-	t3_set_reg_field(adap, A_XGM_TX_CFG + oft, F_TXPAUSEEN, 0);
-
 	t3_write_reg(adap, A_XGM_RESET_CTRL + oft, F_MAC_RESET_);
 	t3_read_reg(adap, A_XGM_RESET_CTRL + oft);    /* flush */
 
-	/* Store A_TP_TX_DROP_CFG_CH0 */
-	t3_write_reg(adap, A_TP_PIO_ADDR, A_TP_TX_DROP_CFG_CH0 + idx);
-	store = t3_read_reg(adap, A_TP_TX_DROP_CFG_CH0 + idx);
-
 	msleep(10);
 
-	/* Change DROP_CFG to 0xc0000011 */
-	t3_write_reg(adap, A_TP_PIO_ADDR, A_TP_TX_DROP_CFG_CH0 + idx);
-	t3_write_reg(adap, A_TP_PIO_DATA, 0xc0000011);
-
 	/* Check for xgm Rx fifo empty */
-	/* Increased loop count to 1000 from 5 cover 1G and 100Mbps case */
 	if (t3_wait_op_done(adap, A_XGM_RX_MAX_PKT_SIZE_ERR_CNT + oft,
-			    0x80000000, 1, 1000, 2)) {
+			    0x80000000, 1, 5, 2)) {
 		CH_ERR(adap, "MAC %d Rx fifo drain failed\n",
 		       macidx(mac));
 		return -1;
@@ -206,20 +191,10 @@ static int t3b2_mac_reset(struct cmac *mac)
 		     F_DISPAUSEFRAMES | F_EN1536BFRAMES |
 		     F_RMFCS | F_ENJUMBO | F_ENHASHMCAST);
 
-	/* Restore the DROP_CFG */
-	t3_write_reg(adap, A_TP_PIO_ADDR, A_TP_TX_DROP_CFG_CH0 + idx);
-	t3_write_reg(adap, A_TP_PIO_DATA, store);
-
-	if (!idx)
+	if (!macidx(mac))
 		t3_set_reg_field(adap, A_MPS_CFG, 0, F_PORT0ACTIVE);
 	else
 		t3_set_reg_field(adap, A_MPS_CFG, 0, F_PORT1ACTIVE);
-
-	/* re-enable nic traffic */
-	t3_set_reg_field(adap, A_MPS_CFG, F_ENFORCEPKT, 1);
-
-	/*  Set: re-enable NIC traffic */
-	t3_set_reg_field(adap, A_MPS_CFG, F_ENFORCEPKT, 1);
 
 	return 0;
 }
@@ -261,7 +236,7 @@ int t3_mac_set_num_ucast(struct cmac *mac, int n)
 	return 0;
 }
 
-void t3_mac_disable_exact_filters(struct cmac *mac)
+static void disable_exact_filters(struct cmac *mac)
 {
 	unsigned int i, reg = mac->offset + A_XGM_RX_EXACT_MATCH_LOW_1;
 
@@ -272,7 +247,7 @@ void t3_mac_disable_exact_filters(struct cmac *mac)
 	t3_read_reg(mac->adapter, A_XGM_RX_EXACT_MATCH_LOW_1);	/* flush */
 }
 
-void t3_mac_enable_exact_filters(struct cmac *mac)
+static void enable_exact_filters(struct cmac *mac)
 {
 	unsigned int i, reg = mac->offset + A_XGM_RX_EXACT_MATCH_HIGH_1;
 
@@ -357,9 +332,18 @@ int t3_mac_set_mtu(struct cmac *mac, unsigned int mtu)
 		return -EINVAL;
 	t3_write_reg(adap, A_XGM_RX_MAX_PKT_SIZE + mac->offset, mtu);
 
+	/*
+	 * Adjust the PAUSE frame watermarks.  We always set the LWM, and the
+	 * HWM only if flow-control is enabled.
+	 */
+	hwm = max_t(unsigned int, MAC_RXFIFO_SIZE - 3 * mtu,
+		    MAC_RXFIFO_SIZE * 38 / 100);
+	hwm = min(hwm, MAC_RXFIFO_SIZE - 8192);
+	lwm = min(3 * (int)mtu, MAC_RXFIFO_SIZE / 4);
+
 	if (adap->params.rev >= T3_REV_B2 &&
 	    (t3_read_reg(adap, A_XGM_RX_CTRL + mac->offset) & F_RXEN)) {
-		t3_mac_disable_exact_filters(mac);
+		disable_exact_filters(mac);
 		v = t3_read_reg(adap, A_XGM_RX_CFG + mac->offset);
 		t3_set_reg_field(adap, A_XGM_RX_CFG + mac->offset,
 				 F_ENHASHMCAST | F_COPYALLFRAMES, F_DISBCAST);
@@ -371,14 +355,14 @@ int t3_mac_set_mtu(struct cmac *mac, unsigned int mtu)
 		if (t3_wait_op_done(adap, reg + mac->offset,
 				    F_RXFIFO_EMPTY, 1, 20, 5)) {
 			t3_write_reg(adap, A_XGM_RX_CFG + mac->offset, v);
-			t3_mac_enable_exact_filters(mac);
+			enable_exact_filters(mac);
 			return -EIO;
 		}
 		t3_set_reg_field(adap, A_XGM_RX_MAX_PKT_SIZE + mac->offset,
 				 V_RXMAXPKTSIZE(M_RXMAXPKTSIZE),
 				 V_RXMAXPKTSIZE(mtu));
 		t3_write_reg(adap, A_XGM_RX_CFG + mac->offset, v);
-		t3_mac_enable_exact_filters(mac);
+		enable_exact_filters(mac);
 	} else
 		t3_set_reg_field(adap, A_XGM_RX_MAX_PKT_SIZE + mac->offset,
 				 V_RXMAXPKTSIZE(M_RXMAXPKTSIZE),
@@ -468,12 +452,9 @@ int t3_mac_enable(struct cmac *mac, int which)
 
 	if (which & MAC_DIRECTION_TX) {
 		t3_write_reg(adap, A_TP_PIO_ADDR, A_TP_TX_DROP_CFG_CH0 + idx);
-		t3_write_reg(adap, A_TP_PIO_DATA,
-			     adap->params.rev == T3_REV_C ?
-			     0xc4ffff01 : 0xc0ede401);
+		t3_write_reg(adap, A_TP_PIO_DATA, 0xc0ede401);
 		t3_write_reg(adap, A_TP_PIO_ADDR, A_TP_TX_DROP_MODE);
-		t3_set_reg_field(adap, A_TP_PIO_DATA, 1 << idx,
-				 adap->params.rev == T3_REV_C ? 0 : 1 << idx);
+		t3_set_reg_field(adap, A_TP_PIO_DATA, 1 << idx, 1 << idx);
 
 		t3_write_reg(adap, A_XGM_TX_CTRL + oft, F_TXEN);
 
@@ -529,12 +510,15 @@ int t3b2_mac_watchdog_task(struct cmac *mac)
 	struct adapter *adap = mac->adapter;
 	struct mac_stats *s = &mac->stats;
 	unsigned int tx_tcnt, tx_xcnt;
-	u64 tx_mcnt = s->tx_frames;
+	unsigned int tx_mcnt = s->tx_frames;
+	unsigned int rx_mcnt = s->rx_frames;
+	unsigned int rx_xcnt;
 	int status;
 
 	status = 0;
 	tx_xcnt = 1;		/* By default tx_xcnt is making progress */
 	tx_tcnt = mac->tx_tcnt;	/* If tx_mcnt is progressing ignore tx_tcnt */
+	rx_xcnt = 1;		/* By default rx_xcnt is making progress */
 	if (tx_mcnt == mac->tx_mcnt && mac->rx_pause == s->rx_pause) {
 		tx_xcnt = (G_TXSPI4SOPCNT(t3_read_reg(adap,
 						A_XGM_TX_SPI4_SOP_EOP_CNT +
@@ -545,11 +529,11 @@ int t3b2_mac_watchdog_task(struct cmac *mac)
 			tx_tcnt = (G_TXDROPCNTCH0RCVD(t3_read_reg(adap,
 						      A_TP_PIO_DATA)));
 		} else {
-			goto out;
+			goto rxcheck;
 		}
 	} else {
 		mac->toggle_cnt = 0;
-		goto out;
+		goto rxcheck;
 	}
 
 	if ((tx_tcnt != mac->tx_tcnt) && (mac->tx_xcnt == 0)) {
@@ -562,6 +546,23 @@ int t3b2_mac_watchdog_task(struct cmac *mac)
 		}
 	} else {
 		mac->toggle_cnt = 0;
+		goto rxcheck;
+	}
+
+rxcheck:
+	if (rx_mcnt != mac->rx_mcnt) {
+		rx_xcnt = (G_TXSPI4SOPCNT(t3_read_reg(adap,
+						A_XGM_RX_SPI4_SOP_EOP_CNT +
+						mac->offset))) +
+						(s->rx_fifo_ovfl -
+						 mac->rx_ocnt);
+		mac->rx_ocnt = s->rx_fifo_ovfl;
+	} else
+		goto out;
+
+	if (mac->rx_mcnt != s->rx_frames && rx_xcnt == 0 &&
+	    mac->rx_xcnt == 0) {
+		status = 2;
 		goto out;
 	}
 
@@ -569,6 +570,8 @@ out:
 	mac->tx_tcnt = tx_tcnt;
 	mac->tx_xcnt = tx_xcnt;
 	mac->tx_mcnt = s->tx_frames;
+	mac->rx_xcnt = rx_xcnt;
+	mac->rx_mcnt = s->rx_frames;
 	mac->rx_pause = s->rx_pause;
 	if (status == 1) {
 		t3_write_reg(adap, A_XGM_TX_CTRL + mac->offset, 0);

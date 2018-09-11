@@ -1005,8 +1005,7 @@ static int ael2005_reset(struct cphy *phy, int wait)
 		{ 0, 0, 0, 0 }
 	};
 
-	int err;
-	unsigned int lasi_ctrl;
+	int err, lasi_ctrl;
 
 	err = mdio_read(phy, MDIO_DEV_PMA_PMD, LASI_CTRL, &lasi_ctrl);
 	if (err)

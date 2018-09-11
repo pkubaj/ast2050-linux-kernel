@@ -325,7 +325,7 @@ static void apple_kiwi_init(struct pci_dev *pdev)
 }
 #endif /* CONFIG_PPC_PMAC */
 
-static int init_chipset_pdcnew(struct pci_dev *dev)
+static unsigned int init_chipset_pdcnew(struct pci_dev *dev)
 {
 	const char *name = DRV_NAME;
 	unsigned long dma_base = pci_resource_start(dev, 4);
@@ -444,7 +444,7 @@ static int init_chipset_pdcnew(struct pci_dev *dev)
 #endif
 
  out:
-	return 0;
+	return dev->irq;
 }
 
 static struct pci_dev * __devinit pdc20270_get_dev2(struct pci_dev *dev)

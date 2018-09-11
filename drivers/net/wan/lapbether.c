@@ -55,6 +55,7 @@ struct lapbethdev {
 	struct list_head	node;
 	struct net_device	*ethdev;	/* link to ethernet device */
 	struct net_device	*axdev;		/* lapbeth device (lapb#) */
+	struct net_device_stats stats;		/* some statistics */
 };
 
 static LIST_HEAD(lapbeth_devices);
@@ -106,9 +107,10 @@ static int lapbeth_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 	if (!netif_running(lapbeth->axdev))
 		goto drop_unlock;
 
+	lapbeth->stats.rx_packets++;
+
 	len = skb->data[0] + skb->data[1] * 256;
-	dev->stats.rx_packets++;
-	dev->stats.rx_bytes += len;
+	lapbeth->stats.rx_bytes += len;
 
 	skb_pull(skb, 2);	/* Remove the length bytes */
 	skb_trim(skb, len);	/* Set the length of the data */
@@ -208,8 +210,8 @@ static void lapbeth_data_transmit(struct net_device *ndev, struct sk_buff *skb)
 	*ptr++ = size % 256;
 	*ptr++ = size / 256;
 
-	ndev->stats.tx_packets++;
-	ndev->stats.tx_bytes += size;
+	lapbeth->stats.tx_packets++;
+	lapbeth->stats.tx_bytes += size;
 
 	skb->dev = dev = lapbeth->ethdev;
 
@@ -250,6 +252,15 @@ static void lapbeth_disconnected(struct net_device *dev, int reason)
 
 	skb->protocol = x25_type_trans(skb, dev);
 	netif_rx(skb);
+}
+
+/*
+ *	Statistics
+ */
+static struct net_device_stats *lapbeth_get_stats(struct net_device *dev)
+{
+	struct lapbethdev *lapbeth = netdev_priv(dev);
+	return &lapbeth->stats;
 }
 
 /*
@@ -303,17 +314,14 @@ static int lapbeth_close(struct net_device *dev)
 
 /* ------------------------------------------------------------------------ */
 
-static const struct net_device_ops lapbeth_netdev_ops = {
-	.ndo_open	     = lapbeth_open,
-	.ndo_stop	     = lapbeth_close,
-	.ndo_start_xmit	     = lapbeth_xmit,
-	.ndo_set_mac_address = lapbeth_set_mac_address,
-};
-
 static void lapbeth_setup(struct net_device *dev)
 {
-	dev->netdev_ops	     = &lapbeth_netdev_ops;
+	dev->hard_start_xmit = lapbeth_xmit;
+	dev->open	     = lapbeth_open;
+	dev->stop	     = lapbeth_close;
 	dev->destructor	     = free_netdev;
+	dev->set_mac_address = lapbeth_set_mac_address;
+	dev->get_stats	     = lapbeth_get_stats;
 	dev->type            = ARPHRD_X25;
 	dev->hard_header_len = 3;
 	dev->mtu             = 1000;
@@ -413,7 +421,7 @@ static int lapbeth_device_event(struct notifier_block *this,
 
 /* ------------------------------------------------------------------------ */
 
-static struct packet_type lapbeth_packet_type __read_mostly = {
+static struct packet_type lapbeth_packet_type = {
 	.type = cpu_to_be16(ETH_P_DEC),
 	.func = lapbeth_rcv,
 };
@@ -422,8 +430,7 @@ static struct notifier_block lapbeth_dev_notifier = {
 	.notifier_call = lapbeth_device_event,
 };
 
-static const char banner[] __initconst =
-	KERN_INFO "LAPB Ethernet driver version 0.02\n";
+static char banner[] __initdata = KERN_INFO "LAPB Ethernet driver version 0.02\n";
 
 static int __init lapbeth_init_driver(void)
 {

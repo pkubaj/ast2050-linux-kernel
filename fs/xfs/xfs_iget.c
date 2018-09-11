@@ -246,6 +246,9 @@ xfs_iget_cache_miss(
 		goto out_destroy;
 	}
 
+	if (lock_flags)
+		xfs_ilock(ip, lock_flags);
+
 	/*
 	 * Preload the radix tree so we can insert safely under the
 	 * write spinlock. Note that we cannot sleep inside the preload
@@ -253,16 +256,7 @@ xfs_iget_cache_miss(
 	 */
 	if (radix_tree_preload(GFP_KERNEL)) {
 		error = EAGAIN;
-		goto out_destroy;
-	}
-
-	/*
-	 * Because the inode hasn't been added to the radix-tree yet it can't
-	 * be found by another thread, so we can do the non-sleeping lock here.
-	 */
-	if (lock_flags) {
-		if (!xfs_ilock_nowait(ip, lock_flags))
-			BUG();
+		goto out_unlock;
 	}
 
 	mask = ~(((XFS_INODE_CLUSTER_SIZE(mp) >> mp->m_sb.sb_inodelog)) - 1);
@@ -290,6 +284,7 @@ xfs_iget_cache_miss(
 out_preload_end:
 	write_unlock(&pag->pag_ici_lock);
 	radix_tree_preload_end();
+out_unlock:
 	if (lock_flags)
 		xfs_iunlock(ip, lock_flags);
 out_destroy:

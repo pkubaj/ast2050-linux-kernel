@@ -237,7 +237,7 @@ static void mipsnet_set_mclist(struct net_device *dev)
 {
 }
 
-static int __init mipsnet_probe(struct platform_device *dev)
+static int __init mipsnet_probe(struct device *dev)
 {
 	struct net_device *netdev;
 	int err;
@@ -248,7 +248,7 @@ static int __init mipsnet_probe(struct platform_device *dev)
 		goto out;
 	}
 
-	platform_set_drvdata(dev, netdev);
+	dev_set_drvdata(dev, netdev);
 
 	netdev->open			= mipsnet_open;
 	netdev->stop			= mipsnet_close;
@@ -293,25 +293,23 @@ out:
 	return err;
 }
 
-static int __devexit mipsnet_device_remove(struct platform_device *device)
+static int __devexit mipsnet_device_remove(struct device *device)
 {
-	struct net_device *dev = platform_get_drvdata(device);
+	struct net_device *dev = dev_get_drvdata(device);
 
 	unregister_netdev(dev);
 	release_region(dev->base_addr, sizeof(struct mipsnet_regs));
 	free_netdev(dev);
-	platform_set_drvdata(device, NULL);
+	dev_set_drvdata(device, NULL);
 
 	return 0;
 }
 
-static struct platform_driver mipsnet_driver = {
-	.driver = {
-		.name		= mipsnet_string,
-		.owner		= THIS_MODULE,
-	},
-	.probe		= mipsnet_probe,
-	.remove		= __devexit_p(mipsnet_device_remove),
+static struct device_driver mipsnet_driver = {
+	.name	= mipsnet_string,
+	.bus	= &platform_bus_type,
+	.probe	= mipsnet_probe,
+	.remove	= __devexit_p(mipsnet_device_remove),
 };
 
 static int __init mipsnet_init_module(void)
@@ -321,7 +319,7 @@ static int __init mipsnet_init_module(void)
 	printk(KERN_INFO "MIPSNet Ethernet driver. Version: %s. "
 	       "(c)2005 MIPS Technologies, Inc.\n", MIPSNET_VERSION);
 
-	err = platform_driver_register(&mipsnet_driver);
+	err = driver_register(&mipsnet_driver);
 	if (err)
 		printk(KERN_ERR "Driver registration failed\n");
 
@@ -330,7 +328,7 @@ static int __init mipsnet_init_module(void)
 
 static void __exit mipsnet_exit_module(void)
 {
-	platform_driver_unregister(&mipsnet_driver);
+	driver_unregister(&mipsnet_driver);
 }
 
 module_init(mipsnet_init_module);

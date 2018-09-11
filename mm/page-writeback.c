@@ -66,7 +66,7 @@ static inline long sync_writeback_pages(void)
 /*
  * Start background writeback (via pdflush) at this percentage
  */
-int dirty_background_ratio = 10;
+int dirty_background_ratio = 5;
 
 /*
  * dirty_background_bytes starts at 0 (disabled) so that it is a function of
@@ -83,7 +83,7 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
-int vm_dirty_ratio = 20;
+int vm_dirty_ratio = 10;
 
 /*
  * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
@@ -240,7 +240,7 @@ void bdi_writeout_inc(struct backing_dev_info *bdi)
 }
 EXPORT_SYMBOL_GPL(bdi_writeout_inc);
 
-void task_dirty_inc(struct task_struct *tsk)
+static inline void task_dirty_inc(struct task_struct *tsk)
 {
 	prop_inc_single(&vm_dirties, &tsk->dirties);
 }
@@ -1230,7 +1230,6 @@ int __set_page_dirty_nobuffers(struct page *page)
 				__inc_zone_page_state(page, NR_FILE_DIRTY);
 				__inc_bdi_stat(mapping->backing_dev_info,
 						BDI_RECLAIMABLE);
-				task_dirty_inc(current);
 				task_io_account_write(PAGE_CACHE_SIZE);
 			}
 			radix_tree_tag_set(&mapping->page_tree,
@@ -1263,7 +1262,7 @@ EXPORT_SYMBOL(redirty_page_for_writepage);
  * If the mapping doesn't provide a set_page_dirty a_op, then
  * just fall through and assume that it wants buffer_heads.
  */
-int set_page_dirty(struct page *page)
+static int __set_page_dirty(struct page *page)
 {
 	struct address_space *mapping = page_mapping(page);
 
@@ -1280,6 +1279,14 @@ int set_page_dirty(struct page *page)
 			return 1;
 	}
 	return 0;
+}
+
+int set_page_dirty(struct page *page)
+{
+	int ret = __set_page_dirty(page);
+	if (ret)
+		task_dirty_inc(current);
+	return ret;
 }
 EXPORT_SYMBOL(set_page_dirty);
 

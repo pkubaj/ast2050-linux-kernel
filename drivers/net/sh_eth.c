@@ -687,7 +687,6 @@ static irqreturn_t sh_eth_interrupt(int irq, void *netdev)
 {
 	struct net_device *ndev = netdev;
 	struct sh_eth_private *mdp = netdev_priv(ndev);
-	irqreturn_t ret = IRQ_NONE;
 	u32 ioaddr, boguscnt = RX_RING_SIZE;
 	u32 intr_status = 0;
 
@@ -697,13 +696,7 @@ static irqreturn_t sh_eth_interrupt(int irq, void *netdev)
 	/* Get interrpt stat */
 	intr_status = ctrl_inl(ioaddr + EESR);
 	/* Clear interrupt */
-	if (intr_status & (EESR_FRC | EESR_RMAF | EESR_RRF |
-			EESR_RTLF | EESR_RTSF | EESR_PRE | EESR_CERF |
-			TX_CHECK | EESR_ERR_CHECK)) {
-		ctrl_outl(intr_status, ioaddr + EESR);
-		ret = IRQ_HANDLED;
-	} else
-		goto other_irq;
+	ctrl_outl(intr_status, ioaddr + EESR);
 
 	if (intr_status & (EESR_FRC | /* Frame recv*/
 			EESR_RMAF | /* Multi cast address recv*/
@@ -730,10 +723,9 @@ static irqreturn_t sh_eth_interrupt(int irq, void *netdev)
 		       ndev->name, intr_status);
 	}
 
-other_irq:
 	spin_unlock(&mdp->lock);
 
-	return ret;
+	return IRQ_HANDLED;
 }
 
 static void sh_eth_timer(unsigned long data)
@@ -852,13 +844,7 @@ static int sh_eth_open(struct net_device *ndev)
 	int ret = 0;
 	struct sh_eth_private *mdp = netdev_priv(ndev);
 
-	ret = request_irq(ndev->irq, &sh_eth_interrupt,
-#if defined(CONFIG_CPU_SUBTYPE_SH7763) || defined(CONFIG_CPU_SUBTYPE_SH7764)
-				IRQF_SHARED,
-#else
-				0,
-#endif
-				ndev->name, ndev);
+	ret = request_irq(ndev->irq, &sh_eth_interrupt, 0, ndev->name, ndev);
 	if (ret) {
 		printk(KERN_ERR "Can not assign IRQ number to %s\n", CARDNAME);
 		return ret;

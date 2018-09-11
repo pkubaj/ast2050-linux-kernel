@@ -286,7 +286,9 @@ static void __devinit init_hwif_ns87415 (ide_hwif_t *hwif)
 	}
 
 	if (!using_inta)
-		hwif->irq = pci_get_legacy_ide_irq(dev, hwif->channel);
+		hwif->irq = __ide_default_irq(hwif->io_ports.data_addr);
+	else if (!hwif->irq && hwif->mate && hwif->mate->irq)
+		hwif->irq = hwif->mate->irq;	/* share IRQ with mate */
 
 	if (!hwif->dma_base)
 		return;

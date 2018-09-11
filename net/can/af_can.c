@@ -273,7 +273,8 @@ int can_send(struct sk_buff *skb, int loop)
 		err = net_xmit_errno(err);
 
 	if (err) {
-		kfree_skb(newskb);
+		if (newskb)
+			kfree_skb(newskb);
 		return err;
 	}
 

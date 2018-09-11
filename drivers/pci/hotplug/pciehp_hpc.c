@@ -934,7 +934,7 @@ static void pcie_disable_notification(struct controller *ctrl)
 		ctrl_warn(ctrl, "Cannot disable software notification\n");
 }
 
-int pcie_init_notification(struct controller *ctrl)
+static int pcie_init_notification(struct controller *ctrl)
 {
 	if (pciehp_request_irq(ctrl))
 		return -1;
@@ -942,17 +942,13 @@ int pcie_init_notification(struct controller *ctrl)
 		pciehp_free_irq(ctrl);
 		return -1;
 	}
-	ctrl->notification_enabled = 1;
 	return 0;
 }
 
 static void pcie_shutdown_notification(struct controller *ctrl)
 {
-	if (ctrl->notification_enabled) {
-		pcie_disable_notification(ctrl);
-		pciehp_free_irq(ctrl);
-		ctrl->notification_enabled = 0;
-	}
+	pcie_disable_notification(ctrl);
+	pciehp_free_irq(ctrl);
 }
 
 static int pcie_init_slot(struct controller *ctrl)
@@ -1114,8 +1110,13 @@ struct controller *pcie_init(struct pcie_device *dev)
 	if (pcie_init_slot(ctrl))
 		goto abort_ctrl;
 
+	if (pcie_init_notification(ctrl))
+		goto abort_slot;
+
 	return ctrl;
 
+abort_slot:
+	pcie_cleanup_slot(ctrl);
 abort_ctrl:
 	kfree(ctrl);
 abort:

@@ -69,7 +69,7 @@ __xfrm6_sort(void **dst, void **src, int n, int (*cmp)(void *p), int maxclass)
 
 	for (i = 0; i < n; i++) {
 		dst[count[class[i] - 1]++] = src[i];
-		src[i] = NULL;
+		src[i] = 0;
 	}
 
 	return 0;

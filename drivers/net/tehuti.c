@@ -63,6 +63,7 @@
  */
 
 #include "tehuti.h"
+#include "tehuti_fw.h"
 
 static struct pci_device_id __devinitdata bdx_pci_tbl[] = {
 	{0x1FC9, 0x3009, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
@@ -317,41 +318,28 @@ static int bdx_poll(struct napi_struct *napi, int budget)
 
 static int bdx_fw_load(struct bdx_priv *priv)
 {
-	const struct firmware *fw = NULL;
 	int master, i;
-	int rc;
 
 	ENTER;
 	master = READ_REG(priv, regINIT_SEMAPHORE);
 	if (!READ_REG(priv, regINIT_STATUS) && master) {
-		rc = request_firmware(&fw, "tehuti/firmware.bin", &priv->pdev->dev);
-		if (rc)
-			goto out;
-		bdx_tx_push_desc_safe(priv, (char *)fw->data, fw->size);
+		bdx_tx_push_desc_safe(priv, s_firmLoad, sizeof(s_firmLoad));
 		mdelay(100);
 	}
 	for (i = 0; i < 200; i++) {
-		if (READ_REG(priv, regINIT_STATUS)) {
-			rc = 0;
-			goto out;
-		}
+		if (READ_REG(priv, regINIT_STATUS))
+			break;
 		mdelay(2);
 	}
-	rc = -EIO;
-out:
 	if (master)
 		WRITE_REG(priv, regINIT_SEMAPHORE, 1);
-	if (fw)
-		release_firmware(fw);
 
-	if (rc) {
+	if (i == 200) {
 		ERR("%s: firmware loading failed\n", priv->ndev->name);
-		if (rc == -EIO)
-			DBG("VPC = 0x%x VIC = 0x%x INIT_STATUS = 0x%x i=%d\n",
-			    READ_REG(priv, regVPC),
-			    READ_REG(priv, regVIC),
-			    READ_REG(priv, regINIT_STATUS), i);
-		RET(rc);
+		DBG("VPC = 0x%x VIC = 0x%x INIT_STATUS = 0x%x i=%d\n",
+		    READ_REG(priv, regVPC),
+		    READ_REG(priv, regVIC), READ_REG(priv, regINIT_STATUS), i);
+		RET(-EIO);
 	} else {
 		DBG("%s: firmware loading success\n", priv->ndev->name);
 		RET(0);
@@ -627,6 +615,13 @@ static int bdx_open(struct net_device *ndev)
 err:
 	bdx_close(ndev);
 	RET(rc);
+}
+
+static void __init bdx_firmware_endianess(void)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(s_firmLoad); i++)
+		s_firmLoad[i] = CPU_CHIP_SWAP32(s_firmLoad[i]);
 }
 
 static int bdx_range_check(struct bdx_priv *priv, u32 offset)
@@ -2506,6 +2501,7 @@ static void __init print_driver_id(void)
 static int __init bdx_module_init(void)
 {
 	ENTER;
+	bdx_firmware_endianess();
 	init_txd_sizes();
 	print_driver_id();
 	RET(pci_register_driver(&bdx_pci_driver));
@@ -2525,4 +2521,3 @@ module_exit(bdx_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(BDX_DRV_DESC);
-MODULE_FIRMWARE("tehuti/firmware.bin");

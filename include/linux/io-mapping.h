@@ -30,13 +30,10 @@
  * See Documentation/io_mapping.txt
  */
 
-#ifdef CONFIG_HAVE_ATOMIC_IOMAP
+/* this struct isn't actually defined anywhere */
+struct io_mapping;
 
-struct io_mapping {
-	resource_size_t base;
-	unsigned long size;
-	pgprot_t prot;
-};
+#ifdef CONFIG_HAVE_ATOMIC_IOMAP
 
 /*
  * For small address space machines, mapping large objects
@@ -46,40 +43,23 @@ struct io_mapping {
  */
 
 static inline struct io_mapping *
-io_mapping_create_wc(resource_size_t base, unsigned long size)
+io_mapping_create_wc(unsigned long base, unsigned long size)
 {
-	struct io_mapping *iomap;
-
-	if (!is_io_mapping_possible(base, size))
-		return NULL;
-
-	iomap = kmalloc(sizeof(*iomap), GFP_KERNEL);
-	if (!iomap)
-		return NULL;
-
-	iomap->base = base;
-	iomap->size = size;
-	iomap->prot = pgprot_writecombine(__pgprot(__PAGE_KERNEL));
-	return iomap;
+	return (struct io_mapping *) base;
 }
 
 static inline void
 io_mapping_free(struct io_mapping *mapping)
 {
-	kfree(mapping);
 }
 
 /* Atomic map/unmap */
 static inline void *
 io_mapping_map_atomic_wc(struct io_mapping *mapping, unsigned long offset)
 {
-	resource_size_t phys_addr;
-	unsigned long pfn;
-
-	BUG_ON(offset >= mapping->size);
-	phys_addr = mapping->base + offset;
-	pfn = (unsigned long) (phys_addr >> PAGE_SHIFT);
-	return iomap_atomic_prot_pfn(pfn, KM_USER0, mapping->prot);
+	offset += (unsigned long) mapping;
+	return iomap_atomic_prot_pfn(offset >> PAGE_SHIFT, KM_USER0,
+				     __pgprot(__PAGE_KERNEL_WC));
 }
 
 static inline void
@@ -91,12 +71,8 @@ io_mapping_unmap_atomic(void *vaddr)
 static inline void *
 io_mapping_map_wc(struct io_mapping *mapping, unsigned long offset)
 {
-	resource_size_t phys_addr;
-
-	BUG_ON(offset >= mapping->size);
-	phys_addr = mapping->base + offset;
-
-	return ioremap_wc(phys_addr, PAGE_SIZE);
+	offset += (unsigned long) mapping;
+	return ioremap_wc(offset, PAGE_SIZE);
 }
 
 static inline void
@@ -107,12 +83,9 @@ io_mapping_unmap(void *vaddr)
 
 #else
 
-/* this struct isn't actually defined anywhere */
-struct io_mapping;
-
 /* Create the io_mapping object*/
 static inline struct io_mapping *
-io_mapping_create_wc(resource_size_t base, unsigned long size)
+io_mapping_create_wc(unsigned long base, unsigned long size)
 {
 	return (struct io_mapping *) ioremap_wc(base, size);
 }

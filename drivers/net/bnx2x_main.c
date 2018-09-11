@@ -53,10 +53,9 @@
 
 #include "bnx2x.h"
 #include "bnx2x_init.h"
-#include "bnx2x_dump.h"
 
-#define DRV_MODULE_VERSION	"1.48.105"
-#define DRV_MODULE_RELDATE	"2009/03/02"
+#define DRV_MODULE_VERSION	"1.48.102"
+#define DRV_MODULE_RELDATE	"2009/02/12"
 #define BNX2X_BC_VER		0x040200
 
 /* Time in jiffies before concluding the transmitter is hung */
@@ -73,7 +72,6 @@ MODULE_VERSION(DRV_MODULE_VERSION);
 
 static int multi_mode = 1;
 module_param(multi_mode, int, 0);
-MODULE_PARM_DESC(multi_mode, " Use per-CPU queues");
 
 static int disable_tpa;
 module_param(disable_tpa, int, 0);
@@ -217,7 +215,7 @@ void bnx2x_write_dmae(struct bnx2x *bp, dma_addr_t dma_addr, u32 dst_addr,
 	dmae->comp_addr_hi = U64_HI(bnx2x_sp_mapping(bp, wb_comp));
 	dmae->comp_val = DMAE_COMP_VAL;
 
-	DP(BNX2X_MSG_OFF, "DMAE: opcode 0x%08x\n"
+	DP(BNX2X_MSG_OFF, "dmae: opcode 0x%08x\n"
 	   DP_LEVEL "src_addr  [%x:%08x]  len [%d *4]  "
 		    "dst_addr [%x:%08x (%08x)]\n"
 	   DP_LEVEL "comp_addr [%x:%08x]  comp_val 0x%08x\n",
@@ -238,7 +236,7 @@ void bnx2x_write_dmae(struct bnx2x *bp, dma_addr_t dma_addr, u32 dst_addr,
 		DP(BNX2X_MSG_OFF, "wb_comp 0x%08x\n", *wb_comp);
 
 		if (!cnt) {
-			BNX2X_ERR("DMAE timeout!\n");
+			BNX2X_ERR("dmae timeout!\n");
 			break;
 		}
 		cnt--;
@@ -293,7 +291,7 @@ void bnx2x_read_dmae(struct bnx2x *bp, u32 src_addr, u32 len32)
 	dmae->comp_addr_hi = U64_HI(bnx2x_sp_mapping(bp, wb_comp));
 	dmae->comp_val = DMAE_COMP_VAL;
 
-	DP(BNX2X_MSG_OFF, "DMAE: opcode 0x%08x\n"
+	DP(BNX2X_MSG_OFF, "dmae: opcode 0x%08x\n"
 	   DP_LEVEL "src_addr  [%x:%08x]  len [%d *4]  "
 		    "dst_addr [%x:%08x (%08x)]\n"
 	   DP_LEVEL "comp_addr [%x:%08x]  comp_val 0x%08x\n",
@@ -310,7 +308,7 @@ void bnx2x_read_dmae(struct bnx2x *bp, u32 src_addr, u32 len32)
 	while (*wb_comp != DMAE_COMP_VAL) {
 
 		if (!cnt) {
-			BNX2X_ERR("DMAE timeout!\n");
+			BNX2X_ERR("dmae timeout!\n");
 			break;
 		}
 		cnt--;
@@ -518,13 +516,13 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 	for_each_rx_queue(bp, i) {
 		struct bnx2x_fastpath *fp = &bp->fp[i];
 
-		BNX2X_ERR("fp%d: rx_bd_prod(%x)  rx_bd_cons(%x)"
+		BNX2X_ERR("queue[%d]: rx_bd_prod(%x)  rx_bd_cons(%x)"
 			  "  *rx_bd_cons_sb(%x)  rx_comp_prod(%x)"
 			  "  rx_comp_cons(%x)  *rx_cons_sb(%x)\n",
 			  i, fp->rx_bd_prod, fp->rx_bd_cons,
 			  le16_to_cpu(*fp->rx_bd_cons_sb), fp->rx_comp_prod,
 			  fp->rx_comp_cons, le16_to_cpu(*fp->rx_cons_sb));
-		BNX2X_ERR("      rx_sge_prod(%x)  last_max_sge(%x)"
+		BNX2X_ERR("          rx_sge_prod(%x)  last_max_sge(%x)"
 			  "  fp_u_idx(%x) *sb_u_idx(%x)\n",
 			  fp->rx_sge_prod, fp->last_max_sge,
 			  le16_to_cpu(fp->fp_u_idx),
@@ -536,11 +534,11 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 		struct bnx2x_fastpath *fp = &bp->fp[i];
 		struct eth_tx_db_data *hw_prods = fp->hw_tx_prods;
 
-		BNX2X_ERR("fp%d: tx_pkt_prod(%x)  tx_pkt_cons(%x)"
+		BNX2X_ERR("queue[%d]: tx_pkt_prod(%x)  tx_pkt_cons(%x)"
 			  "  tx_bd_prod(%x)  tx_bd_cons(%x)  *tx_cons_sb(%x)\n",
 			  i, fp->tx_pkt_prod, fp->tx_pkt_cons, fp->tx_bd_prod,
 			  fp->tx_bd_cons, le16_to_cpu(*fp->tx_cons_sb));
-		BNX2X_ERR("      fp_c_idx(%x)  *sb_c_idx(%x)"
+		BNX2X_ERR("          fp_c_idx(%x)  *sb_c_idx(%x)"
 			  "  bd data(%x,%x)\n", le16_to_cpu(fp->fp_c_idx),
 			  fp->status_blk->c_status_block.status_block_index,
 			  hw_prods->packets_prod, hw_prods->bds_prod);
@@ -557,8 +555,8 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 			u32 *rx_bd = (u32 *)&fp->rx_desc_ring[j];
 			struct sw_rx_bd *sw_bd = &fp->rx_buf_ring[j];
 
-			BNX2X_ERR("fp%d: rx_bd[%x]=[%x:%x]  sw_bd=[%p]\n",
-				  i, j, rx_bd[1], rx_bd[0], sw_bd->skb);
+			BNX2X_ERR("rx_bd[%x]=[%x:%x]  sw_bd=[%p]\n",
+				  j, rx_bd[1], rx_bd[0], sw_bd->skb);
 		}
 
 		start = RX_SGE(fp->rx_sge_prod);
@@ -567,8 +565,8 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 			u32 *rx_sge = (u32 *)&fp->rx_sge_ring[j];
 			struct sw_rx_page *sw_page = &fp->rx_page_ring[j];
 
-			BNX2X_ERR("fp%d: rx_sge[%x]=[%x:%x]  sw_page=[%p]\n",
-				  i, j, rx_sge[1], rx_sge[0], sw_page->page);
+			BNX2X_ERR("rx_sge[%x]=[%x:%x]  sw_page=[%p]\n",
+				  j, rx_sge[1], rx_sge[0], sw_page->page);
 		}
 
 		start = RCQ_BD(fp->rx_comp_cons - 10);
@@ -576,8 +574,8 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 		for (j = start; j != end; j = RCQ_BD(j + 1)) {
 			u32 *cqe = (u32 *)&fp->rx_comp_ring[j];
 
-			BNX2X_ERR("fp%d: cqe[%x]=[%x:%x:%x:%x]\n",
-				  i, j, cqe[0], cqe[1], cqe[2], cqe[3]);
+			BNX2X_ERR("cqe[%x]=[%x:%x:%x:%x]\n",
+				  j, cqe[0], cqe[1], cqe[2], cqe[3]);
 		}
 	}
 
@@ -590,8 +588,8 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 		for (j = start; j != end; j = TX_BD(j + 1)) {
 			struct sw_tx_bd *sw_bd = &fp->tx_buf_ring[j];
 
-			BNX2X_ERR("fp%d: packet[%x]=[%p,%x]\n",
-				  i, j, sw_bd->skb, sw_bd->first_bd);
+			BNX2X_ERR("packet[%x]=[%p,%x]\n", j,
+				  sw_bd->skb, sw_bd->first_bd);
 		}
 
 		start = TX_BD(fp->tx_bd_cons - 10);
@@ -599,8 +597,8 @@ static void bnx2x_panic_dump(struct bnx2x *bp)
 		for (j = start; j != end; j = TX_BD(j + 1)) {
 			u32 *tx_bd = (u32 *)&fp->tx_desc_ring[j];
 
-			BNX2X_ERR("fp%d: tx_bd[%x]=[%x:%x:%x:%x]\n",
-				  i, j, tx_bd[0], tx_bd[1], tx_bd[2], tx_bd[3]);
+			BNX2X_ERR("tx_bd[%x]=[%x:%x:%x:%x]\n",
+				  j, tx_bd[0], tx_bd[1], tx_bd[2], tx_bd[3]);
 		}
 	}
 
@@ -876,7 +874,7 @@ static inline u16 bnx2x_tx_avail(struct bnx2x_fastpath *fp)
 	return (s16)(fp->bp->tx_ring_size) - used;
 }
 
-static void bnx2x_tx_int(struct bnx2x_fastpath *fp)
+static void bnx2x_tx_int(struct bnx2x_fastpath *fp, int work)
 {
 	struct bnx2x *bp = fp->bp;
 	struct netdev_queue *txq;
@@ -910,23 +908,25 @@ static void bnx2x_tx_int(struct bnx2x_fastpath *fp)
 		bd_cons = bnx2x_free_tx_pkt(bp, fp, pkt_cons);
 		sw_cons++;
 		done++;
+
+		if (done == work)
+			break;
 	}
 
 	fp->tx_pkt_cons = sw_cons;
 	fp->tx_bd_cons = bd_cons;
 
+	/* Need to make the tx_bd_cons update visible to start_xmit()
+	 * before checking for netif_tx_queue_stopped().  Without the
+	 * memory barrier, there is a small possibility that start_xmit()
+	 * will miss it and cause the queue to be stopped forever.
+	 */
+	smp_mb();
+
 	/* TBD need a thresh? */
 	if (unlikely(netif_tx_queue_stopped(txq))) {
 
 		__netif_tx_lock(txq, smp_processor_id());
-
-		/* Need to make the tx_bd_cons update visible to start_xmit()
-		 * before checking for netif_tx_queue_stopped().  Without the
-		 * memory barrier, there is a small possibility that
-		 * start_xmit() will miss it and cause the queue to be stopped
-		 * forever.
-		 */
-		smp_mb();
 
 		if ((netif_tx_queue_stopped(txq)) &&
 		    (bp->state == BNX2X_STATE_OPEN) &&
@@ -3668,7 +3668,7 @@ static int bnx2x_hw_stats_update(struct bnx2x *bp)
 		bnx2x_emac_stats_update(bp);
 
 	else { /* unreached */
-		BNX2X_ERR("stats updated by DMAE but no MAC active\n");
+		BNX2X_ERR("stats updated by dmae but no MAC active\n");
 		return -1;
 	}
 
@@ -4176,7 +4176,7 @@ static void bnx2x_timer(unsigned long data)
 		struct bnx2x_fastpath *fp = &bp->fp[0];
 		int rc;
 
-		bnx2x_tx_int(fp);
+		bnx2x_tx_int(fp, 1000);
 		rc = bnx2x_rx_int(fp, 1000);
 	}
 
@@ -4224,10 +4224,10 @@ static void bnx2x_zero_sb(struct bnx2x *bp, int sb_id)
 {
 	int port = BP_PORT(bp);
 
-	bnx2x_init_fill(bp, USTORM_INTMEM_ADDR +
+	bnx2x_init_fill(bp, BAR_USTRORM_INTMEM +
 			USTORM_SB_HOST_STATUS_BLOCK_OFFSET(port, sb_id), 0,
 			sizeof(struct ustorm_status_block)/4);
-	bnx2x_init_fill(bp, CSTORM_INTMEM_ADDR +
+	bnx2x_init_fill(bp, BAR_CSTRORM_INTMEM +
 			CSTORM_SB_HOST_STATUS_BLOCK_OFFSET(port, sb_id), 0,
 			sizeof(struct cstorm_status_block)/4);
 }
@@ -4281,18 +4281,18 @@ static void bnx2x_zero_def_sb(struct bnx2x *bp)
 {
 	int func = BP_FUNC(bp);
 
-	bnx2x_init_fill(bp, TSTORM_INTMEM_ADDR +
-			TSTORM_DEF_SB_HOST_STATUS_BLOCK_OFFSET(func), 0,
-			sizeof(struct tstorm_def_status_block)/4);
-	bnx2x_init_fill(bp, USTORM_INTMEM_ADDR +
+	bnx2x_init_fill(bp, BAR_USTRORM_INTMEM +
 			USTORM_DEF_SB_HOST_STATUS_BLOCK_OFFSET(func), 0,
 			sizeof(struct ustorm_def_status_block)/4);
-	bnx2x_init_fill(bp, CSTORM_INTMEM_ADDR +
+	bnx2x_init_fill(bp, BAR_CSTRORM_INTMEM +
 			CSTORM_DEF_SB_HOST_STATUS_BLOCK_OFFSET(func), 0,
 			sizeof(struct cstorm_def_status_block)/4);
-	bnx2x_init_fill(bp, XSTORM_INTMEM_ADDR +
+	bnx2x_init_fill(bp, BAR_XSTRORM_INTMEM +
 			XSTORM_DEF_SB_HOST_STATUS_BLOCK_OFFSET(func), 0,
 			sizeof(struct xstorm_def_status_block)/4);
+	bnx2x_init_fill(bp, BAR_TSTRORM_INTMEM +
+			TSTORM_DEF_SB_HOST_STATUS_BLOCK_OFFSET(func), 0,
+			sizeof(struct tstorm_def_status_block)/4);
 }
 
 static void bnx2x_init_def_sb(struct bnx2x *bp,
@@ -5153,10 +5153,6 @@ static void bnx2x_nic_init(struct bnx2x *bp, u32 load_code)
 		bnx2x_update_fpsb_idx(fp);
 	}
 
-	/* ensure status block indices were read */
-	rmb();
-
-
 	bnx2x_init_def_sb(bp, bp->def_status_blk, bp->def_status_blk_mapping,
 			  DEF_SB_ID);
 	bnx2x_update_dsb_idx(bp);
@@ -5616,10 +5612,37 @@ static int bnx2x_init_common(struct bnx2x *bp)
 	bnx2x_init_block(bp, USDM_COMMON_START, USDM_COMMON_END);
 	bnx2x_init_block(bp, XSDM_COMMON_START, XSDM_COMMON_END);
 
-	bnx2x_init_fill(bp, TSTORM_INTMEM_ADDR, 0, STORM_INTMEM_SIZE(bp));
-	bnx2x_init_fill(bp, USTORM_INTMEM_ADDR, 0, STORM_INTMEM_SIZE(bp));
-	bnx2x_init_fill(bp, CSTORM_INTMEM_ADDR, 0, STORM_INTMEM_SIZE(bp));
-	bnx2x_init_fill(bp, XSTORM_INTMEM_ADDR, 0, STORM_INTMEM_SIZE(bp));
+	if (CHIP_IS_E1H(bp)) {
+		bnx2x_init_fill(bp, TSTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp,
+				TSTORM_INTMEM_ADDR + STORM_INTMEM_SIZE_E1H/2,
+				0, STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp, CSTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp,
+				CSTORM_INTMEM_ADDR + STORM_INTMEM_SIZE_E1H/2,
+				0, STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp, XSTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp,
+				XSTORM_INTMEM_ADDR + STORM_INTMEM_SIZE_E1H/2,
+				0, STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp, USTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1H/2);
+		bnx2x_init_fill(bp,
+				USTORM_INTMEM_ADDR + STORM_INTMEM_SIZE_E1H/2,
+				0, STORM_INTMEM_SIZE_E1H/2);
+	} else { /* E1 */
+		bnx2x_init_fill(bp, TSTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1);
+		bnx2x_init_fill(bp, CSTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1);
+		bnx2x_init_fill(bp, XSTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1);
+		bnx2x_init_fill(bp, USTORM_INTMEM_ADDR, 0,
+				STORM_INTMEM_SIZE_E1);
+	}
 
 	bnx2x_init_block(bp, TSEM_COMMON_START, TSEM_COMMON_END);
 	bnx2x_init_block(bp, USEM_COMMON_START, USEM_COMMON_END);
@@ -6574,8 +6597,10 @@ static void bnx2x_netif_stop(struct bnx2x *bp, int disable_hw)
 {
 	bnx2x_int_disable_sync(bp, disable_hw);
 	bnx2x_napi_disable(bp);
-	netif_tx_disable(bp->dev);
-	bp->dev->trans_start = jiffies;	/* prevent tx timeout */
+	if (netif_running(bp->dev)) {
+		netif_tx_disable(bp->dev);
+		bp->dev->trans_start = jiffies;	/* prevent tx timeout */
+	}
 }
 
 /*
@@ -7185,9 +7210,10 @@ static int bnx2x_nic_unload(struct bnx2x *bp, int unload_mode)
 		struct bnx2x_fastpath *fp = &bp->fp[i];
 
 		cnt = 1000;
+		smp_mb();
 		while (bnx2x_has_tx_work_unload(fp)) {
 
-			bnx2x_tx_int(fp);
+			bnx2x_tx_int(fp, 1000);
 			if (!cnt) {
 				BNX2X_ERR("timeout waiting for queue[%d]\n",
 					  i);
@@ -7200,6 +7226,7 @@ static int bnx2x_nic_unload(struct bnx2x *bp, int unload_mode)
 			}
 			cnt--;
 			msleep(1);
+			smp_mb();
 		}
 	}
 	/* Give HW time to discard old tx messages */
@@ -8470,84 +8497,6 @@ static void bnx2x_get_drvinfo(struct net_device *dev,
 	info->testinfo_len = BNX2X_NUM_TESTS;
 	info->eedump_len = bp->common.flash_size;
 	info->regdump_len = 0;
-}
-
-#define IS_E1_ONLINE(info)	(((info) & RI_E1_ONLINE) == RI_E1_ONLINE)
-#define IS_E1H_ONLINE(info)	(((info) & RI_E1H_ONLINE) == RI_E1H_ONLINE)
-
-static int bnx2x_get_regs_len(struct net_device *dev)
-{
-	static u32 regdump_len;
-	struct bnx2x *bp = netdev_priv(dev);
-	int i;
-
-	if (regdump_len)
-		return regdump_len;
-
-	if (CHIP_IS_E1(bp)) {
-		for (i = 0; i < REGS_COUNT; i++)
-			if (IS_E1_ONLINE(reg_addrs[i].info))
-				regdump_len += reg_addrs[i].size;
-
-		for (i = 0; i < WREGS_COUNT_E1; i++)
-			if (IS_E1_ONLINE(wreg_addrs_e1[i].info))
-				regdump_len += wreg_addrs_e1[i].size *
-					(1 + wreg_addrs_e1[i].read_regs_count);
-
-	} else { /* E1H */
-		for (i = 0; i < REGS_COUNT; i++)
-			if (IS_E1H_ONLINE(reg_addrs[i].info))
-				regdump_len += reg_addrs[i].size;
-
-		for (i = 0; i < WREGS_COUNT_E1H; i++)
-			if (IS_E1H_ONLINE(wreg_addrs_e1h[i].info))
-				regdump_len += wreg_addrs_e1h[i].size *
-					(1 + wreg_addrs_e1h[i].read_regs_count);
-	}
-	regdump_len *= 4;
-	regdump_len += sizeof(struct dump_hdr);
-
-	return regdump_len;
-}
-
-static void bnx2x_get_regs(struct net_device *dev,
-			   struct ethtool_regs *regs, void *_p)
-{
-	u32 *p = _p, i, j;
-	struct bnx2x *bp = netdev_priv(dev);
-	struct dump_hdr dump_hdr = {0};
-
-	regs->version = 0;
-	memset(p, 0, regs->len);
-
-	if (!netif_running(bp->dev))
-		return;
-
-	dump_hdr.hdr_size = (sizeof(struct dump_hdr) / 4) - 1;
-	dump_hdr.dump_sign = dump_sign_all;
-	dump_hdr.xstorm_waitp = REG_RD(bp, XSTORM_WAITP_ADDR);
-	dump_hdr.tstorm_waitp = REG_RD(bp, TSTORM_WAITP_ADDR);
-	dump_hdr.ustorm_waitp = REG_RD(bp, USTORM_WAITP_ADDR);
-	dump_hdr.cstorm_waitp = REG_RD(bp, CSTORM_WAITP_ADDR);
-	dump_hdr.info = CHIP_IS_E1(bp) ? RI_E1_ONLINE : RI_E1H_ONLINE;
-
-	memcpy(p, &dump_hdr, sizeof(struct dump_hdr));
-	p += dump_hdr.hdr_size + 1;
-
-	if (CHIP_IS_E1(bp)) {
-		for (i = 0; i < REGS_COUNT; i++)
-			if (IS_E1_ONLINE(reg_addrs[i].info))
-				for (j = 0; j < reg_addrs[i].size; j++)
-					*p++ = REG_RD(bp,
-						      reg_addrs[i].addr + j*4);
-
-	} else { /* E1H */
-		for (i = 0; i < REGS_COUNT; i++)
-			if (IS_E1H_ONLINE(reg_addrs[i].info))
-				for (j = 0; j < reg_addrs[i].size; j++)
-					*p++ = REG_RD(bp,
-						      reg_addrs[i].addr + j*4);
-	}
 }
 
 static void bnx2x_get_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
@@ -10005,8 +9954,6 @@ static struct ethtool_ops bnx2x_ethtool_ops = {
 	.get_settings		= bnx2x_get_settings,
 	.set_settings		= bnx2x_set_settings,
 	.get_drvinfo		= bnx2x_get_drvinfo,
-	.get_regs_len		= bnx2x_get_regs_len,
-	.get_regs		= bnx2x_get_regs,
 	.get_wol		= bnx2x_get_wol,
 	.set_wol		= bnx2x_set_wol,
 	.get_msglevel		= bnx2x_get_msglevel,
@@ -10119,29 +10066,16 @@ static int bnx2x_poll(struct napi_struct *napi, int budget)
 	bnx2x_update_fpsb_idx(fp);
 
 	if (bnx2x_has_tx_work(fp))
-		bnx2x_tx_int(fp);
+		bnx2x_tx_int(fp, budget);
 
-	if (bnx2x_has_rx_work(fp)) {
+	if (bnx2x_has_rx_work(fp))
 		work_done = bnx2x_rx_int(fp, budget);
 
-		/* must not complete if we consumed full budget */
-		if (work_done >= budget)
-			goto poll_again;
-	}
+	rmb(); /* BNX2X_HAS_WORK() reads the status block */
 
-	/* BNX2X_HAS_WORK() reads the status block, thus we need to
-	 * ensure that status block indices have been actually read
-	 * (bnx2x_update_fpsb_idx) prior to this check (BNX2X_HAS_WORK)
-	 * so that we won't write the "newer" value of the status block to IGU
-	 * (if there was a DMA right after BNX2X_HAS_WORK and
-	 * if there is no rmb, the memory reading (bnx2x_update_fpsb_idx)
-	 * may be postponed to right before bnx2x_ack_sb). In this case
-	 * there will never be another interrupt until there is another update
-	 * of the status block, while there is still unhandled work.
-	 */
-	rmb();
+	/* must not complete if we consumed full budget */
+	if ((work_done < budget) && !BNX2X_HAS_WORK(fp)) {
 
-	if (!BNX2X_HAS_WORK(fp)) {
 #ifdef BNX2X_STOP_ON_ERROR
 poll_panic:
 #endif
@@ -10153,7 +10087,6 @@ poll_panic:
 			     le16_to_cpu(fp->fp_c_idx), IGU_INT_ENABLE, 1);
 	}
 
-poll_again:
 	return work_done;
 }
 
@@ -11129,7 +11062,6 @@ static int __devinit bnx2x_init_one(struct pci_dev *pdev,
 	       (bnx2x_get_pcie_speed(bp) == 2) ? "5GHz (Gen2)" : "2.5GHz",
 	       dev->base_addr, bp->pdev->irq);
 	printk(KERN_CONT "node addr %pM\n", dev->dev_addr);
-
 	return 0;
 
 init_one_exit:

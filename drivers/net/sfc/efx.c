@@ -133,16 +133,6 @@ static int phy_flash_cfg;
 module_param(phy_flash_cfg, int, 0644);
 MODULE_PARM_DESC(phy_flash_cfg, "Set PHYs into reflash mode initially");
 
-static unsigned irq_adapt_low_thresh = 10000;
-module_param(irq_adapt_low_thresh, uint, 0644);
-MODULE_PARM_DESC(irq_adapt_low_thresh,
-		 "Threshold score for reducing IRQ moderation");
-
-static unsigned irq_adapt_high_thresh = 20000;
-module_param(irq_adapt_high_thresh, uint, 0644);
-MODULE_PARM_DESC(irq_adapt_high_thresh,
-		 "Threshold score for increasing IRQ moderation");
-
 /**************************************************************************
  *
  * Utility functions and prototypes
@@ -233,35 +223,6 @@ static int efx_poll(struct napi_struct *napi, int budget)
 	rx_packets = efx_process_channel(channel, budget);
 
 	if (rx_packets < budget) {
-		struct efx_nic *efx = channel->efx;
-
-		if (channel->used_flags & EFX_USED_BY_RX &&
-		    efx->irq_rx_adaptive &&
-		    unlikely(++channel->irq_count == 1000)) {
-			unsigned old_irq_moderation = channel->irq_moderation;
-
-			if (unlikely(channel->irq_mod_score <
-				     irq_adapt_low_thresh)) {
-				channel->irq_moderation =
-					max_t(int,
-					      channel->irq_moderation -
-					      FALCON_IRQ_MOD_RESOLUTION,
-					      FALCON_IRQ_MOD_RESOLUTION);
-			} else if (unlikely(channel->irq_mod_score >
-					    irq_adapt_high_thresh)) {
-				channel->irq_moderation =
-					min(channel->irq_moderation +
-					    FALCON_IRQ_MOD_RESOLUTION,
-					    efx->irq_rx_moderation);
-			}
-
-			if (channel->irq_moderation != old_irq_moderation)
-				falcon_set_int_moderation(channel);
-
-			channel->irq_count = 0;
-			channel->irq_mod_score = 0;
-		}
-
 		/* There is no race here; although napi_disable() will
 		 * only wait for napi_complete(), this isn't a problem
 		 * since efx_channel_processed() will have no effect if
@@ -596,8 +557,6 @@ static void efx_link_status_changed(struct efx_nic *efx)
 
 }
 
-static void efx_fini_port(struct efx_nic *efx);
-
 /* This call reinitialises the MAC to pick up new PHY settings. The
  * caller must hold the mac_lock */
 void __efx_reconfigure_port(struct efx_nic *efx)
@@ -633,8 +592,8 @@ void __efx_reconfigure_port(struct efx_nic *efx)
 
 fail:
 	EFX_ERR(efx, "failed to reconfigure MAC\n");
-	efx->port_enabled = false;
-	efx_fini_port(efx);
+	efx->phy_op->fini(efx);
+	efx->port_initialized = false;
 }
 
 /* Reinitialise the MAC to pick up new PHY settings, even if the port is
@@ -1030,7 +989,7 @@ static int efx_probe_nic(struct efx_nic *efx)
 	efx_set_channels(efx);
 
 	/* Initialise the interrupt moderation settings */
-	efx_init_irq_moderation(efx, tx_irq_mod_usec, rx_irq_mod_usec, true);
+	efx_init_irq_moderation(efx, tx_irq_mod_usec, rx_irq_mod_usec);
 
 	return 0;
 }
@@ -1227,8 +1186,7 @@ void efx_flush_queues(struct efx_nic *efx)
  **************************************************************************/
 
 /* Set interrupt moderation parameters */
-void efx_init_irq_moderation(struct efx_nic *efx, int tx_usecs, int rx_usecs,
-			     bool rx_adaptive)
+void efx_init_irq_moderation(struct efx_nic *efx, int tx_usecs, int rx_usecs)
 {
 	struct efx_tx_queue *tx_queue;
 	struct efx_rx_queue *rx_queue;
@@ -1238,8 +1196,6 @@ void efx_init_irq_moderation(struct efx_nic *efx, int tx_usecs, int rx_usecs,
 	efx_for_each_tx_queue(tx_queue, efx)
 		tx_queue->channel->irq_moderation = tx_usecs;
 
-	efx->irq_rx_adaptive = rx_adaptive;
-	efx->irq_rx_moderation = rx_usecs;
 	efx_for_each_rx_queue(rx_queue, efx)
 		rx_queue->channel->irq_moderation = rx_usecs;
 }
@@ -1711,8 +1667,7 @@ int efx_reset_up(struct efx_nic *efx, enum reset_type method,
 			rc = efx->phy_op->init(efx);
 			if (rc)
 				ok = false;
-		}
-		if (!ok)
+		} else
 			efx->port_initialized = false;
 	}
 
@@ -1893,8 +1848,8 @@ static struct efx_phy_operations efx_dummy_phy_operations = {
 
 static struct efx_board efx_dummy_board_info = {
 	.init		= efx_port_dummy_op_int,
-	.init_leds	= efx_port_dummy_op_void,
-	.set_id_led	= efx_port_dummy_op_blink,
+	.init_leds	= efx_port_dummy_op_int,
+	.set_fault_led	= efx_port_dummy_op_blink,
 	.monitor	= efx_port_dummy_op_int,
 	.blink		= efx_port_dummy_op_blink,
 	.fini		= efx_port_dummy_op_void,

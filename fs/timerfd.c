@@ -186,9 +186,10 @@ SYSCALL_DEFINE2(timerfd_create, int, clockid, int, flags)
 	BUILD_BUG_ON(TFD_CLOEXEC != O_CLOEXEC);
 	BUILD_BUG_ON(TFD_NONBLOCK != O_NONBLOCK);
 
-	if ((flags & ~TFD_CREATE_FLAGS) ||
-	    (clockid != CLOCK_MONOTONIC &&
-	     clockid != CLOCK_REALTIME))
+	if (flags & ~(TFD_CLOEXEC | TFD_NONBLOCK))
+		return -EINVAL;
+	if (clockid != CLOCK_MONOTONIC &&
+	    clockid != CLOCK_REALTIME)
 		return -EINVAL;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -200,7 +201,7 @@ SYSCALL_DEFINE2(timerfd_create, int, clockid, int, flags)
 	hrtimer_init(&ctx->tmr, clockid, HRTIMER_MODE_ABS);
 
 	ufd = anon_inode_getfd("[timerfd]", &timerfd_fops, ctx,
-			       flags & TFD_SHARED_FCNTL_FLAGS);
+			       flags & (O_CLOEXEC | O_NONBLOCK));
 	if (ufd < 0)
 		kfree(ctx);
 
@@ -218,8 +219,7 @@ SYSCALL_DEFINE4(timerfd_settime, int, ufd, int, flags,
 	if (copy_from_user(&ktmr, utmr, sizeof(ktmr)))
 		return -EFAULT;
 
-	if ((flags & ~TFD_SETTIME_FLAGS) ||
-	    !timespec_valid(&ktmr.it_value) ||
+	if (!timespec_valid(&ktmr.it_value) ||
 	    !timespec_valid(&ktmr.it_interval))
 		return -EINVAL;
 

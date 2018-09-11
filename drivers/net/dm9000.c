@@ -930,15 +930,13 @@ static irqreturn_t dm9000_interrupt(int irq, void *dev_id)
 	struct net_device *dev = dev_id;
 	board_info_t *db = netdev_priv(dev);
 	int int_status;
-	unsigned long flags;
 	u8 reg_save;
 
 	dm9000_dbg(db, 3, "entering %s\n", __func__);
 
 	/* A real interrupt coming */
 
-	/* holders of db->lock must always block IRQs */
-	spin_lock_irqsave(&db->lock, flags);
+	spin_lock(&db->lock);
 
 	/* Save previous register address */
 	reg_save = readb(db->io_addr);
@@ -974,7 +972,7 @@ static irqreturn_t dm9000_interrupt(int irq, void *dev_id)
 	/* Restore previous register address */
 	writeb(reg_save, db->io_addr);
 
-	spin_unlock_irqrestore(&db->lock, flags);
+	spin_unlock(&db->lock);
 
 	return IRQ_HANDLED;
 }

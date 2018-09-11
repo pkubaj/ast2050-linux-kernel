@@ -1536,15 +1536,32 @@ static void adjust_link(struct net_device *dev)
 static int init_phy(struct net_device *dev)
 {
 	struct ucc_geth_private *priv = netdev_priv(dev);
-	struct ucc_geth_info *ug_info = priv->ug_info;
+	struct device_node *np = priv->node;
+	struct device_node *phy, *mdio;
+	const phandle *ph;
+	char bus_name[MII_BUS_ID_SIZE];
+	const unsigned int *id;
 	struct phy_device *phydev;
+	char phy_id[BUS_ID_SIZE];
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;
 	priv->oldduplex = -1;
 
-	phydev = phy_connect(dev, ug_info->phy_bus_id, &adjust_link, 0,
-			     priv->phy_interface);
+	ph = of_get_property(np, "phy-handle", NULL);
+	phy = of_find_node_by_phandle(*ph);
+	mdio = of_get_parent(phy);
+
+	id = of_get_property(phy, "reg", NULL);
+
+	of_node_put(phy);
+	of_node_put(mdio);
+
+	fsl_pq_mdio_bus_name(bus_name, mdio);
+	snprintf(phy_id, sizeof(phy_id), "%s:%02x",
+                                bus_name, *id);
+
+	phydev = phy_connect(dev, phy_id, &adjust_link, 0, priv->phy_interface);
 
 	if (IS_ERR(phydev)) {
 		printk("%s: Could not attach to PHY\n", dev->name);
@@ -3501,20 +3518,6 @@ static phy_interface_t to_phy_interface(const char *phy_connection_type)
 	return PHY_INTERFACE_MODE_MII;
 }
 
-static const struct net_device_ops ucc_geth_netdev_ops = {
-	.ndo_open		= ucc_geth_open,
-	.ndo_stop		= ucc_geth_close,
-	.ndo_start_xmit		= ucc_geth_start_xmit,
-	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_set_mac_address	= eth_mac_addr,
-	.ndo_change_mtu		= eth_change_mtu,
-	.ndo_set_multicast_list	= ucc_geth_set_multi,
-	.ndo_tx_timeout		= ucc_geth_timeout,
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	.ndo_poll_controller	= ucc_netpoll,
-#endif
-};
-
 static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *match)
 {
 	struct device *device = &ofdev->dev;
@@ -3626,12 +3629,10 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 	ug_info->uf_info.irq = irq_of_parse_and_map(np, 0);
 	fixed_link = of_get_property(np, "fixed-link", NULL);
 	if (fixed_link) {
-		snprintf(ug_info->phy_bus_id, sizeof(ug_info->phy_bus_id),
-			 PHY_ID_FMT, "0", fixed_link[0]);
+		snprintf(ug_info->mdio_bus, MII_BUS_ID_SIZE, "0");
+		ug_info->phy_address = fixed_link[0];
 		phy = NULL;
 	} else {
-		char bus_name[MII_BUS_ID_SIZE];
-
 		ph = of_get_property(np, "phy-handle", NULL);
 		phy = of_find_node_by_phandle(*ph);
 
@@ -3642,6 +3643,7 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 		prop = of_get_property(phy, "reg", NULL);
 		if (prop == NULL)
 			return -1;
+		ug_info->phy_address = *prop;
 
 		/* Set the bus id */
 		mdio = of_get_parent(phy);
@@ -3655,9 +3657,8 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 		if (err)
 			return -1;
 
-		fsl_pq_mdio_bus_name(bus_name, mdio);
-		snprintf(ug_info->phy_bus_id, sizeof(ug_info->phy_bus_id),
-			"%s:%02x", bus_name, *prop);
+		snprintf(ug_info->mdio_bus, MII_BUS_ID_SIZE, "%x",
+				res.start&0xfffff);
 	}
 
 	/* get the phy interface type, or default to MII */
@@ -3730,11 +3731,19 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 
 	/* Fill in the dev structure */
 	uec_set_ethtool_ops(dev);
-	dev->netdev_ops = &ucc_geth_netdev_ops;
+	dev->open = ucc_geth_open;
+	dev->hard_start_xmit = ucc_geth_start_xmit;
+	dev->tx_timeout = ucc_geth_timeout;
 	dev->watchdog_timeo = TX_TIMEOUT;
 	INIT_WORK(&ugeth->timeout_work, ucc_geth_timeout_work);
 	netif_napi_add(dev, &ugeth->napi, ucc_geth_poll, UCC_GETH_DEV_WEIGHT);
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	dev->poll_controller = ucc_netpoll;
+#endif
+	dev->stop = ucc_geth_close;
+//    dev->change_mtu = ucc_geth_change_mtu;
 	dev->mtu = 1500;
+	dev->set_multicast_list = ucc_geth_set_multi;
 
 	ugeth->msg_enable = netif_msg_init(debug.msg_enable, UGETH_MSG_DEFAULT);
 	ugeth->phy_interface = phy_interface;

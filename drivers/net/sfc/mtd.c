@@ -15,7 +15,6 @@
 #define EFX_DRIVER_NAME "sfc_mtd"
 #include "net_driver.h"
 #include "spi.h"
-#include "efx.h"
 
 #define EFX_SPI_VERIFY_BUF_LEN 16
 

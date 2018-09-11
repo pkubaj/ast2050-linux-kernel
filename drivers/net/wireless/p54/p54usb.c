@@ -976,9 +976,11 @@ static int __devinit p54u_probe(struct usb_interface *intf,
 	if (err)
 		goto err_free_dev;
 
-	err = p54_register_common(dev, &udev->dev);
-	if (err)
+	err = ieee80211_register_hw(dev);
+	if (err) {
+		dev_err(&udev->dev, "(p54usb) Cannot register netdevice\n");
 		goto err_free_dev;
+	}
 
 	return 0;
 
@@ -1022,7 +1024,6 @@ static struct usb_driver p54u_driver = {
 	.disconnect = p54u_disconnect,
 	.pre_reset = p54u_pre_reset,
 	.post_reset = p54u_post_reset,
-	.soft_unbind = 1,
 };
 
 static int __init p54u_init(void)

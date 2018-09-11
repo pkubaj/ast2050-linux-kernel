@@ -29,7 +29,7 @@ static struct llc_sap *snap_sap;
 /*
  *	Find a snap client by matching the 5 bytes.
  */
-static struct datalink_proto *find_snap_client(const unsigned char *desc)
+static struct datalink_proto *find_snap_client(unsigned char *desc)
 {
 	struct datalink_proto *proto = NULL, *p;
 
@@ -95,16 +95,15 @@ static int snap_request(struct datalink_proto *dl,
 EXPORT_SYMBOL(register_snap_client);
 EXPORT_SYMBOL(unregister_snap_client);
 
-static const char snap_err_msg[] __initconst =
+static char snap_err_msg[] __initdata =
 	KERN_CRIT "SNAP - unable to register with 802.2\n";
 
 static int __init snap_init(void)
 {
 	snap_sap = llc_sap_open(0xAA, snap_rcv);
-	if (!snap_sap) {
+
+	if (!snap_sap)
 		printk(snap_err_msg);
-		return -EBUSY;
-	}
 
 	return 0;
 }
@@ -122,7 +121,7 @@ module_exit(snap_exit);
 /*
  *	Register SNAP clients. We don't yet use this for IP.
  */
-struct datalink_proto *register_snap_client(const unsigned char *desc,
+struct datalink_proto *register_snap_client(unsigned char *desc,
 					    int (*rcvfunc)(struct sk_buff *,
 							   struct net_device *,
 							   struct packet_type *,
@@ -137,7 +136,7 @@ struct datalink_proto *register_snap_client(const unsigned char *desc,
 
 	proto = kmalloc(sizeof(*proto), GFP_ATOMIC);
 	if (proto) {
-		memcpy(proto->type, desc, 5);
+		memcpy(proto->type, desc,5);
 		proto->rcvfunc		= rcvfunc;
 		proto->header_length	= 5 + 3; /* snap + 802.2 */
 		proto->request		= snap_request;

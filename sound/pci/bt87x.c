@@ -888,9 +888,9 @@ static int __devinit snd_bt87x_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
-	if (err < 0)
-		return err;
+	card = snd_card_new(index[dev], id[dev], THIS_MODULE, 0);
+	if (!card)
+		return -ENOMEM;
 
 	err = snd_bt87x_create(card, pci, &chip);
 	if (err < 0)

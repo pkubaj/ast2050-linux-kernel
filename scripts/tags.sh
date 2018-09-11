@@ -76,10 +76,7 @@ all_sources()
 
 all_kconfigs()
 {
-	for arch in $ALLSOURCE_ARCHS; do
-		find_sources $arch 'Kconfig*'
-	done
-	find_other_sources 'Kconfig*'
+	find_sources $ALLSOURCE_ARCHS 'Kconfig*'
 }
 
 all_defconfigs()
@@ -102,8 +99,7 @@ exuberant()
 	-I ____cacheline_internodealigned_in_smp                \
 	-I EXPORT_SYMBOL,EXPORT_SYMBOL_GPL                      \
 	--extra=+f --c-kinds=+px                                \
-	--regex-asm='/^ENTRY\(([^)]*)\).*/\1/'                  \
-	--regex-c='/^SYSCALL_DEFINE[[:digit:]]?\(([^,)]*).*/sys_\1/'
+	--regex-asm='/^ENTRY\(([^)]*)\).*/\1/'
 
 	all_kconfigs | xargs $1 -a                              \
 	--langdef=kconfig --language-force=kconfig              \
@@ -121,9 +117,7 @@ exuberant()
 
 emacs()
 {
-	all_sources | xargs $1 -a                               \
-	--regex='/^ENTRY(\([^)]*\)).*/\1/'                      \
-	--regex='/^SYSCALL_DEFINE[0-9]?(\([^,)]*\).*/sys_\1/'
+	all_sources | xargs $1 -a
 
 	all_kconfigs | xargs $1 -a                              \
 	--regex='/^[ \t]*\(\(menu\)*config\)[ \t]+\([a-zA-Z0-9_]+\)/\3/'

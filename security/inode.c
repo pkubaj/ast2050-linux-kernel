@@ -202,11 +202,12 @@ static int create_by_name(const char *name, mode_t mode,
  * This function returns a pointer to a dentry if it succeeds.  This
  * pointer must be passed to the securityfs_remove() function when the file is
  * to be removed (no automatic cleanup happens if your module is unloaded,
- * you are responsible here).  If an error occurs, the function will return
- * the erorr value (via ERR_PTR).
+ * you are responsible here).  If an error occurs, %NULL is returned.
  *
  * If securityfs is not enabled in the kernel, the value %-ENODEV is
- * returned.
+ * returned.  It is not wise to check for this value, but rather, check for
+ * %NULL or !%NULL instead as to eliminate the need for #ifdef in the calling
+ * code.
  */
 struct dentry *securityfs_create_file(const char *name, mode_t mode,
 				   struct dentry *parent, void *data,

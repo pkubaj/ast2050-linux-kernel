@@ -129,7 +129,7 @@ int fsl_pq_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 static int fsl_pq_mdio_reset(struct mii_bus *bus)
 {
 	struct fsl_pq_mdio __iomem *regs = (void __iomem *)bus->priv;
-	int timeout = PHY_INIT_TIMEOUT;
+	unsigned int timeout = PHY_INIT_TIMEOUT;
 
 	mutex_lock(&bus->mdio_lock);
 
@@ -145,7 +145,7 @@ static int fsl_pq_mdio_reset(struct mii_bus *bus)
 
 	mutex_unlock(&bus->mdio_lock);
 
-	if (timeout < 0) {
+	if(timeout == 0) {
 		printk(KERN_ERR "%s: The MII Bus is stuck!\n",
 				bus->name);
 		return -EBUSY;
@@ -194,15 +194,11 @@ static int *create_irq_map(struct device_node *np)
 
 void fsl_pq_mdio_bus_name(char *name, struct device_node *np)
 {
-	const u32 *addr;
-	u64 taddr = OF_BAD_ADDR;
+	const u32 *reg;
 
-	addr = of_get_address(np, 0, NULL, NULL);
-	if (addr)
-		taddr = of_translate_address(np, addr);
+	reg = of_get_property(np, "reg", NULL);
 
-	snprintf(name, MII_BUS_ID_SIZE, "%s@%llx", np->name,
-		(unsigned long long)taddr);
+	snprintf(name, MII_BUS_ID_SIZE, "%s@%x", np->name, reg ? *reg : 0);
 }
 
 /* Scan the bus in reverse, looking for an empty spot */
@@ -325,7 +321,6 @@ static int fsl_pq_mdio_probe(struct of_device *ofdev,
 	dev_set_drvdata(&ofdev->dev, new_bus);
 
 	if (of_device_is_compatible(np, "fsl,gianfar-mdio") ||
-			of_device_is_compatible(np, "fsl,gianfar-tbi") ||
 			of_device_is_compatible(np, "gianfar")) {
 #ifdef CONFIG_GIANFAR
 		tbipa = get_gfar_tbipa(regs);

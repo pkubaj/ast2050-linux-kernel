@@ -486,7 +486,6 @@ static struct rif_cache *rif_get_idx(loff_t pos)
 }
 
 static void *rif_seq_start(struct seq_file *seq, loff_t *pos)
-	__acquires(&rif_lock)
 {
 	spin_lock_irq(&rif_lock);
 
@@ -518,7 +517,6 @@ static void *rif_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void rif_seq_stop(struct seq_file *seq, void *v)
-	__releases(&rif_lock)
 {
 	spin_unlock_irq(&rif_lock);
 }
@@ -670,5 +668,3 @@ module_init(rif_init);
 
 EXPORT_SYMBOL(tr_type_trans);
 EXPORT_SYMBOL(alloc_trdev);
-
-MODULE_LICENSE("GPL");

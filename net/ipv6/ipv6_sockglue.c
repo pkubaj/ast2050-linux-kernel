@@ -218,7 +218,8 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 			if (opt)
 				sock_kfree_s(sk, opt, opt->tot_len);
 			pktopt = xchg(&np->pktoptions, NULL);
-			kfree_skb(pktopt);
+			if (pktopt)
+				kfree_skb(pktopt);
 
 			sk->sk_destruct = inet_sock_destruct;
 			/*

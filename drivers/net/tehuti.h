@@ -29,7 +29,6 @@
 #include <linux/if_vlan.h>
 #include <linux/interrupt.h>
 #include <linux/vmalloc.h>
-#include <linux/firmware.h>
 #include <asm/byteorder.h>
 
 /* Compile Time Switches */

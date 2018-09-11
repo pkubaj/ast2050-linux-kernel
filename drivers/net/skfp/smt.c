@@ -55,6 +55,16 @@ static const struct fddi_addr SMT_Unknown = {
 } ;
 
 /*
+ * external variables
+ */
+extern const struct fddi_addr fddi_broadcast ;
+
+/*
+ * external functions
+ */
+int pcm_status_twisted(struct s_smc *smc);
+
+/*
  * function prototypes
  */
 #ifdef	LITTLE_ENDIAN

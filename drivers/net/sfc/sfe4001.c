@@ -399,7 +399,6 @@ static struct i2c_board_info sfn4111t_r5_hwmon_info = {
 
 int sfn4111t_init(struct efx_nic *efx)
 {
-	int i = 0;
 	int rc;
 
 	efx->board_info.hwmon_client =
@@ -418,20 +417,13 @@ int sfn4111t_init(struct efx_nic *efx)
 	if (rc)
 		goto fail_hwmon;
 
-	do {
-		if (efx->phy_mode & PHY_MODE_SPECIAL) {
-			/* PHY may not generate a 156.25 MHz clock and MAC
-			 * stats fetch will fail. */
-			efx_stats_disable(efx);
-			sfn4111t_reset(efx);
-		}
-		rc = sft9001_wait_boot(efx);
-		if (rc == 0)
-			return 0;
-		efx->phy_mode = PHY_MODE_SPECIAL;
-	} while (rc == -EINVAL && ++i < 2);
+	if (efx->phy_mode & PHY_MODE_SPECIAL) {
+		efx_stats_disable(efx);
+		sfn4111t_reset(efx);
+	}
 
-	device_remove_file(&efx->pci_dev->dev, &dev_attr_phy_flash_cfg);
+	return 0;
+
 fail_hwmon:
 	i2c_unregister_device(efx->board_info.hwmon_client);
 	return rc;

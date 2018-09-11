@@ -60,7 +60,7 @@ static u32 convert_radiotap_rate_to_mv(u8 rate)
 int lbs_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	unsigned long flags;
-	struct lbs_private *priv = dev->ml_priv;
+	struct lbs_private *priv = netdev_priv(dev);
 	struct txpd *txpd;
 	char *p802x_hdr;
 	uint16_t pkt_len;
@@ -82,8 +82,8 @@ int lbs_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		       skb->len, MRVDRV_ETH_TX_PACKET_BUFFER_SIZE);
 		/* We'll never manage to send this one; drop it and return 'OK' */
 
-		dev->stats.tx_dropped++;
-		dev->stats.tx_errors++;
+		priv->stats.tx_dropped++;
+		priv->stats.tx_errors++;
 		goto free;
 	}
 
@@ -146,8 +146,8 @@ int lbs_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	lbs_deb_tx("%s lined up packet\n", __func__);
 
-	dev->stats.tx_packets++;
-	dev->stats.tx_bytes += skb->len;
+	priv->stats.tx_packets++;
+	priv->stats.tx_bytes += skb->len;
 
 	dev->trans_start = jiffies;
 

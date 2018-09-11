@@ -15,7 +15,6 @@
 
 #include <crypto/internal/skcipher.h>
 #include <crypto/rng.h>
-#include <crypto/crypto_wq.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -134,7 +133,7 @@ static int async_chainiv_schedule_work(struct async_chainiv_ctx *ctx)
 			goto out;
 	}
 
-	queued = queue_work(kcrypto_wq, &ctx->postponed);
+	queued = schedule_work(&ctx->postponed);
 	BUG_ON(!queued);
 
 out:

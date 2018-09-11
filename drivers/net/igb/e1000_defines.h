@@ -45,8 +45,6 @@
 
 /* Extended Device Control */
 #define E1000_CTRL_EXT_SDP7_DATA 0x00000080 /* Value of SW Defineable Pin 7 */
-/* Physical Func Reset Done Indication */
-#define E1000_CTRL_EXT_PFRSTD    0x00004000
 #define E1000_CTRL_EXT_LINK_MODE_MASK 0x00C00000
 #define E1000_CTRL_EXT_LINK_MODE_PCIE_SERDES  0x00C00000
 #define E1000_CTRL_EXT_LINK_MODE_SGMII   0x00800000
@@ -327,7 +325,6 @@
 #define E1000_ICR_RXSEQ         0x00000008 /* rx sequence error */
 #define E1000_ICR_RXDMT0        0x00000010 /* rx desc min. threshold (0) */
 #define E1000_ICR_RXT0          0x00000080 /* rx timer intr (ring 0) */
-#define E1000_ICR_VMMB          0x00000100 /* VM MB event */
 /* If this bit asserted, the driver should claim the interrupt */
 #define E1000_ICR_INT_ASSERTED  0x80000000
 /* LAN connected device generates an interrupt */
@@ -365,7 +362,6 @@
 /* Interrupt Mask Set */
 #define E1000_IMS_TXDW      E1000_ICR_TXDW      /* Transmit desc written back */
 #define E1000_IMS_LSC       E1000_ICR_LSC       /* Link Status Change */
-#define E1000_IMS_VMMB      E1000_ICR_VMMB      /* Mail box activity */
 #define E1000_IMS_RXSEQ     E1000_ICR_RXSEQ     /* rx sequence error */
 #define E1000_IMS_RXDMT0    E1000_ICR_RXDMT0    /* rx desc min. threshold */
 #define E1000_IMS_RXT0      E1000_ICR_RXT0      /* rx timer intr */
@@ -403,8 +399,6 @@
 #define E1000_RAH_AV  0x80000000        /* Receive descriptor valid */
 #define E1000_RAL_MAC_ADDR_LEN 4
 #define E1000_RAH_MAC_ADDR_LEN 2
-#define E1000_RAH_POOL_MASK 0x03FC0000
-#define E1000_RAH_POOL_1 0x00040000
 
 /* Error Codes */
 #define E1000_ERR_NVM      1
@@ -417,7 +411,6 @@
 #define E1000_BLK_PHY_RESET   12
 #define E1000_ERR_SWFW_SYNC 13
 #define E1000_NOT_IMPLEMENTED 14
-#define E1000_ERR_MBX      15
 
 /* Loop limit on how long we wait for auto-negotiation to complete */
 #define COPPER_LINK_UP_LIMIT              10
@@ -512,7 +505,6 @@
 #define NVM_ID_LED_SETTINGS        0x0004
 /* For SERDES output amplitude adjustment. */
 #define NVM_INIT_CONTROL2_REG      0x000F
-#define NVM_INIT_CONTROL3_PORT_B   0x0014
 #define NVM_INIT_CONTROL3_PORT_A   0x0024
 #define NVM_ALT_MAC_ADDR_PTR       0x0037
 #define NVM_CHECKSUM_REG           0x003F
@@ -664,9 +656,5 @@
 #define E1000_GEN_CTL_READY             0x80000000
 #define E1000_GEN_CTL_ADDRESS_SHIFT     8
 #define E1000_GEN_POLL_TIMEOUT          640
-
-#define E1000_VFTA_ENTRY_SHIFT               5
-#define E1000_VFTA_ENTRY_MASK                0x7F
-#define E1000_VFTA_ENTRY_BIT_SHIFT_MASK      0x1F
 
 #endif

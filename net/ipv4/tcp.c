@@ -661,47 +661,6 @@ struct sk_buff *sk_stream_alloc_skb(struct sock *sk, int size, gfp_t gfp)
 	return NULL;
 }
 
-static unsigned int tcp_xmit_size_goal(struct sock *sk, u32 mss_now,
-				       int large_allowed)
-{
-	struct tcp_sock *tp = tcp_sk(sk);
-	u32 xmit_size_goal, old_size_goal;
-
-	xmit_size_goal = mss_now;
-
-	if (large_allowed && sk_can_gso(sk)) {
-		xmit_size_goal = ((sk->sk_gso_max_size - 1) -
-				  inet_csk(sk)->icsk_af_ops->net_header_len -
-				  inet_csk(sk)->icsk_ext_hdr_len -
-				  tp->tcp_header_len);
-
-		xmit_size_goal = tcp_bound_to_half_wnd(tp, xmit_size_goal);
-
-		/* We try hard to avoid divides here */
-		old_size_goal = tp->xmit_size_goal_segs * mss_now;
-
-		if (likely(old_size_goal <= xmit_size_goal &&
-			   old_size_goal + mss_now > xmit_size_goal)) {
-			xmit_size_goal = old_size_goal;
-		} else {
-			tp->xmit_size_goal_segs = xmit_size_goal / mss_now;
-			xmit_size_goal = tp->xmit_size_goal_segs * mss_now;
-		}
-	}
-
-	return max(xmit_size_goal, mss_now);
-}
-
-static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
-{
-	int mss_now;
-
-	mss_now = tcp_current_mss(sk);
-	*size_goal = tcp_xmit_size_goal(sk, mss_now, !(flags & MSG_OOB));
-
-	return mss_now;
-}
-
 static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffset,
 			 size_t psize, int flags)
 {
@@ -718,12 +677,13 @@ static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffse
 
 	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
 
-	mss_now = tcp_send_mss(sk, &size_goal, flags);
+	mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
+	size_goal = tp->xmit_size_goal;
 	copied = 0;
 
 	err = -EPIPE;
 	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))
-		goto out_err;
+		goto do_error;
 
 	while (psize > 0) {
 		struct sk_buff *skb = tcp_write_queue_tail(sk);
@@ -801,7 +761,8 @@ wait_for_memory:
 		if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 			goto do_error;
 
-		mss_now = tcp_send_mss(sk, &size_goal, flags);
+		mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
+		size_goal = tp->xmit_size_goal;
 	}
 
 out:
@@ -883,7 +844,8 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	/* This should be in poll */
 	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
 
-	mss_now = tcp_send_mss(sk, &size_goal, flags);
+	mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
+	size_goal = tp->xmit_size_goal;
 
 	/* Ok commence sending. */
 	iovlen = msg->msg_iovlen;
@@ -892,7 +854,7 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 
 	err = -EPIPE;
 	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))
-		goto out_err;
+		goto do_error;
 
 	while (--iovlen >= 0) {
 		int seglen = iov->iov_len;
@@ -1045,7 +1007,8 @@ wait_for_memory:
 			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 				goto do_error;
 
-			mss_now = tcp_send_mss(sk, &size_goal, flags);
+			mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
+			size_goal = tp->xmit_size_goal;
 		}
 	}
 
@@ -1082,7 +1045,8 @@ out_err:
  */
 
 static int tcp_recv_urg(struct sock *sk, long timeo,
-			struct msghdr *msg, int len, int flags)
+			struct msghdr *msg, int len, int flags,
+			int *addr_len)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 
@@ -1697,7 +1661,7 @@ out:
 	return err;
 
 recv_urg:
-	err = tcp_recv_urg(sk, timeo, msg, len, flags);
+	err = tcp_recv_urg(sk, timeo, msg, len, flags, addr_len);
 	goto out;
 }
 

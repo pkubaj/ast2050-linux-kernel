@@ -426,7 +426,7 @@ static int __devinit twl4030_rtc_probe(struct platform_device *pdev)
 
 	ret = request_irq(irq, twl4030_rtc_interrupt,
 				IRQF_TRIGGER_RISING,
-				dev_name(&rtc->dev), rtc);
+				rtc->dev.bus_id, rtc);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "IRQ is not free.\n");
 		goto out1;

@@ -140,14 +140,16 @@ static void rs_poll(unsigned long priv)
 }
 
 
-static int rs_put_char(struct tty_struct *tty, unsigned char ch)
+static void rs_put_char(struct tty_struct *tty, unsigned char ch)
 {
 	char buf[2];
+
+	if (!tty)
+		return;
 
 	buf[0] = ch;
 	buf[1] = '\0';		/* Is this NULL necessary? */
 	__simc (SYS_write, 1, (unsigned long) buf, 1, 0, 0);
-	return 1;
 }
 
 static void rs_flush_chars(struct tty_struct *tty)

@@ -1563,7 +1563,6 @@ static int __init cs4231_attach_begin(struct snd_card **rcard)
 {
 	struct snd_card *card;
 	struct snd_cs4231 *chip;
-	int err;
 
 	*rcard = NULL;
 
@@ -1575,10 +1574,10 @@ static int __init cs4231_attach_begin(struct snd_card **rcard)
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
-			      sizeof(struct snd_cs4231), &card);
-	if (err < 0)
-		return err;
+	card = snd_card_new(index[dev], id[dev], THIS_MODULE,
+			    sizeof(struct snd_cs4231));
+	if (card == NULL)
+		return -ENOMEM;
 
 	strcpy(card->driver, "CS4231");
 	strcpy(card->shortname, "Sun CS4231");

@@ -105,8 +105,7 @@ void ctcm_unpack_skb(struct channel *ch, struct sk_buff *pskb)
 			return;
 		}
 		pskb->protocol = ntohs(header->type);
-		if ((header->length <= LL_HEADER_LENGTH) ||
-		    (len <= LL_HEADER_LENGTH)) {
+		if (header->length <= LL_HEADER_LENGTH) {
 			if (!(ch->logflags & LOG_FLAG_ILLEGALSIZE)) {
 				CTCM_DBF_TEXT_(ERROR, CTC_DBF_ERROR,
 					"%s(%s): Illegal packet size %d(%d,%d)"
@@ -168,9 +167,11 @@ void ctcm_unpack_skb(struct channel *ch, struct sk_buff *pskb)
 		if (len > 0) {
 			skb_pull(pskb, header->length);
 			if (skb_tailroom(pskb) < LL_HEADER_LENGTH) {
-				CTCM_DBF_DEV_NAME(TRACE, dev,
-					"Overrun in ctcm_unpack_skb");
-				ch->logflags |= LOG_FLAG_OVERRUN;
+				if (!(ch->logflags & LOG_FLAG_OVERRUN)) {
+					CTCM_DBF_DEV_NAME(TRACE, dev,
+						"Overrun in ctcm_unpack_skb");
+					ch->logflags |= LOG_FLAG_OVERRUN;
+				}
 				return;
 			}
 			skb_put(pskb, LL_HEADER_LENGTH);
@@ -905,11 +906,11 @@ static int ctcm_tx(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (ctcm_test_and_set_busy(dev))
-		return NETDEV_TX_BUSY;
+		return -EBUSY;
 
 	dev->trans_start = jiffies;
 	if (ctcm_transmit_skb(priv->channel[WRITE], skb) != 0)
-		return NETDEV_TX_BUSY;
+		return 1;
 	return 0;
 }
 

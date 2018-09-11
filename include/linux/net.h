@@ -129,15 +129,11 @@ struct socket {
 	socket_state		state;
 	short			type;
 	unsigned long		flags;
-	/*
-	 * Please keep fasync_list & wait fields in the same cache line
-	 */
+	const struct proto_ops	*ops;
 	struct fasync_struct	*fasync_list;
-	wait_queue_head_t	wait;
-
 	struct file		*file;
 	struct sock		*sk;
-	const struct proto_ops	*ops;
+	wait_queue_head_t	wait;
 };
 
 struct vm_area_struct;

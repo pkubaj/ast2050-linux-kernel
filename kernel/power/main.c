@@ -298,12 +298,8 @@ static int suspend_enter(suspend_state_t state)
 		goto Done;
 	}
 
-	error = sysdev_suspend(PMSG_SUSPEND);
-	if (!error) {
-		if (!suspend_test(TEST_CORE))
-			error = suspend_ops->enter(state);
-		sysdev_resume();
-	}
+	if (!suspend_test(TEST_CORE))
+		error = suspend_ops->enter(state);
 
 	device_power_up(PMSG_RESUME);
  Done:

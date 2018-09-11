@@ -10,6 +10,7 @@
 
 #include "platform.h"
 
+#include "gesbc9312.h"
 #include "ts72xx.h"
 
 #endif

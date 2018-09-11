@@ -336,16 +336,6 @@ static int ssi_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	 SNDRV_PCM_FMTBIT_S24_3LE | SNDRV_PCM_FMTBIT_U24_3LE |	\
 	 SNDRV_PCM_FMTBIT_S32_LE  | SNDRV_PCM_FMTBIT_U32_LE)
 
-static struct snd_soc_dai_ops ssi_dai_ops = {
-	.startup	= ssi_startup,
-	.shutdown	= ssi_shutdown,
-	.trigger	= ssi_trigger,
-	.hw_params	= ssi_hw_params,
-	.set_sysclk	= ssi_set_sysclk,
-	.set_clkdiv	= ssi_set_clkdiv,
-	.set_fmt	= ssi_set_fmt,
-};
-
 struct snd_soc_dai sh4_ssi_dai[] = {
 {
 	.name			= "SSI0",
@@ -362,7 +352,15 @@ struct snd_soc_dai sh4_ssi_dai[] = {
 		.channels_min	= 2,
 		.channels_max	= 8,
 	},
-	.ops = &ssi_dai_ops,
+	.ops = {
+		.startup	= ssi_startup,
+		.shutdown	= ssi_shutdown,
+		.trigger	= ssi_trigger,
+		.hw_params	= ssi_hw_params,
+		.set_sysclk	= ssi_set_sysclk,
+		.set_clkdiv	= ssi_set_clkdiv,
+		.set_fmt	= ssi_set_fmt,
+	},
 },
 #ifdef CONFIG_CPU_SUBTYPE_SH7760
 {
@@ -380,7 +378,15 @@ struct snd_soc_dai sh4_ssi_dai[] = {
 		.channels_min	= 2,
 		.channels_max	= 8,
 	},
-	.ops = &ssi_dai_ops,
+	.ops = {
+		.startup	= ssi_startup,
+		.shutdown	= ssi_shutdown,
+		.trigger	= ssi_trigger,
+		.hw_params	= ssi_hw_params,
+		.set_sysclk	= ssi_set_sysclk,
+		.set_clkdiv	= ssi_set_clkdiv,
+		.set_fmt	= ssi_set_fmt,
+	},
 },
 #endif
 };

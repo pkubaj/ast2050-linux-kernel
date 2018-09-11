@@ -120,6 +120,8 @@ struct ath_rate_table {
 		u8 sgi_index;
 		u8 ht_index;
 		u32 max_4ms_framelen;
+		u16 lpAckDuration;
+		u16 spAckDuration;
 	} info[RATE_TABLE_SIZE];
 	u32 probe_interval;
 	u32 rssi_reduce_interval;
@@ -194,19 +196,11 @@ struct ath_rate_priv {
 	struct ath_rate_softc *asc;
 };
 
-enum ath9k_internal_frame_type {
-	ATH9K_NOT_INTERNAL,
-	ATH9K_INT_PAUSE,
-	ATH9K_INT_UNPAUSE
-};
-
 struct ath_tx_info_priv {
-	struct ath_wiphy *aphy;
 	struct ath_tx_status tx;
 	int n_frames;
 	int n_bad_frames;
 	bool update_rc;
-	enum ath9k_internal_frame_type frame_type;
 };
 
 #define ATH_TX_INFO_PRIV(tx_info) \

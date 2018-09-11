@@ -1275,11 +1275,8 @@ static int htb_delete(struct Qdisc *sch, unsigned long arg)
 	if (last_child)
 		htb_parent_to_leaf(q, cl, new_q);
 
-	BUG_ON(--cl->refcnt == 0);
-	/*
-	 * This shouldn't happen: we "hold" one cops->get() when called
-	 * from tc_ctl_tclass; the destroy method is done from cops->put().
-	 */
+	if (--cl->refcnt == 0)
+		htb_destroy_class(sch, cl);
 
 	sch_tree_unlock(sch);
 	return 0;

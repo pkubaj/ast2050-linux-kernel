@@ -659,16 +659,13 @@ void sysfs_remove_file_from_group(struct kobject *kobj,
 EXPORT_SYMBOL_GPL(sysfs_remove_file_from_group);
 
 struct sysfs_schedule_callback_struct {
-	struct list_head	workq_list;
-	struct kobject		*kobj;
+	struct kobject 		*kobj;
 	void			(*func)(void *);
 	void			*data;
 	struct module		*owner;
 	struct work_struct	work;
 };
 
-static DEFINE_MUTEX(sysfs_workq_mutex);
-static LIST_HEAD(sysfs_workq);
 static void sysfs_schedule_callback_work(struct work_struct *work)
 {
 	struct sysfs_schedule_callback_struct *ss = container_of(work,
@@ -677,9 +674,6 @@ static void sysfs_schedule_callback_work(struct work_struct *work)
 	(ss->func)(ss->data);
 	kobject_put(ss->kobj);
 	module_put(ss->owner);
-	mutex_lock(&sysfs_workq_mutex);
-	list_del(&ss->workq_list);
-	mutex_unlock(&sysfs_workq_mutex);
 	kfree(ss);
 }
 
@@ -701,25 +695,15 @@ static void sysfs_schedule_callback_work(struct work_struct *work)
  * until @func returns.
  *
  * Returns 0 if the request was submitted, -ENOMEM if storage could not
- * be allocated, -ENODEV if a reference to @owner isn't available,
- * -EAGAIN if a callback has already been scheduled for @kobj.
+ * be allocated, -ENODEV if a reference to @owner isn't available.
  */
 int sysfs_schedule_callback(struct kobject *kobj, void (*func)(void *),
 		void *data, struct module *owner)
 {
-	struct sysfs_schedule_callback_struct *ss, *tmp;
+	struct sysfs_schedule_callback_struct *ss;
 
 	if (!try_module_get(owner))
 		return -ENODEV;
-
-	mutex_lock(&sysfs_workq_mutex);
-	list_for_each_entry_safe(ss, tmp, &sysfs_workq, workq_list)
-		if (ss->kobj == kobj) {
-			mutex_unlock(&sysfs_workq_mutex);
-			return -EAGAIN;
-		}
-	mutex_unlock(&sysfs_workq_mutex);
-
 	ss = kmalloc(sizeof(*ss), GFP_KERNEL);
 	if (!ss) {
 		module_put(owner);
@@ -731,10 +715,6 @@ int sysfs_schedule_callback(struct kobject *kobj, void (*func)(void *),
 	ss->data = data;
 	ss->owner = owner;
 	INIT_WORK(&ss->work, sysfs_schedule_callback_work);
-	INIT_LIST_HEAD(&ss->workq_list);
-	mutex_lock(&sysfs_workq_mutex);
-	list_add_tail(&ss->workq_list, &sysfs_workq);
-	mutex_unlock(&sysfs_workq_mutex);
 	schedule_work(&ss->work);
 	return 0;
 }

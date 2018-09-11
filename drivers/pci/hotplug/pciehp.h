@@ -111,7 +111,6 @@ struct controller {
 	int cmd_busy;
 	unsigned int no_cmd_complete:1;
 	unsigned int link_active_reporting:1;
-	unsigned int notification_enabled:1;
 };
 
 #define INT_BUTTON_IGNORE		0
@@ -171,7 +170,6 @@ extern int pciehp_configure_device(struct slot *p_slot);
 extern int pciehp_unconfigure_device(struct slot *p_slot);
 extern void pciehp_queue_pushbutton_work(struct work_struct *work);
 struct controller *pcie_init(struct pcie_device *dev);
-int pcie_init_notification(struct controller *ctrl);
 int pciehp_enable_slot(struct slot *p_slot);
 int pciehp_disable_slot(struct slot *p_slot);
 int pcie_enable_notification(struct controller *ctrl);

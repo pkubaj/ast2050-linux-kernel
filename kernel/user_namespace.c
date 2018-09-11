@@ -60,25 +60,12 @@ int create_user_ns(struct cred *new)
 	return 0;
 }
 
-/*
- * Deferred destructor for a user namespace.  This is required because
- * free_user_ns() may be called with uidhash_lock held, but we need to call
- * back to free_uid() which will want to take the lock again.
- */
-static void free_user_ns_work(struct work_struct *work)
-{
-	struct user_namespace *ns =
-		container_of(work, struct user_namespace, destroyer);
-	free_uid(ns->creator);
-	kfree(ns);
-}
-
 void free_user_ns(struct kref *kref)
 {
-	struct user_namespace *ns =
-		container_of(kref, struct user_namespace, kref);
+	struct user_namespace *ns;
 
-	INIT_WORK(&ns->destroyer, free_user_ns_work);
-	schedule_work(&ns->destroyer);
+	ns = container_of(kref, struct user_namespace, kref);
+	free_uid(ns->creator);
+	kfree(ns);
 }
 EXPORT_SYMBOL(free_user_ns);

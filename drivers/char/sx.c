@@ -1746,10 +1746,9 @@ static long sx_fw_ioctl(struct file *filp, unsigned int cmd,
 		sx_dprintk(SX_DEBUG_FIRMWARE, "returning type= %ld\n", rc);
 		break;
 	case SXIO_DO_RAMTEST:
-		if (sx_initialized) {	/* Already initialized: better not ramtest the board.  */
+		if (sx_initialized)	/* Already initialized: better not ramtest the board.  */
 			rc = -EPERM;
 			break;
-		}
 		if (IS_SX_BOARD(board)) {
 			rc = do_memtest(board, 0, 0x7000);
 			if (!rc)
@@ -1789,7 +1788,7 @@ static long sx_fw_ioctl(struct file *filp, unsigned int cmd,
 						nbytes - i : SX_CHUNK_SIZE)) {
 					kfree(tmp);
 					rc = -EFAULT;
-					goto out;
+					break;
 				}
 				memcpy_toio(board->base2 + offset + i, tmp,
 						(i + SX_CHUNK_SIZE > nbytes) ?

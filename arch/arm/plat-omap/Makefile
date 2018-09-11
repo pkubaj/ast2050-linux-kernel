@@ -18,8 +18,7 @@ obj-$(CONFIG_CPU_FREQ) += cpu-omap.o
 obj-$(CONFIG_OMAP_DM_TIMER) += dmtimer.o
 obj-$(CONFIG_OMAP_DEBUG_DEVICES) += debug-devices.o
 obj-$(CONFIG_OMAP_DEBUG_LEDS) += debug-leds.o
-i2c-omap-$(CONFIG_I2C_OMAP) := i2c.o
-obj-y += $(i2c-omap-m) $(i2c-omap-y)
+obj-$(CONFIG_I2C_OMAP) += i2c.o
 
 # OMAP mailbox framework
 obj-$(CONFIG_OMAP_MBOX_FWK) += mailbox.o

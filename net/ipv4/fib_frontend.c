@@ -275,7 +275,7 @@ int fib_validate_source(__be32 src, __be32 dst, u8 tos, int oif,
 	fib_res_put(&res);
 	if (no_addr)
 		goto last_resort;
-	if (rpf == 1)
+	if (rpf)
 		goto e_inval;
 	fl.oif = dev->ifindex;
 

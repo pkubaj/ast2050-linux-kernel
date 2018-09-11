@@ -17,7 +17,6 @@
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
-#include <linux/user_namespace.h>
 #include <asm/uaccess.h>
 #include "internal.h"
 
@@ -35,7 +34,6 @@ struct key_user root_key_user = {
 	.nkeys		= ATOMIC_INIT(2),
 	.nikeys		= ATOMIC_INIT(2),
 	.uid		= 0,
-	.user_ns	= &init_user_ns,
 };
 
 /*****************************************************************************/

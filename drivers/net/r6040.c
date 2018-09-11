@@ -49,12 +49,12 @@
 #include <asm/processor.h>
 
 #define DRV_NAME	"r6040"
-#define DRV_VERSION	"0.22"
-#define DRV_RELDATE	"25Mar2009"
+#define DRV_VERSION	"0.21"
+#define DRV_RELDATE	"09Jan2009"
 
 /* PHY CHIP Address */
 #define PHY1_ADDR	1	/* For MAC1 */
-#define PHY2_ADDR	3	/* For MAC2 */
+#define PHY2_ADDR	2	/* For MAC2 */
 #define PHY_MODE	0x3100	/* PHY CHIP Register 0 */
 #define PHY_CAP		0x01E1	/* PHY CHIP Register 4 */
 

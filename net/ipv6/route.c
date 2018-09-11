@@ -2400,9 +2400,8 @@ void inet6_rt_notify(int event, struct rt6_info *rt, struct nl_info *info)
 		kfree_skb(skb);
 		goto errout;
 	}
-	rtnl_notify(skb, net, info->pid, RTNLGRP_IPV6_ROUTE,
-		    info->nlh, gfp_any());
-	return;
+	err = rtnl_notify(skb, net, info->pid, RTNLGRP_IPV6_ROUTE,
+			  info->nlh, gfp_any());
 errout:
 	if (err < 0)
 		rtnl_set_sk_err(net, RTNLGRP_IPV6_ROUTE, err);

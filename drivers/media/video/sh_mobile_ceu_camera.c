@@ -603,18 +603,21 @@ static int sh_mobile_ceu_set_fmt(struct soc_camera_device *icd,
 	const struct soc_camera_format_xlate *xlate;
 	int ret;
 
-	if (!pixfmt)
-		return icd->ops->set_fmt(icd, pixfmt, rect);
-
 	xlate = soc_camera_xlate_by_fourcc(icd, pixfmt);
 	if (!xlate) {
 		dev_warn(&ici->dev, "Format %x not found\n", pixfmt);
 		return -EINVAL;
 	}
 
-	ret = icd->ops->set_fmt(icd, xlate->cam_fmt->fourcc, rect);
+	switch (pixfmt) {
+	case 0:				/* Only geometry change */
+		ret = icd->ops->set_fmt(icd, pixfmt, rect);
+		break;
+	default:
+		ret = icd->ops->set_fmt(icd, xlate->cam_fmt->fourcc, rect);
+	}
 
-	if (!ret) {
+	if (pixfmt && !ret) {
 		icd->buswidth = xlate->buswidth;
 		icd->current_fmt = xlate->host_fmt;
 		pcdev->camera_fmt = xlate->cam_fmt;

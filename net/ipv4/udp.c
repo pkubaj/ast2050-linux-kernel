@@ -222,7 +222,7 @@ fail:
 	return error;
 }
 
-int ipv4_rcv_saddr_equal(const struct sock *sk1, const struct sock *sk2)
+static int ipv4_rcv_saddr_equal(const struct sock *sk1, const struct sock *sk2)
 {
 	struct inet_sock *inet1 = inet_sk(sk1), *inet2 = inet_sk(sk2);
 
@@ -1184,7 +1184,7 @@ static int __udp4_lib_mcast_deliver(struct net *net, struct sk_buff *skb,
 			sk = sknext;
 		} while (sknext);
 	} else
-		consume_skb(skb);
+		kfree_skb(skb);
 	spin_unlock(&hslot->lock);
 	return 0;
 }
@@ -1618,8 +1618,7 @@ static struct sock *udp_get_next(struct seq_file *seq, struct sock *sk)
 	} while (sk && (!net_eq(sock_net(sk), net) || sk->sk_family != state->family));
 
 	if (!sk) {
-		if (state->bucket < UDP_HTABLE_SIZE)
-			spin_unlock_bh(&state->udp_table->hash[state->bucket].lock);
+		spin_unlock_bh(&state->udp_table->hash[state->bucket].lock);
 		return udp_get_first(seq, state->bucket + 1);
 	}
 	return sk;
@@ -1637,9 +1636,6 @@ static struct sock *udp_get_idx(struct seq_file *seq, loff_t pos)
 
 static void *udp_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	struct udp_iter_state *state = seq->private;
-	state->bucket = UDP_HTABLE_SIZE;
-
 	return *pos ? udp_get_idx(seq, *pos-1) : SEQ_START_TOKEN;
 }
 
@@ -1823,7 +1819,6 @@ EXPORT_SYMBOL(udp_lib_getsockopt);
 EXPORT_SYMBOL(udp_lib_setsockopt);
 EXPORT_SYMBOL(udp_poll);
 EXPORT_SYMBOL(udp_lib_get_port);
-EXPORT_SYMBOL(ipv4_rcv_saddr_equal);
 
 #ifdef CONFIG_PROC_FS
 EXPORT_SYMBOL(udp_proc_register);

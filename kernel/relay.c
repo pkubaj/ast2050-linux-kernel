@@ -750,7 +750,7 @@ size_t relay_switch_subbuf(struct rchan_buf *buf, size_t length)
 			 * from the scheduler (trying to re-grab
 			 * rq->lock), so defer it.
 			 */
-			mod_timer(&buf->timer, jiffies + 1);
+			__mod_timer(&buf->timer, jiffies + 1);
 	}
 
 	old = buf->data;

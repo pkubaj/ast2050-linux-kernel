@@ -1,0 +1,9 @@
+#
+# Configuration for the generic KCS driver framework
+#
+
+config KCS_GENERIC
+	tristate "Generic KCS driver framework"
+	default n
+	help
+	  Generic KCS driver framework

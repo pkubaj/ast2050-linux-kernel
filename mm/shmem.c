@@ -28,7 +28,6 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/swap.h>
-#include <linux/ima.h>
 
 static struct vfsmount *shm_mnt;
 
@@ -170,13 +169,13 @@ static inline struct shmem_sb_info *SHMEM_SB(struct super_block *sb)
  */
 static inline int shmem_acct_size(unsigned long flags, loff_t size)
 {
-	return (flags & VM_NORESERVE) ?
-		0 : security_vm_enough_memory_kern(VM_ACCT(size));
+	return (flags & VM_ACCOUNT) ?
+		security_vm_enough_memory_kern(VM_ACCT(size)) : 0;
 }
 
 static inline void shmem_unacct_size(unsigned long flags, loff_t size)
 {
-	if (!(flags & VM_NORESERVE))
+	if (flags & VM_ACCOUNT)
 		vm_unacct_memory(VM_ACCT(size));
 }
 
@@ -188,13 +187,13 @@ static inline void shmem_unacct_size(unsigned long flags, loff_t size)
  */
 static inline int shmem_acct_block(unsigned long flags)
 {
-	return (flags & VM_NORESERVE) ?
-		security_vm_enough_memory_kern(VM_ACCT(PAGE_CACHE_SIZE)) : 0;
+	return (flags & VM_ACCOUNT) ?
+		0 : security_vm_enough_memory_kern(VM_ACCT(PAGE_CACHE_SIZE));
 }
 
 static inline void shmem_unacct_blocks(unsigned long flags, long pages)
 {
-	if (flags & VM_NORESERVE)
+	if (!(flags & VM_ACCOUNT))
 		vm_unacct_memory(pages * VM_ACCT(PAGE_CACHE_SIZE));
 }
 
@@ -1516,8 +1515,8 @@ static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
-static struct inode *shmem_get_inode(struct super_block *sb, int mode,
-					dev_t dev, unsigned long flags)
+static struct inode *
+shmem_get_inode(struct super_block *sb, int mode, dev_t dev)
 {
 	struct inode *inode;
 	struct shmem_inode_info *info;
@@ -1538,7 +1537,6 @@ static struct inode *shmem_get_inode(struct super_block *sb, int mode,
 		info = SHMEM_I(inode);
 		memset(info, 0, (char *)inode - (char *)info);
 		spin_lock_init(&info->lock);
-		info->flags = flags & VM_NORESERVE;
 		INIT_LIST_HEAD(&info->swaplist);
 
 		switch (mode & S_IFMT) {
@@ -1781,10 +1779,9 @@ static int shmem_statfs(struct dentry *dentry, struct kstatfs *buf)
 static int
 shmem_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 {
-	struct inode *inode;
+	struct inode *inode = shmem_get_inode(dir->i_sb, mode, dev);
 	int error = -ENOSPC;
 
-	inode = shmem_get_inode(dir->i_sb, mode, dev, VM_NORESERVE);
 	if (inode) {
 		error = security_inode_init_security(inode, dir, NULL, NULL,
 						     NULL);
@@ -1923,7 +1920,7 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
 	if (len > PAGE_CACHE_SIZE)
 		return -ENAMETOOLONG;
 
-	inode = shmem_get_inode(dir->i_sb, S_IFLNK|S_IRWXUGO, 0, VM_NORESERVE);
+	inode = shmem_get_inode(dir->i_sb, S_IFLNK|S_IRWXUGO, 0);
 	if (!inode)
 		return -ENOSPC;
 
@@ -2335,7 +2332,7 @@ static int shmem_fill_super(struct super_block *sb,
 	sb->s_flags |= MS_POSIXACL;
 #endif
 
-	inode = shmem_get_inode(sb, S_IFDIR | sbinfo->mode, 0, VM_NORESERVE);
+	inode = shmem_get_inode(sb, S_IFDIR | sbinfo->mode, 0);
 	if (!inode)
 		goto failed;
 	inode->i_uid = sbinfo->uid;
@@ -2577,12 +2574,12 @@ int shmem_unuse(swp_entry_t entry, struct page *page)
 	return 0;
 }
 
-#define shmem_vm_ops				generic_file_vm_ops
-#define shmem_file_operations			ramfs_file_operations
-#define shmem_get_inode(sb, mode, dev, flags)	ramfs_get_inode(sb, mode, dev)
-#define shmem_acct_size(flags, size)		0
-#define shmem_unacct_size(flags, size)		do {} while (0)
-#define SHMEM_MAX_BYTES				LLONG_MAX
+#define shmem_file_operations ramfs_file_operations
+#define shmem_vm_ops generic_file_vm_ops
+#define shmem_get_inode ramfs_get_inode
+#define shmem_acct_size(a, b) 0
+#define shmem_unacct_size(a, b) do {} while (0)
+#define SHMEM_MAX_BYTES LLONG_MAX
 
 #endif /* CONFIG_SHMEM */
 
@@ -2592,7 +2589,7 @@ int shmem_unuse(swp_entry_t entry, struct page *page)
  * shmem_file_setup - get an unlinked file living in tmpfs
  * @name: name for dentry (to be seen in /proc/<pid>/maps
  * @size: size to be set for the file
- * @flags: VM_NORESERVE suppresses pre-accounting of the entire object size
+ * @flags: vm_flags
  */
 struct file *shmem_file_setup(char *name, loff_t size, unsigned long flags)
 {
@@ -2626,10 +2623,13 @@ struct file *shmem_file_setup(char *name, loff_t size, unsigned long flags)
 		goto put_dentry;
 
 	error = -ENOSPC;
-	inode = shmem_get_inode(root->d_sb, S_IFREG | S_IRWXUGO, 0, flags);
+	inode = shmem_get_inode(root->d_sb, S_IFREG | S_IRWXUGO, 0);
 	if (!inode)
 		goto close_file;
 
+#ifdef CONFIG_SHMEM
+	SHMEM_I(inode)->flags = (flags & VM_NORESERVE) ? 0 : VM_ACCOUNT;
+#endif
 	d_instantiate(dentry, inode);
 	inode->i_size = size;
 	inode->i_nlink = 0;	/* It is unlinked */
@@ -2666,7 +2666,6 @@ int shmem_zero_setup(struct vm_area_struct *vma)
 	if (IS_ERR(file))
 		return PTR_ERR(file);
 
-	ima_shm_check(file);
 	if (vma->vm_file)
 		fput(vma->vm_file);
 	vma->vm_file = file;

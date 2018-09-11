@@ -217,7 +217,6 @@ int platform_device_add_data(struct platform_device *pdev, const void *data,
 	if (d) {
 		memcpy(d, data, size);
 		pdev->dev.platform_data = d;
-		pdev->platform_data = d;
 	}
 	return d ? 0 : -ENOMEM;
 }
@@ -246,21 +245,6 @@ int platform_device_add(struct platform_device *pdev)
 		dev_set_name(&pdev->dev, "%s.%d", pdev->name,  pdev->id);
 	else
 		dev_set_name(&pdev->dev, pdev->name);
-
-	/* We will remove platform_data field from struct device
-	* if all platform devices pass its platform specific data
-	* from platform_device. The conversion is going to be a
-	* long time, so we allow the two cases coexist to make
-	* this kind of fix more easily*/
-	if (pdev->platform_data && pdev->dev.platform_data) {
-		printk(KERN_ERR
-			       "%s: use which platform_data?\n",
-			       dev_name(&pdev->dev));
-	} else if (pdev->platform_data) {
-		pdev->dev.platform_data = pdev->platform_data;
-	} else if (pdev->dev.platform_data) {
-		pdev->platform_data = pdev->dev.platform_data;
-	}
 
 	for (i = 0; i < pdev->num_resources; i++) {
 		struct resource *p, *r = &pdev->resource[i];
@@ -600,23 +584,8 @@ static int platform_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	struct platform_device	*pdev = to_platform_device(dev);
 
-	add_uevent_var(env, "MODALIAS=%s%s", PLATFORM_MODULE_PREFIX,
-		(pdev->id_entry) ? pdev->id_entry->name : pdev->name);
+	add_uevent_var(env, "MODALIAS=platform:%s", pdev->name);
 	return 0;
-}
-
-static const struct platform_device_id *platform_match_id(
-			struct platform_device_id *id,
-			struct platform_device *pdev)
-{
-	while (id->name[0]) {
-		if (strcmp(pdev->name, id->name) == 0) {
-			pdev->id_entry = id;
-			return id;
-		}
-		id++;
-	}
-	return NULL;
 }
 
 /**
@@ -634,14 +603,9 @@ static const struct platform_device_id *platform_match_id(
  */
 static int platform_match(struct device *dev, struct device_driver *drv)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct platform_driver *pdrv = to_platform_driver(drv);
+	struct platform_device *pdev;
 
-	/* match against the id table first */
-	if (pdrv->id_table)
-		return platform_match_id(pdrv->id_table, pdev) != NULL;
-
-	/* fall-back to driver name match */
+	pdev = container_of(dev, struct platform_device, dev);
 	return (strcmp(pdev->name, drv->name) == 0);
 }
 
@@ -659,24 +623,26 @@ static int platform_legacy_suspend(struct device *dev, pm_message_t mesg)
 
 static int platform_legacy_suspend_late(struct device *dev, pm_message_t mesg)
 {
-	struct platform_driver *pdrv = to_platform_driver(dev->driver);
-	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_driver *drv = to_platform_driver(dev->driver);
+	struct platform_device *pdev;
 	int ret = 0;
 
-	if (dev->driver && pdrv->suspend_late)
-		ret = pdrv->suspend_late(pdev, mesg);
+	pdev = container_of(dev, struct platform_device, dev);
+	if (dev->driver && drv->suspend_late)
+		ret = drv->suspend_late(pdev, mesg);
 
 	return ret;
 }
 
 static int platform_legacy_resume_early(struct device *dev)
 {
-	struct platform_driver *pdrv = to_platform_driver(dev->driver);
-	struct platform_device *pdev = to_platform_device(dev);
+	struct platform_driver *drv = to_platform_driver(dev->driver);
+	struct platform_device *pdev;
 	int ret = 0;
 
-	if (dev->driver && pdrv->resume_early)
-		ret = pdrv->resume_early(pdev);
+	pdev = container_of(dev, struct platform_device, dev);
+	if (dev->driver && drv->resume_early)
+		ret = drv->resume_early(pdev);
 
 	return ret;
 }

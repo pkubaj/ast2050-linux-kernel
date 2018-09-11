@@ -31,8 +31,3 @@
 #endif	
 	.endm
 
-#if defined(CONFIG_CPU_SH2A) || defined(CONFIG_CPU_SH4)
-# define PREF(x)	pref	@x
-#else
-# define PREF(x)	nop
-#endif

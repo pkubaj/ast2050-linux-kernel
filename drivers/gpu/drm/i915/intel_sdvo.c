@@ -193,7 +193,7 @@ static bool intel_sdvo_write_byte(struct intel_output *intel_output, int addr,
 
 #define SDVO_CMD_NAME_ENTRY(cmd) {cmd, #cmd}
 /** Mapping of command numbers to names, for debug output */
-static const struct _sdvo_cmd_name {
+const static struct _sdvo_cmd_name {
 	u8 cmd;
 	char *name;
 } sdvo_cmd_names[] = {

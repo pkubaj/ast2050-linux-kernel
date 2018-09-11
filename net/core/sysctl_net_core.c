@@ -11,7 +11,6 @@
 #include <linux/socket.h>
 #include <linux/netdevice.h>
 #include <linux/init.h>
-#include <net/ip.h>
 #include <net/sock.h>
 
 static struct ctl_table net_core_table[] = {

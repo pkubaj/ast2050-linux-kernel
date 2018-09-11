@@ -29,7 +29,7 @@
  * if we eventually end up using our copied page.
  *
  */
-static void __naked
+static void __attribute__((naked))
 xsc3_mc_copy_user_page(void *kto, const void *kfrom)
 {
 	asm("\

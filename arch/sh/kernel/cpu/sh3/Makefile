@@ -4,8 +4,6 @@
 
 obj-y	:= ex.o probe.o entry.o setup-sh3.o
 
-obj-$(CONFIG_HIBERNATION)		+= swsusp.o
-
 # CPU subtype setup
 obj-$(CONFIG_CPU_SUBTYPE_SH7705)	+= setup-sh7705.o
 obj-$(CONFIG_CPU_SUBTYPE_SH7706)	+= setup-sh770x.o

@@ -69,10 +69,11 @@ int tulip_mdio_read(struct net_device *dev, int phy_id, int location)
 
 	spin_lock_irqsave(&tp->mii_lock, flags);
 	if (tp->chip_id == LC82C168) {
+		int i = 1000;
 		iowrite32(0x60020000 + (phy_id<<23) + (location<<18), ioaddr + 0xA0);
 		ioread32(ioaddr + 0xA0);
 		ioread32(ioaddr + 0xA0);
-		for (i = 1000; i >= 0; --i) {
+		while (--i > 0) {
 			barrier();
 			if ( ! ((retval = ioread32(ioaddr + 0xA0)) & 0x80000000))
 				break;
@@ -130,12 +131,13 @@ void tulip_mdio_write(struct net_device *dev, int phy_id, int location, int val)
 
 	spin_lock_irqsave(&tp->mii_lock, flags);
 	if (tp->chip_id == LC82C168) {
+		int i = 1000;
 		iowrite32(cmd, ioaddr + 0xA0);
-		for (i = 1000; i >= 0; --i) {
+		do {
 			barrier();
 			if ( ! (ioread32(ioaddr + 0xA0) & 0x80000000))
 				break;
-		}
+		} while (--i > 0);
 		spin_unlock_irqrestore(&tp->mii_lock, flags);
 		return;
 	}

@@ -79,9 +79,8 @@
 #include <linux/smp.h>
 #include <linux/cpufreq.h>
 #include <linux/pci.h>
-#include <linux/errno.h>
-
 #include <asm/processor-cyrix.h>
+#include <asm/errno.h>
 
 /* PCI config registers, all at F0 */
 #define PCI_PMER1	0x80	/* power management enable register 1 */
@@ -123,8 +122,8 @@ static struct gxfreq_params *gx_params;
 static int stock_freq;
 
 /* PCI bus clock - defaults to 30.000 if cpu_khz is not available */
-static int pci_busclk;
-module_param(pci_busclk, int, 0444);
+static int pci_busclk = 0;
+module_param (pci_busclk, int, 0444);
 
 /* maximum duration for which the cpu may be suspended
  * (32us * MAX_DURATION). If no parameter is given, this defaults
@@ -133,7 +132,7 @@ module_param(pci_busclk, int, 0444);
  * is suspended -- processing power is just 0.39% of what it used to be,
  * though. 781.25 kHz(!) for a 200 MHz processor -- wow. */
 static int max_duration = 255;
-module_param(max_duration, int, 0444);
+module_param (max_duration, int, 0444);
 
 /* For the default policy, we want at least some processing power
  * - let's say 5%. (min = maxfreq / POLICY_MIN_DIV)
@@ -141,8 +140,7 @@ module_param(max_duration, int, 0444);
 #define POLICY_MIN_DIV 20
 
 
-#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, \
-		"gx-suspmod", msg)
+#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "gx-suspmod", msg)
 
 /**
  * we can detect a core multipiler from dir0_lsb
@@ -168,19 +166,11 @@ static int gx_freq_mult[16] = {
  *	Low Level chipset interface				*
  ****************************************************************/
 static struct pci_device_id gx_chipset_tbl[] __initdata = {
-	{ PCI_VENDOR_ID_CYRIX, PCI_DEVICE_ID_CYRIX_5530_LEGACY,
-		PCI_ANY_ID, PCI_ANY_ID },
-	{ PCI_VENDOR_ID_CYRIX, PCI_DEVICE_ID_CYRIX_5520,
-		PCI_ANY_ID, PCI_ANY_ID },
-	{ PCI_VENDOR_ID_CYRIX, PCI_DEVICE_ID_CYRIX_5510,
-		PCI_ANY_ID, PCI_ANY_ID },
+	{ PCI_VENDOR_ID_CYRIX, PCI_DEVICE_ID_CYRIX_5530_LEGACY, PCI_ANY_ID, PCI_ANY_ID },
+	{ PCI_VENDOR_ID_CYRIX, PCI_DEVICE_ID_CYRIX_5520, PCI_ANY_ID, PCI_ANY_ID },
+	{ PCI_VENDOR_ID_CYRIX, PCI_DEVICE_ID_CYRIX_5510, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0, },
 };
-
-static void gx_write_byte(int reg, int value)
-{
-	pci_write_config_byte(gx_params->cs55x0, reg, value);
-}
 
 /**
  * gx_detect_chipset:
@@ -210,8 +200,7 @@ static __init struct pci_dev *gx_detect_chipset(void)
 /**
  * gx_get_cpuspeed:
  *
- * Finds out at which efficient frequency the Cyrix MediaGX/NatSemi
- * Geode CPU runs.
+ * Finds out at which efficient frequency the Cyrix MediaGX/NatSemi Geode CPU runs.
  */
 static unsigned int gx_get_cpuspeed(unsigned int cpu)
 {
@@ -228,18 +217,17 @@ static unsigned int gx_get_cpuspeed(unsigned int cpu)
  *
  **/
 
-static unsigned int gx_validate_speed(unsigned int khz, u8 *on_duration,
-		u8 *off_duration)
+static unsigned int gx_validate_speed(unsigned int khz, u8 *on_duration, u8 *off_duration)
 {
 	unsigned int i;
 	u8 tmp_on, tmp_off;
 	int old_tmp_freq = stock_freq;
 	int tmp_freq;
 
-	*off_duration = 1;
-	*on_duration = 0;
+	*off_duration=1;
+	*on_duration=0;
 
-	for (i = max_duration; i > 0; i--) {
+	for (i=max_duration; i>0; i--) {
 		tmp_off = ((khz * i) / stock_freq) & 0xff;
 		tmp_on = i - tmp_off;
 		tmp_freq = (stock_freq * tmp_off) / i;
@@ -271,34 +259,26 @@ static void gx_set_cpuspeed(unsigned int khz)
 	freqs.cpu = 0;
 	freqs.old = gx_get_cpuspeed(0);
 
-	new_khz = gx_validate_speed(khz, &gx_params->on_duration,
-			&gx_params->off_duration);
+	new_khz = gx_validate_speed(khz, &gx_params->on_duration, &gx_params->off_duration);
 
 	freqs.new = new_khz;
 
 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 	local_irq_save(flags);
 
-
-
-	if (new_khz != stock_freq) {
-		/* if new khz == 100% of CPU speed, it is special case */
+	if (new_khz != stock_freq) {  /* if new khz == 100% of CPU speed, it is special case */
 		switch (gx_params->cs55x0->device) {
 		case PCI_DEVICE_ID_CYRIX_5530_LEGACY:
 			pmer1 = gx_params->pci_pmer1 | IRQ_SPDUP | VID_SPDUP;
 			/* FIXME: need to test other values -- Zwane,Miura */
-			/* typical 2 to 4ms */
-			gx_write_byte(PCI_IRQTC, 4);
-			/* typical 50 to 100ms */
-			gx_write_byte(PCI_VIDTC, 100);
-			gx_write_byte(PCI_PMER1, pmer1);
+			pci_write_config_byte(gx_params->cs55x0, PCI_IRQTC, 4); /* typical 2 to 4ms */
+			pci_write_config_byte(gx_params->cs55x0, PCI_VIDTC, 100);/* typical 50 to 100ms */
+			pci_write_config_byte(gx_params->cs55x0, PCI_PMER1, pmer1);
 
-			if (gx_params->cs55x0->revision < 0x10) {
-				/* CS5530(rev 1.2, 1.3) */
-				suscfg = gx_params->pci_suscfg|SUSMOD;
-			} else {
-				/* CS5530A,B.. */
-				suscfg = gx_params->pci_suscfg|SUSMOD|PWRSVE;
+			if (gx_params->cs55x0->revision < 0x10) {   /* CS5530(rev 1.2, 1.3) */
+				suscfg = gx_params->pci_suscfg | SUSMOD;
+			} else {                           /* CS5530A,B.. */
+				suscfg = gx_params->pci_suscfg | SUSMOD | PWRSVE;
 			}
 			break;
 		case PCI_DEVICE_ID_CYRIX_5520:
@@ -314,13 +294,13 @@ static void gx_set_cpuspeed(unsigned int khz)
 		suscfg = gx_params->pci_suscfg & ~(SUSMOD);
 		gx_params->off_duration = 0;
 		gx_params->on_duration = 0;
-		dprintk("suspend modulation disabled: cpu runs 100%% speed.\n");
+		dprintk("suspend modulation disabled: cpu runs 100 percent speed.\n");
 	}
 
-	gx_write_byte(PCI_MODOFF, gx_params->off_duration);
-	gx_write_byte(PCI_MODON, gx_params->on_duration);
+	pci_write_config_byte(gx_params->cs55x0, PCI_MODOFF, gx_params->off_duration);
+	pci_write_config_byte(gx_params->cs55x0, PCI_MODON, gx_params->on_duration);
 
-	gx_write_byte(PCI_SUSCFG, suscfg);
+	pci_write_config_byte(gx_params->cs55x0, PCI_SUSCFG, suscfg);
 	pci_read_config_byte(gx_params->cs55x0, PCI_SUSCFG, &suscfg);
 
 	local_irq_restore(flags);
@@ -354,8 +334,7 @@ static int cpufreq_gx_verify(struct cpufreq_policy *policy)
 		return -EINVAL;
 
 	policy->cpu = 0;
-	cpufreq_verify_within_limits(policy, (stock_freq / max_duration),
-			stock_freq);
+	cpufreq_verify_within_limits(policy, (stock_freq / max_duration), stock_freq);
 
 	/* it needs to be assured that at least one supported frequency is
 	 * within policy->min and policy->max. If it is not, policy->max
@@ -375,8 +354,7 @@ static int cpufreq_gx_verify(struct cpufreq_policy *policy)
 	policy->max = tmp_freq;
 	if (policy->max < policy->min)
 		policy->max = policy->min;
-	cpufreq_verify_within_limits(policy, (stock_freq / max_duration),
-			stock_freq);
+	cpufreq_verify_within_limits(policy, (stock_freq / max_duration), stock_freq);
 
 	return 0;
 }
@@ -420,18 +398,18 @@ static int cpufreq_gx_cpu_init(struct cpufreq_policy *policy)
 		return -ENODEV;
 
 	/* determine maximum frequency */
-	if (pci_busclk)
+	if (pci_busclk) {
 		maxfreq = pci_busclk * gx_freq_mult[getCx86(CX86_DIR1) & 0x0f];
-	else if (cpu_khz)
+	} else if (cpu_khz) {
 		maxfreq = cpu_khz;
-	else
+	} else {
 		maxfreq = 30000 * gx_freq_mult[getCx86(CX86_DIR1) & 0x0f];
-
+	}
 	stock_freq = maxfreq;
 	curfreq = gx_get_cpuspeed(0);
 
 	dprintk("cpu max frequency is %d.\n", maxfreq);
-	dprintk("cpu current frequency is %dkHz.\n", curfreq);
+	dprintk("cpu current frequency is %dkHz.\n",curfreq);
 
 	/* setup basic struct for cpufreq API */
 	policy->cpu = 0;
@@ -469,8 +447,7 @@ static int __init cpufreq_gx_init(void)
 	struct pci_dev *gx_pci;
 
 	/* Test if we have the right hardware */
-	gx_pci = gx_detect_chipset();
-	if (gx_pci == NULL)
+	if ((gx_pci = gx_detect_chipset()) == NULL)
 		return -ENODEV;
 
 	/* check whether module parameters are sane */
@@ -491,11 +468,9 @@ static int __init cpufreq_gx_init(void)
 	pci_read_config_byte(params->cs55x0, PCI_PMER1, &(params->pci_pmer1));
 	pci_read_config_byte(params->cs55x0, PCI_PMER2, &(params->pci_pmer2));
 	pci_read_config_byte(params->cs55x0, PCI_MODON, &(params->on_duration));
-	pci_read_config_byte(params->cs55x0, PCI_MODOFF,
-			&(params->off_duration));
+	pci_read_config_byte(params->cs55x0, PCI_MODOFF, &(params->off_duration));
 
-	ret = cpufreq_register_driver(&gx_suspmod_driver);
-	if (ret) {
+	if ((ret = cpufreq_register_driver(&gx_suspmod_driver))) {
 		kfree(params);
 		return ret;                   /* register error! */
 	}
@@ -510,9 +485,9 @@ static void __exit cpufreq_gx_exit(void)
 	kfree(gx_params);
 }
 
-MODULE_AUTHOR("Hiroshi Miura <miura@da-cha.org>");
-MODULE_DESCRIPTION("Cpufreq driver for Cyrix MediaGX and NatSemi Geode");
-MODULE_LICENSE("GPL");
+MODULE_AUTHOR ("Hiroshi Miura <miura@da-cha.org>");
+MODULE_DESCRIPTION ("Cpufreq driver for Cyrix MediaGX and NatSemi Geode");
+MODULE_LICENSE ("GPL");
 
 module_init(cpufreq_gx_init);
 module_exit(cpufreq_gx_exit);

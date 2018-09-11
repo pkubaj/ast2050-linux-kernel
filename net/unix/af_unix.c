@@ -1178,7 +1178,8 @@ out_unlock:
 		unix_state_unlock(other);
 
 out:
-	kfree_skb(skb);
+	if (skb)
+		kfree_skb(skb);
 	if (newsk)
 		unix_release_sock(newsk, 0);
 	if (other)

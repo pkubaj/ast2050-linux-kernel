@@ -149,7 +149,7 @@ dsthash_alloc_init(struct xt_hashlimit_htable *ht,
 	/* initialize hash with random val at the time we allocate
 	 * the first hashtable entry */
 	if (!ht->rnd_initialized) {
-		get_random_bytes(&ht->rnd, sizeof(ht->rnd));
+		get_random_bytes(&ht->rnd, 4);
 		ht->rnd_initialized = 1;
 	}
 
@@ -565,7 +565,8 @@ hashlimit_init_dst(const struct xt_hashlimit_htable *hinfo,
 static bool
 hashlimit_mt_v0(const struct sk_buff *skb, const struct xt_match_param *par)
 {
-	const struct xt_hashlimit_info *r = par->matchinfo;
+	const struct xt_hashlimit_info *r =
+		((const struct xt_hashlimit_info *)par->matchinfo)->u.master;
 	struct xt_hashlimit_htable *hinfo = r->hinfo;
 	unsigned long now = jiffies;
 	struct dsthash_ent *dh;
@@ -701,6 +702,8 @@ static bool hashlimit_mt_check_v0(const struct xt_mtchk_param *par)
 	}
 	mutex_unlock(&hlimit_mutex);
 
+	/* Ugly hack: For SMP, we only want to use one set */
+	r->u.master = r;
 	return true;
 }
 

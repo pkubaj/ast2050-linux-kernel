@@ -362,6 +362,10 @@ config MTD_ARM_INTEGRATOR
 	tristate "CFI Flash device mapped on ARM Integrator/P720T"
 	depends on ARM && MTD_CFI
 
+config MTD_AST
+        tristate "CFI Flash device mapped on ASPEED"
+        depends on ARCH_ASPEED && MTD_CFI
+
 config MTD_CDB89712
 	tristate "Cirrus CDB89712 evaluation board mappings"
 	depends on MTD_CFI && ARCH_CDB89712
@@ -491,7 +495,7 @@ config MTD_PCMCIA_ANONYMOUS
 
 config MTD_BFIN_ASYNC
 	tristate "Blackfin BF533-STAMP Flash Chip Support"
-	depends on BFIN533_STAMP && MTD_CFI && MTD_COMPLEX_MAPPINGS
+	depends on BFIN533_STAMP && MTD_CFI
 	select MTD_PARTITIONS
 	default y
 	help
@@ -551,15 +555,5 @@ config MTD_PLATRAM
 
 	  This selection automatically selects the map_ram driver.
 
-config MTD_VMU
-	tristate "Map driver for Dreamcast VMU"
-	depends on MAPLE
-	help
-	  This driver enables access to the Dreamcast Visual Memory Unit (VMU).
-
-	  Most Dreamcast users will want to say Y here.
-
-	  To build this as a module select M here, the module will be called
-	  vmu-flash.
-
 endmenu
+

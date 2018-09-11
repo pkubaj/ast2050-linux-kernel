@@ -1,8 +1,8 @@
 /*
  * SEGA Dreamcast keyboard driver
  * Based on drivers/usb/usbkbd.c
- * Copyright (c) YAEGASHI Takeshi, 2001
- * Porting to 2.6 Copyright (c) Adrian McMenamin, 2007 - 2009
+ * Copyright YAEGASHI Takeshi, 2001
+ * Porting to 2.6 Copyright Adrian McMenamin, 2007, 2008
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@ static DEFINE_MUTEX(maple_keyb_mutex);
 
 #define NR_SCANCODES 256
 
-MODULE_AUTHOR("Adrian McMenamin <adrian@mcmen.demon.co.uk");
+MODULE_AUTHOR("YAEGASHI Takeshi, Adrian McMenamin");
 MODULE_DESCRIPTION("SEGA Dreamcast keyboard driver");
 MODULE_LICENSE("GPL");
 
@@ -115,7 +115,7 @@ static void dc_scan_kbd(struct dc_kbd *kbd)
 				input_event(dev, EV_MSC, MSC_SCAN, code);
 				input_report_key(dev, keycode, 0);
 			} else
-				dev_dbg(&dev->dev,
+				printk(KERN_DEBUG "maple_keyb: "
 					"Unknown key (scancode %#x) released.",
 					code);
 		}
@@ -127,7 +127,7 @@ static void dc_scan_kbd(struct dc_kbd *kbd)
 				input_event(dev, EV_MSC, MSC_SCAN, code);
 				input_report_key(dev, keycode, 1);
 			} else
-				dev_dbg(&dev->dev,
+				printk(KERN_DEBUG "maple_keyb: "
 					"Unknown key (scancode %#x) pressed.",
 					code);
 		}
@@ -140,7 +140,7 @@ static void dc_kbd_callback(struct mapleq *mq)
 {
 	struct maple_device *mapledev = mq->dev;
 	struct dc_kbd *kbd = maple_get_drvdata(mapledev);
-	unsigned long *buf = (unsigned long *)(mq->recvbuf->buf);
+	unsigned long *buf = mq->recvbuf;
 
 	/*
 	 * We should always get the lock because the only
@@ -159,25 +159,20 @@ static void dc_kbd_callback(struct mapleq *mq)
 
 static int probe_maple_kbd(struct device *dev)
 {
-	struct maple_device *mdev;
-	struct maple_driver *mdrv;
+	struct maple_device *mdev = to_maple_dev(dev);
+	struct maple_driver *mdrv = to_maple_driver(dev->driver);
 	int i, error;
 	struct dc_kbd *kbd;
 	struct input_dev *idev;
 
-	mdev = to_maple_dev(dev);
-	mdrv = to_maple_driver(dev->driver);
+	if (!(mdev->function & MAPLE_FUNC_KEYBOARD))
+		return -EINVAL;
 
 	kbd = kzalloc(sizeof(struct dc_kbd), GFP_KERNEL);
-	if (!kbd) {
+	idev = input_allocate_device();
+	if (!kbd || !idev) {
 		error = -ENOMEM;
 		goto fail;
-	}
-
-	idev = input_allocate_device();
-	if (!idev) {
-		error = -ENOMEM;
-		goto fail_idev_alloc;
 	}
 
 	kbd->dev = idev;
@@ -200,7 +195,7 @@ static int probe_maple_kbd(struct device *dev)
 
 	error = input_register_device(idev);
 	if (error)
-		goto fail_register;
+		goto fail;
 
 	/* Maple polling is locked to VBLANK - which may be just 50/s */
 	maple_getcond_callback(mdev, dc_kbd_callback, HZ/50,
@@ -212,12 +207,10 @@ static int probe_maple_kbd(struct device *dev)
 
 	return error;
 
-fail_register:
-	maple_set_drvdata(mdev, NULL);
-	input_free_device(idev);
-fail_idev_alloc:
-	kfree(kbd);
 fail:
+	input_free_device(idev);
+	kfree(kbd);
+	maple_set_drvdata(mdev, NULL);
 	return error;
 }
 

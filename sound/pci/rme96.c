@@ -2348,10 +2348,9 @@ snd_rme96_probe(struct pci_dev *pci,
 		dev++;
 		return -ENOENT;
 	}
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
-			      sizeof(struct rme96), &card);
-	if (err < 0)
-		return err;
+	if ((card = snd_card_new(index[dev], id[dev], THIS_MODULE,
+				 sizeof(struct rme96))) == NULL)
+		return -ENOMEM;
 	card->private_free = snd_rme96_card_free;
 	rme96 = (struct rme96 *)card->private_data;	
 	rme96->card = card;

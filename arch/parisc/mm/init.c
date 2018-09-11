@@ -304,8 +304,10 @@ static void __init setup_bootmem(void)
 	 */
 	max_low_pfn = max_pfn;
 
-	/* bootmap sizing messed up? */
-	BUG_ON((bootmap_pfn - bootmap_start_pfn) != bootmap_pages);
+	if ((bootmap_pfn - bootmap_start_pfn) != bootmap_pages) {
+		printk(KERN_WARNING "WARNING! bootmap sizing is messed up!\n");
+		BUG();
+	}
 
 	/* reserve PAGE0 pdc memory, kernel text/data/bss & bootmap */
 

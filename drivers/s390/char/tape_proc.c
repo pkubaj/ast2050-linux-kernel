@@ -20,6 +20,8 @@
 
 #include "tape.h"
 
+#define PRINTK_HEADER "TAPE_PROC: "
+
 static const char *tape_med_st_verbose[MS_SIZE] =
 {
 	[MS_UNKNOWN] = "UNKNOWN ",
@@ -126,6 +128,7 @@ tape_proc_init(void)
 		proc_create("tapedevices", S_IFREG | S_IRUGO | S_IWUSR, NULL,
 			    &tape_proc_ops);
 	if (tape_proc_devices == NULL) {
+		PRINT_WARN("tape: Cannot register procfs entry tapedevices\n");
 		return;
 	}
 }

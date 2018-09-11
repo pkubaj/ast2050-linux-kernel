@@ -15,6 +15,7 @@
 #include <linux/mtd/physmap.h>
 #include <linux/usb/isp116x.h>
 #include <linux/dma-mapping.h>
+#include <linux/platform_device.h>
 #include <linux/delay.h>
 
 #include <mach/portmux.h>

@@ -951,8 +951,10 @@ int x25_rx_call_request(struct sk_buff *skb, struct x25_neigh *nb,
 	/*
 	 *	Incoming Call User Data.
 	 */
-	skb_copy_from_linear_data(skb, makex25->calluserdata.cuddata, skb->len);
-	makex25->calluserdata.cudlength = skb->len;
+	if (skb->len >= 0) {
+		skb_copy_from_linear_data(skb, makex25->calluserdata.cuddata, skb->len);
+		makex25->calluserdata.cudlength = skb->len;
+	}
 
 	sk->sk_ack_backlog++;
 
@@ -1120,9 +1122,8 @@ static int x25_sendmsg(struct kiocb *iocb, struct socket *sock,
 	if (msg->msg_flags & MSG_OOB)
 		skb_queue_tail(&x25->interrupt_out_queue, skb);
 	else {
-		rc = x25_output(sk, skb);
-		len = rc;
-		if (rc < 0)
+		len = x25_output(sk, skb);
+		if (len < 0)
 			kfree_skb(skb);
 		else if (x25->qbitincl)
 			len++;
@@ -1607,7 +1608,7 @@ static const struct proto_ops SOCKOPS_WRAPPED(x25_proto_ops) = {
 
 SOCKOPS_WRAP(x25_proto, AF_X25);
 
-static struct packet_type x25_packet_type __read_mostly = {
+static struct packet_type x25_packet_type = {
 	.type =	cpu_to_be16(ETH_P_X25),
 	.func =	x25_lapb_receive_frame,
 };

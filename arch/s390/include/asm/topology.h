@@ -5,6 +5,7 @@
 
 #define mc_capable()	(1)
 
+cpumask_t cpu_coregroup_map(unsigned int cpu);
 const struct cpumask *cpu_coregroup_mask(unsigned int cpu);
 
 extern cpumask_t cpu_core_map[NR_CPUS];
@@ -28,8 +29,6 @@ static inline void s390_init_cpu_topology(void)
 {
 };
 #endif
-
-#define SD_MC_INIT SD_CPU_INIT
 
 #include <asm-generic/topology.h>
 

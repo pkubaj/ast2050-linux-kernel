@@ -376,7 +376,7 @@ static int adu_release(struct inode *inode, struct file *file)
 	if (dev->open_count <= 0) {
 		dbg(1," %s : device not opened", __func__);
 		retval = -ENODEV;
-		goto unlock;
+		goto exit;
 	}
 
 	adu_release_internal(dev);
@@ -385,9 +385,9 @@ static int adu_release(struct inode *inode, struct file *file)
 		if (!dev->open_count)	/* ... and we're the last user */
 			adu_delete(dev);
 	}
-unlock:
-	mutex_unlock(&adutux_mutex);
+
 exit:
+	mutex_unlock(&adutux_mutex);
 	dbg(2," %s : leave, return value %d", __func__, retval);
 	return retval;
 }

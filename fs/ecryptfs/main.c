@@ -194,7 +194,7 @@ int ecryptfs_interpose(struct dentry *lower_dentry, struct dentry *dentry,
 		d_add(dentry, inode);
 	else
 		d_instantiate(dentry, inode);
-	fsstack_copy_attr_all(inode, lower_inode, NULL);
+	fsstack_copy_attr_all(inode, lower_inode);
 	/* This size will be overwritten for real files w/ headers and
 	 * other metadata */
 	fsstack_copy_inode_size(inode, lower_inode);
@@ -319,7 +319,7 @@ static int ecryptfs_parse_options(struct super_block *sb, char *options)
 		case ecryptfs_opt_ecryptfs_sig:
 			sig_src = args[0].from;
 			rc = ecryptfs_add_global_auth_tok(mount_crypt_stat,
-							  sig_src, 0);
+							  sig_src);
 			if (rc) {
 				printk(KERN_ERR "Error attempting to register "
 				       "global sig; rc = [%d]\n", rc);
@@ -370,8 +370,7 @@ static int ecryptfs_parse_options(struct super_block *sb, char *options)
 				ECRYPTFS_SIG_SIZE_HEX] = '\0';
 			rc = ecryptfs_add_global_auth_tok(
 				mount_crypt_stat,
-				mount_crypt_stat->global_default_fnek_sig,
-				ECRYPTFS_AUTH_TOK_FNEK);
+				mount_crypt_stat->global_default_fnek_sig);
 			if (rc) {
 				printk(KERN_ERR "Error attempting to register "
 				       "global fnek sig [%s]; rc = [%d]\n",

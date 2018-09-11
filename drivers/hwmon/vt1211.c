@@ -1262,7 +1262,7 @@ static int __init vt1211_device_add(unsigned short address)
 	res.name = pdev->name;
 	err = acpi_check_resource_conflict(&res);
 	if (err)
-		goto EXIT_DEV_PUT;
+		goto EXIT;
 
 	err = platform_device_add_resources(pdev, &res, 1);
 	if (err) {

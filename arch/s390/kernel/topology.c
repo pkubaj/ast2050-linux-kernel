@@ -74,7 +74,7 @@ static DEFINE_SPINLOCK(topology_lock);
 
 cpumask_t cpu_core_map[NR_CPUS];
 
-static cpumask_t cpu_coregroup_map(unsigned int cpu)
+cpumask_t cpu_coregroup_map(unsigned int cpu)
 {
 	struct core_info *core = &core_info;
 	unsigned long flags;

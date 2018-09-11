@@ -13,7 +13,6 @@
 #include <linux/linkage.h>
 #include <linux/module.h>
 #include <linux/sched.h>
-#include <linux/syscalls.h>
 #include <linux/mm.h>
 
 #include <asm/cacheflush.h>
@@ -59,8 +58,8 @@ EXPORT_SYMBOL(_dma_cache_wback_inv);
  * We could optimize the case where the cache argument is not BCACHE but
  * that seems very atypical use ...
  */
-SYSCALL_DEFINE3(cacheflush, unsigned long, addr, unsigned long, bytes,
-	unsigned int, cache)
+asmlinkage int sys_cacheflush(unsigned long addr,
+	unsigned long bytes, unsigned int cache)
 {
 	if (bytes == 0)
 		return 0;

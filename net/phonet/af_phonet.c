@@ -382,8 +382,9 @@ out:
 	return NET_RX_DROP;
 }
 
-static struct packet_type phonet_packet_type __read_mostly = {
+static struct packet_type phonet_packet_type = {
 	.type = cpu_to_be16(ETH_P_PHONET),
+	.dev = NULL,
 	.func = phonet_rcv,
 };
 

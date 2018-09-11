@@ -20,6 +20,11 @@
 #define COUNTRY_ERD_FLAG        0x8000
 #define WORLDWIDE_ROAMING_FLAG  0x4000
 
+#define isWwrSKU(_ah) \
+	(((ath9k_regd_get_eepromRD((_ah)) & WORLD_SKU_MASK) == \
+		WORLD_SKU_PREFIX) || \
+		(ath9k_regd_get_eepromRD(_ah) == WORLD))
+
 #define MULTI_DOMAIN_MASK 0xFF00
 
 #define WORLD_SKU_MASK          0x00F0
@@ -47,6 +52,7 @@ struct ath9k_regulatory {
 	u32 tp_scale;
 	u16 current_rd;
 	u16 current_rd_ext;
+	u16 current_rd_inuse;
 	int16_t power_limit;
 	struct reg_dmn_pair_mapping *regpair;
 };
@@ -233,15 +239,17 @@ enum CountryCode {
 	CTRY_BELGIUM2 = 5002
 };
 
+u16 ath9k_regd_get_rd(struct ath_hw *ah);
 bool ath9k_is_world_regd(struct ath_hw *ah);
 const struct ieee80211_regdomain *ath9k_world_regdomain(struct ath_hw *ah);
 const struct ieee80211_regdomain *ath9k_default_world_regdomain(void);
-void ath9k_reg_apply_world_flags(struct wiphy *wiphy,
-				 enum nl80211_reg_initiator initiator);
+void ath9k_reg_apply_world_flags(struct wiphy *wiphy, enum reg_set_by setby);
 void ath9k_reg_apply_radar_flags(struct wiphy *wiphy);
 int ath9k_regd_init(struct ath_hw *ah);
 bool ath9k_regd_is_eeprom_valid(struct ath_hw *ah);
 u32 ath9k_regd_get_ctl(struct ath_hw *ah, struct ath9k_channel *chan);
 int ath9k_reg_notifier(struct wiphy *wiphy, struct regulatory_request *request);
+void ath9k_regd_get_current_country(struct ath_hw *ah,
+				    struct ath9k_country_entry *ctry);
 
 #endif

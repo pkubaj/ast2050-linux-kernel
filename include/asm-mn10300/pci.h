@@ -121,9 +121,4 @@ pcibios_select_root(struct pci_dev *pdev, struct resource *res)
 
 #define pcibios_scan_all_fns(a, b)	0
 
-static inline int pci_get_legacy_ide_irq(struct pci_dev *dev, int channel)
-{
-	return channel ? 15 : 14;
-}
-
 #endif /* _ASM_PCI_H */

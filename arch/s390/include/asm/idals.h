@@ -44,18 +44,24 @@ idal_is_needed(void *vaddr, unsigned int length)
 /*
  * Return the number of idal words needed for an address/length pair.
  */
-static inline unsigned int idal_nr_words(void *vaddr, unsigned int length)
+static inline unsigned int
+idal_nr_words(void *vaddr, unsigned int length)
 {
-	return ((__pa(vaddr) & (IDA_BLOCK_SIZE-1)) + length +
-		(IDA_BLOCK_SIZE-1)) >> IDA_SIZE_LOG;
+#ifdef __s390x__
+	if (idal_is_needed(vaddr, length))
+		return ((__pa(vaddr) & (IDA_BLOCK_SIZE-1)) + length + 
+			(IDA_BLOCK_SIZE-1)) >> IDA_SIZE_LOG;
+#endif
+	return 0;
 }
 
 /*
  * Create the list of idal words for an address/length pair.
  */
-static inline unsigned long *idal_create_words(unsigned long *idaws,
-					       void *vaddr, unsigned int length)
+static inline unsigned long *
+idal_create_words(unsigned long *idaws, void *vaddr, unsigned int length)
 {
+#ifdef __s390x__
 	unsigned long paddr;
 	unsigned int cidaw;
 
@@ -68,6 +74,7 @@ static inline unsigned long *idal_create_words(unsigned long *idaws,
 		paddr += IDA_BLOCK_SIZE;
 		*idaws++ = paddr;
 	}
+#endif
 	return idaws;
 }
 

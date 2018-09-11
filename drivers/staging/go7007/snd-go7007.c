@@ -248,11 +248,10 @@ int go7007_snd_init(struct go7007 *go)
 	spin_lock_init(&gosnd->lock);
 	gosnd->hw_ptr = gosnd->w_idx = gosnd->avail = 0;
 	gosnd->capturing = 0;
-	ret = snd_card_create(index[dev], id[dev], THIS_MODULE, 0,
-			      &gosnd->card);
-	if (ret < 0) {
+	gosnd->card = snd_card_new(index[dev], id[dev], THIS_MODULE, 0);
+	if (gosnd->card == NULL) {
 		kfree(gosnd);
-		return ret;
+		return -ENOMEM;
 	}
 	ret = snd_device_new(gosnd->card, SNDRV_DEV_LOWLEVEL, go,
 			&go7007_snd_device_ops);

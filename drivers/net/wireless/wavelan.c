@@ -40,11 +40,11 @@ static u8 wv_irq_to_psa(int irq)
  */
 static int __init wv_psa_to_irq(u8 irqval)
 {
-	int i;
+	int irq;
 
-	for (i = 0; i < ARRAY_SIZE(irqvals); i++)
-		if (irqvals[i] == irqval)
-			return i;
+	for (irq = 0; irq < ARRAY_SIZE(irqvals); irq++)
+		if (irqvals[irq] == irqval)
+			return irq;
 
 	return -1;
 }
@@ -4281,7 +4281,8 @@ int __init init_module(void)
 
 
 	/* Loop on all possible base addresses. */
-	for (i = 0; i < ARRAY_SIZE(io) && io[i] != 0; i++) {
+	i = -1;
+	while ((io[++i] != 0) && (i < ARRAY_SIZE(io))) {
 		struct net_device *dev = alloc_etherdev(sizeof(net_local));
 		if (!dev)
 			break;

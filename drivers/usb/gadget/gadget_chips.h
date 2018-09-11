@@ -167,6 +167,13 @@
 // CONFIG_USB_GADGET_AU1X00
 // ...
 
+/* ASPEED BMC Support */
+#ifdef CONFIG_USB_GADGET_ASPEED_AST
+#define gadget_is_aspeed(g)	!strcmp("aspeed_udc", (g)->name)
+#else
+#define gadget_is_aspeed(g)	0
+#endif
+
 
 /**
  * usb_gadget_controller_number - support bcdDevice id convention
@@ -231,6 +238,9 @@ static inline int usb_gadget_controller_number(struct usb_gadget *gadget)
 		return 0x22;
 	else if (gadget_is_ci13xxx(gadget))
 		return 0x23;
+	else if (gadget_is_aspeed(gadget))
+		return 0x24;
+
 	return -ENOENT;
 }
 

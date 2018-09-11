@@ -55,7 +55,7 @@
 
 static DEFINE_MUTEX(idecd_ref_mutex);
 
-static void ide_cd_release(struct device *);
+static void ide_cd_release(struct kref *);
 
 static struct cdrom_info *ide_cd_get(struct gendisk *disk)
 {
@@ -67,7 +67,7 @@ static struct cdrom_info *ide_cd_get(struct gendisk *disk)
 		if (ide_device_get(cd->drive))
 			cd = NULL;
 		else
-			get_device(&cd->dev);
+			kref_get(&cd->kref);
 
 	}
 	mutex_unlock(&idecd_ref_mutex);
@@ -79,7 +79,7 @@ static void ide_cd_put(struct cdrom_info *cd)
 	ide_drive_t *drive = cd->drive;
 
 	mutex_lock(&idecd_ref_mutex);
-	put_device(&cd->dev);
+	kref_put(&cd->kref, ide_cd_release);
 	ide_device_put(drive);
 	mutex_unlock(&idecd_ref_mutex);
 }
@@ -194,14 +194,6 @@ static void cdrom_analyze_sense_data(ide_drive_t *drive,
 			bio_sectors = max(bio_sectors(failed_command->bio), 4U);
 			sector &= ~(bio_sectors - 1);
 
-			/*
-			 * The SCSI specification allows for the value
-			 * returned by READ CAPACITY to be up to 75 2K
-			 * sectors past the last readable block.
-			 * Therefore, if we hit a medium error within the
-			 * last 75 2K sectors, we decrease the saved size
-			 * value.
-			 */
 			if (sector < get_capacity(info->disk) &&
 			    drive->probed_capacity - sector < 4 * 75)
 				set_capacity(info->disk, sector);
@@ -242,9 +234,7 @@ static void cdrom_queue_request_sense(ide_drive_t *drive, void *sense,
 		ide_debug_log(IDE_DBG_SENSE, "failed_cmd: 0x%x\n",
 			      failed_command->cmd[0]);
 
-	drive->hwif->rq = NULL;
-
-	elv_add_request(drive->queue, rq, ELEVATOR_INSERT_FRONT, 0);
+	ide_do_drive_cmd(drive, rq);
 }
 
 static void cdrom_end_request(ide_drive_t *drive, int uptodate)
@@ -1800,17 +1790,15 @@ static void ide_cd_remove(ide_drive_t *drive)
 	ide_debug_log(IDE_DBG_FUNC, "Call %s\n", __func__);
 
 	ide_proc_unregister_driver(drive, info->driver);
-	device_del(&info->dev);
+
 	del_gendisk(info->disk);
 
-	mutex_lock(&idecd_ref_mutex);
-	put_device(&info->dev);
-	mutex_unlock(&idecd_ref_mutex);
+	ide_cd_put(info);
 }
 
-static void ide_cd_release(struct device *dev)
+static void ide_cd_release(struct kref *kref)
 {
-	struct cdrom_info *info = to_ide_drv(dev, cdrom_info);
+	struct cdrom_info *info = to_ide_drv(kref, cdrom_info);
 	struct cdrom_device_info *devinfo = &info->devinfo;
 	ide_drive_t *drive = info->drive;
 	struct gendisk *g = info->disk;
@@ -2009,12 +1997,7 @@ static int ide_cd_probe(ide_drive_t *drive)
 
 	ide_init_disk(g, drive);
 
-	info->dev.parent = &drive->gendev;
-	info->dev.release = ide_cd_release;
-	dev_set_name(&info->dev, dev_name(&drive->gendev));
-
-	if (device_register(&info->dev))
-		goto out_free_disk;
+	kref_init(&info->kref);
 
 	info->drive = drive;
 	info->driver = &ide_cdrom_driver;
@@ -2028,7 +2011,7 @@ static int ide_cd_probe(ide_drive_t *drive)
 	g->driverfs_dev = &drive->gendev;
 	g->flags = GENHD_FL_CD | GENHD_FL_REMOVABLE;
 	if (ide_cdrom_setup(drive)) {
-		put_device(&info->dev);
+		ide_cd_release(&info->kref);
 		goto failed;
 	}
 
@@ -2038,8 +2021,6 @@ static int ide_cd_probe(ide_drive_t *drive)
 	add_disk(g);
 	return 0;
 
-out_free_disk:
-	put_disk(g);
 out_free_cd:
 	kfree(info);
 failed:

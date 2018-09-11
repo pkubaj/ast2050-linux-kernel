@@ -91,34 +91,31 @@ struct ath_11n_rc_stats {
 	u32 success;
 	u32 retries;
 	u32 xretries;
-	u8 per;
 };
 
 struct ath_stats {
 	struct ath_interrupt_stats istats;
-	struct ath_legacy_rc_stats legacy_rcstats[12];	/* max(11a,11b,11g) */
-	struct ath_11n_rc_stats n_rcstats[16];		/* 0..15 MCS rates */
+	struct ath_legacy_rc_stats legacy_rcstats[12]; /* max(11a,11b,11g) */
+	struct ath_11n_rc_stats n_rcstats[16]; /* 0..15 MCS rates */
 };
 
 struct ath9k_debug {
 	int debug_mask;
+	struct dentry *debugfs_root;
 	struct dentry *debugfs_phy;
 	struct dentry *debugfs_dma;
 	struct dentry *debugfs_interrupt;
 	struct dentry *debugfs_rcstat;
-	struct dentry *debugfs_wiphy;
 	struct ath_stats stats;
 };
 
 void DPRINTF(struct ath_softc *sc, int dbg_mask, const char *fmt, ...);
 int ath9k_init_debug(struct ath_softc *sc);
 void ath9k_exit_debug(struct ath_softc *sc);
-int ath9k_debug_create_root(void);
-void ath9k_debug_remove_root(void);
 void ath_debug_stat_interrupt(struct ath_softc *sc, enum ath9k_int status);
 void ath_debug_stat_rc(struct ath_softc *sc, struct sk_buff *skb);
 void ath_debug_stat_retries(struct ath_softc *sc, int rix,
-			    int xretries, int retries, u8 per);
+			    int xretries, int retries);
 
 #else
 
@@ -136,15 +133,6 @@ static inline void ath9k_exit_debug(struct ath_softc *sc)
 {
 }
 
-static inline int ath9k_debug_create_root(void)
-{
-	return 0;
-}
-
-static inline void ath9k_debug_remove_root(void)
-{
-}
-
 static inline void ath_debug_stat_interrupt(struct ath_softc *sc,
 					    enum ath9k_int status)
 {
@@ -156,7 +144,7 @@ static inline void ath_debug_stat_rc(struct ath_softc *sc,
 }
 
 static inline void ath_debug_stat_retries(struct ath_softc *sc, int rix,
-					  int xretries, int retries, u8 per)
+					  int xretries, int retries)
 {
 }
 

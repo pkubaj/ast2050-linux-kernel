@@ -104,9 +104,6 @@ config CPU_HAS_SR_RB
 config CPU_HAS_PTEA
 	bool
 
-config CPU_HAS_PTEAEX
-	bool
-
 config CPU_HAS_DSP
 	bool
 

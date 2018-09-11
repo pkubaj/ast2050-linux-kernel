@@ -362,7 +362,8 @@ static int rionet_close(struct net_device *ndev)
 	netif_carrier_off(ndev);
 
 	for (i = 0; i < RIONET_RX_RING_SIZE; i++)
-		kfree_skb(rnet->rx_skb[i]);
+		if (rnet->rx_skb[i])
+			kfree_skb(rnet->rx_skb[i]);
 
 	list_for_each_entry_safe(peer, tmp, &rionet_peers, node) {
 		if (rionet_active[peer->rdev->destid]) {

@@ -21,9 +21,7 @@
 #define NFSDBG_FACILITY		NFSDBG_VFS
 
 /*
- * Convert the NFSv4 pathname components into a standard posix path.
- *
- * Note that the resulting string will be placed at the end of the buffer
+ * Check if fs_root is valid
  */
 static inline char *nfs4_pathname_string(const struct nfs4_pathname *pathname,
 					 char *buffer, ssize_t buflen)
@@ -101,20 +99,21 @@ static struct vfsmount *try_location(struct nfs_clone_mount *mountdata,
 {
 	struct vfsmount *mnt = ERR_PTR(-ENOENT);
 	char *mnt_path;
-	unsigned int maxbuflen;
+	int page2len;
 	unsigned int s;
 
 	mnt_path = nfs4_pathname_string(&location->rootpath, page2, PAGE_SIZE);
 	if (IS_ERR(mnt_path))
 		return mnt;
 	mountdata->mnt_path = mnt_path;
-	maxbuflen = mnt_path - 1 - page2;
+	page2 += strlen(mnt_path) + 1;
+	page2len = PAGE_SIZE - strlen(mnt_path) - 1;
 
 	for (s = 0; s < location->nservers; s++) {
 		const struct nfs4_string *buf = &location->servers[s];
 		struct sockaddr_storage addr;
 
-		if (buf->len <= 0 || buf->len >= maxbuflen)
+		if (buf->len <= 0 || buf->len >= PAGE_SIZE)
 			continue;
 
 		mountdata->addr = (struct sockaddr *)&addr;
@@ -127,8 +126,8 @@ static struct vfsmount *try_location(struct nfs_clone_mount *mountdata,
 			continue;
 		nfs_set_port(mountdata->addr, NFS_PORT);
 
-		memcpy(page2, buf->data, buf->len);
-		page2[buf->len] = '\0';
+		strncpy(page2, buf->data, page2len);
+		page2[page2len] = '\0';
 		mountdata->hostname = page2;
 
 		snprintf(page, PAGE_SIZE, "%s:%s",

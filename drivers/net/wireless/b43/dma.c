@@ -41,12 +41,6 @@
 #include <asm/div64.h>
 
 
-/* Required number of TX DMA slots per TX frame.
- * This currently is 2, because we put the header and the ieee80211 frame
- * into separate slots. */
-#define TX_SLOTS_PER_FRAME	2
-
-
 /* 32bit DMA ops. */
 static
 struct b43_dmadesc_generic *op32_idx2desc(struct b43_dmaring *ring,
@@ -80,7 +74,8 @@ static void op32_fill_descriptor(struct b43_dmaring *ring,
 	addrext = (u32) (dmaaddr & SSB_DMA_TRANSLATION_MASK)
 	    >> SSB_DMA_TRANSLATION_SHIFT;
 	addr |= ssb_dma_translation(ring->dev->dev);
-	ctl = bufsize & B43_DMA32_DCTL_BYTECNT;
+	ctl = (bufsize - ring->frameoffset)
+	    & B43_DMA32_DCTL_BYTECNT;
 	if (slot == ring->nr_slots - 1)
 		ctl |= B43_DMA32_DCTL_DTABLEEND;
 	if (start)
@@ -182,7 +177,8 @@ static void op64_fill_descriptor(struct b43_dmaring *ring,
 		ctl0 |= B43_DMA64_DCTL0_FRAMEEND;
 	if (irq)
 		ctl0 |= B43_DMA64_DCTL0_IRQ;
-	ctl1 |= bufsize & B43_DMA64_DCTL1_BYTECNT;
+	ctl1 |= (bufsize - ring->frameoffset)
+	    & B43_DMA64_DCTL1_BYTECNT;
 	ctl1 |= (addrext << B43_DMA64_DCTL1_ADDREXT_SHIFT)
 	    & B43_DMA64_DCTL1_ADDREXT_MASK;
 
@@ -580,11 +576,12 @@ static int setup_rx_descbuffer(struct b43_dmaring *ring,
 			return -ENOMEM;
 		dmaaddr = map_descbuffer(ring, skb->data,
 					 ring->rx_buffersize, 0);
-		if (b43_dma_mapping_error(ring, dmaaddr, ring->rx_buffersize, 0)) {
-			b43err(ring->dev->wl, "RX DMA buffer allocation failed\n");
-			dev_kfree_skb_any(skb);
-			return -EIO;
-		}
+	}
+
+	if (b43_dma_mapping_error(ring, dmaaddr, ring->rx_buffersize, 0)) {
+		b43err(ring->dev->wl, "RX DMA buffer allocation failed\n");
+		dev_kfree_skb_any(skb);
+		return -EIO;
 	}
 
 	meta->skb = skb;
@@ -833,6 +830,9 @@ struct b43_dmaring *b43_setup_dmaring(struct b43_wldev *dev,
 		if (ring->index == 0) {
 			ring->rx_buffersize = B43_DMA0_RX_BUFFERSIZE;
 			ring->frameoffset = B43_DMA0_RX_FRAMEOFFSET;
+		} else if (ring->index == 3) {
+			ring->rx_buffersize = B43_DMA3_RX_BUFFERSIZE;
+			ring->frameoffset = B43_DMA3_RX_FRAMEOFFSET;
 		} else
 			B43_WARN_ON(1);
 	}
@@ -842,10 +842,7 @@ struct b43_dmaring *b43_setup_dmaring(struct b43_wldev *dev,
 #endif
 
 	if (for_tx) {
-		/* Assumption: B43_TXRING_SLOTS can be divided by TX_SLOTS_PER_FRAME */
-		BUILD_BUG_ON(B43_TXRING_SLOTS % TX_SLOTS_PER_FRAME != 0);
-
-		ring->txhdr_cache = kcalloc(ring->nr_slots / TX_SLOTS_PER_FRAME,
+		ring->txhdr_cache = kcalloc(ring->nr_slots,
 					    b43_txhdr_size(dev),
 					    GFP_KERNEL);
 		if (!ring->txhdr_cache)
@@ -861,7 +858,7 @@ struct b43_dmaring *b43_setup_dmaring(struct b43_wldev *dev,
 					  b43_txhdr_size(dev), 1)) {
 			/* ugh realloc */
 			kfree(ring->txhdr_cache);
-			ring->txhdr_cache = kcalloc(ring->nr_slots / TX_SLOTS_PER_FRAME,
+			ring->txhdr_cache = kcalloc(ring->nr_slots,
 						    b43_txhdr_size(dev),
 						    GFP_KERNEL | GFP_DMA);
 			if (!ring->txhdr_cache)
@@ -1152,10 +1149,7 @@ static int dma_tx_fragment(struct b43_dmaring *ring,
 	u16 cookie;
 	size_t hdrsize = b43_txhdr_size(ring->dev);
 
-	/* Important note: If the number of used DMA slots per TX frame
-	 * is changed here, the TX_SLOTS_PER_FRAME definition at the top of
-	 * the file has to be updated, too!
-	 */
+#define SLOTS_PER_PACKET  2
 
 	old_top_slot = ring->current_slot;
 	old_used_slots = ring->used_slots;
@@ -1165,7 +1159,7 @@ static int dma_tx_fragment(struct b43_dmaring *ring,
 	desc = ops->idx2desc(ring, slot, &meta_hdr);
 	memset(meta_hdr, 0, sizeof(*meta_hdr));
 
-	header = &(ring->txhdr_cache[(slot / TX_SLOTS_PER_FRAME) * hdrsize]);
+	header = &(ring->txhdr_cache[slot * hdrsize]);
 	cookie = generate_cookie(ring, slot);
 	err = b43_generate_txhdr(ring->dev, header,
 				 skb->data, skb->len, info, cookie);
@@ -1260,8 +1254,8 @@ static inline int should_inject_overflow(struct b43_dmaring *ring)
 }
 
 /* Static mapping of mac80211's queues (priorities) to b43 DMA rings. */
-static struct b43_dmaring *select_ring_by_priority(struct b43_wldev *dev,
-						   u8 queue_prio)
+static struct b43_dmaring * select_ring_by_priority(struct b43_wldev *dev,
+						    u8 queue_prio)
 {
 	struct b43_dmaring *ring;
 
@@ -1312,18 +1306,16 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 	}
 
 	spin_lock_irqsave(&ring->lock, flags);
-
 	B43_WARN_ON(!ring->tx);
-	/* Check if the queue was stopped in mac80211,
-	 * but we got called nevertheless.
-	 * That would be a mac80211 bug. */
-	B43_WARN_ON(ring->stopped);
-
-	if (unlikely(free_slots(ring) < TX_SLOTS_PER_FRAME)) {
+	if (unlikely(free_slots(ring) < SLOTS_PER_PACKET)) {
 		b43warn(dev->wl, "DMA queue overflow\n");
 		err = -ENOSPC;
 		goto out_unlock;
 	}
+	/* Check if the queue was stopped in mac80211,
+	 * but we got called nevertheless.
+	 * That would be a mac80211 bug. */
+	B43_WARN_ON(ring->stopped);
 
 	/* Assign the queue number to the ring (if not already done before)
 	 * so TX status handling can use it. The queue to ring mapping is
@@ -1343,7 +1335,7 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 		goto out_unlock;
 	}
 	ring->nr_tx_packets++;
-	if ((free_slots(ring) < TX_SLOTS_PER_FRAME) ||
+	if ((free_slots(ring) < SLOTS_PER_PACKET) ||
 	    should_inject_overflow(ring)) {
 		/* This TX ring is full. */
 		ieee80211_stop_queue(dev->wl->hw, skb_get_queue_mapping(skb));
@@ -1425,8 +1417,9 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 			break;
 		slot = next_slot(ring, slot);
 	}
+	dev->stats.last_tx = jiffies;
 	if (ring->stopped) {
-		B43_WARN_ON(free_slots(ring) < TX_SLOTS_PER_FRAME);
+		B43_WARN_ON(free_slots(ring) < SLOTS_PER_PACKET);
 		ieee80211_wake_queue(dev->wl->hw, ring->queue_prio);
 		ring->stopped = 0;
 		if (b43_debug(dev, B43_DBG_DMAVERBOSE)) {
@@ -1449,8 +1442,8 @@ void b43_dma_get_tx_stats(struct b43_wldev *dev,
 		ring = select_ring_by_priority(dev, i);
 
 		spin_lock_irqsave(&ring->lock, flags);
-		stats[i].len = ring->used_slots / TX_SLOTS_PER_FRAME;
-		stats[i].limit = ring->nr_slots / TX_SLOTS_PER_FRAME;
+		stats[i].len = ring->used_slots / SLOTS_PER_PACKET;
+		stats[i].limit = ring->nr_slots / SLOTS_PER_PACKET;
 		stats[i].count = ring->nr_tx_packets;
 		spin_unlock_irqrestore(&ring->lock, flags);
 	}

@@ -26,15 +26,6 @@ menuconfig NETDEVICES
 # that for each of the symbols.
 if NETDEVICES
 
-config COMPAT_NET_DEV_OPS
-       default y
-       bool "Enable older network device API compatiablity"
-       ---help---
-          This option enables kernel compatiability with older network devices
-          that do not use net_device_ops interface.
-
-	  If unsure, say Y.
-
 config IFB
 	tristate "Intermediate Functional Block support"
 	depends on NET_CLS_ACT
@@ -1049,17 +1040,6 @@ config NI65
 	  To compile this driver as a module, choose M here. The module
 	  will be called ni65.
 
-config DNET
-	tristate "Dave ethernet support (DNET)"
-	depends on NET_ETHERNET && HAS_IOMEM
-	select PHYLIB
-	help
-	  The Dave ethernet interface (DNET) is found on Qong Board FPGA.
-	  Say Y to include support for the DNET chip.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called dnet.
-
 source "drivers/net/tulip/Kconfig"
 
 config AT1700
@@ -1927,6 +1907,9 @@ menuconfig NETDEV_1000
 
 if NETDEV_1000
 
+config ASPEEDMAC
+        tristate "ASPEED MAC support"
+
 config ACENIC
 	tristate "Alteon AceNIC/3Com 3C985/NetGear GA620 Gigabit support"
 	depends on PCI
@@ -2038,6 +2021,14 @@ config IGB
 
          To compile this driver as a module, choose M here. The module
          will be called igb.
+
+config IGB_LRO 
+	bool "Use software LRO"
+	depends on IGB && INET
+	---help---
+	  Say Y here if you want to use large receive offload. 
+
+	  If in doubt, say N.
 
 config IGB_DCA
 	bool "Direct Cache Access (DCA) Support"
@@ -2321,7 +2312,6 @@ config UGETH_TX_ON_DEMAND
 config MV643XX_ETH
 	tristate "Marvell Discovery (643XX) and Orion ethernet support"
 	depends on MV64360 || MV64X60 || (PPC_MULTIPLATFORM && PPC32) || PLAT_ORION
-	select INET_LRO
 	select PHYLIB
 	help
 	  This driver supports the gigabit ethernet MACs in the
@@ -2330,6 +2320,16 @@ config MV643XX_ETH
 
 	  Some boards that use the Discovery chipset are the Momenco
 	  Ocelot C and Jaguar ATX and Pegasos II.
+
+config MV643XX_ETH_LRO
+	tristate "Marvell 643XX ethernet driver LRO support"
+	depends on MV643XX_ETH
+	select INET_LRO
+	help
+	  Say y here if you want to use Large Receive Offload for the
+	  mv643xx_eth driver.
+
+	  If in doubt, say N.
 
 config QLA3XXX
 	tristate "QLogic QLA3XXX Network Driver Support"
@@ -2362,17 +2362,6 @@ config ATL1E
 
 	  To compile this driver as a module, choose M here.  The module
 	  will be called atl1e.
-
-config ATL1C
-	tristate "Atheros L1C Gigabit Ethernet support (EXPERIMENTAL)"
-	depends on PCI && EXPERIMENTAL
-	select CRC32
-	select MII
-	help
-	  This driver supports the Atheros L1C gigabit ethernet adapter.
-
-	  To compile this driver as a module, choose M here.  The module
-	  will be called atl1c.
 
 config JME
 	tristate "JMicron(R) PCI-Express Gigabit Ethernet support"
@@ -2637,8 +2626,6 @@ config QLGE
 	  will be called qlge.
 
 source "drivers/net/sfc/Kconfig"
-
-source "drivers/net/benet/Kconfig"
 
 endif # NETDEV_10000
 

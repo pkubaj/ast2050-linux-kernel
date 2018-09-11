@@ -341,7 +341,7 @@ static int smsc9420_eeprom_send_cmd(struct smsc9420_pdata *pd, u32 op)
 	do {
 		msleep(1);
 		e2cmd = smsc9420_reg_read(pd, E2P_CMD);
-	} while ((e2cmd & E2P_CMD_EPC_BUSY_) && (--timeout));
+	} while ((e2cmd & E2P_CMD_EPC_BUSY_) && (timeout--));
 
 	if (!timeout) {
 		smsc_info(HW, "TIMED OUT");
@@ -413,7 +413,6 @@ static int smsc9420_ethtool_get_eeprom(struct net_device *dev,
 	}
 
 	memcpy(data, &eeprom_data[eeprom->offset], len);
-	eeprom->magic = SMSC9420_EEPROM_MAGIC;
 	eeprom->len = len;
 	return 0;
 }
@@ -423,9 +422,6 @@ static int smsc9420_ethtool_set_eeprom(struct net_device *dev,
 {
 	struct smsc9420_pdata *pd = netdev_priv(dev);
 	int ret;
-
-	if (eeprom->magic != SMSC9420_EEPROM_MAGIC)
-		return -EINVAL;
 
 	smsc9420_eeprom_enable_access(pd);
 	smsc9420_eeprom_send_cmd(pd, E2P_CMD_EPC_CMD_EWEN_);
@@ -807,7 +803,7 @@ static void smsc9420_rx_handoff(struct smsc9420_pdata *pd, const int index,
 	if (pd->rx_csum) {
 		u16 hw_csum = get_unaligned_le16(skb_tail_pointer(skb) +
 			NET_IP_ALIGN + packet_length + 4);
-		put_unaligned_le16(hw_csum, &skb->csum);
+		put_unaligned_le16(cpu_to_le16(hw_csum), &skb->csum);
 		skb->ip_summed = CHECKSUM_COMPLETE;
 	}
 

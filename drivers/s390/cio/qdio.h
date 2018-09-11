@@ -186,9 +186,6 @@ struct qdio_input_q {
 	/* input buffer acknowledgement flag */
 	int polling;
 
-	/* first ACK'ed buffer */
-	int ack_start;
-
 	/* how much sbals are acknowledged with qebsm */
 	int ack_count;
 
@@ -237,7 +234,7 @@ struct qdio_q {
 	int first_to_check;
 
 	/* first_to_check of the last time */
-	int last_move;
+	int last_move_ftc;
 
 	/* beginning position for calling the program */
 	int first_to_kick;
@@ -247,6 +244,7 @@ struct qdio_q {
 
 	struct qdio_irq *irq_ptr;
 	struct tasklet_struct tasklet;
+	spinlock_t lock;
 
 	/* error condition during a data transfer */
 	unsigned int qdio_error;
@@ -356,7 +354,7 @@ int get_buf_state(struct qdio_q *q, unsigned int bufnr, unsigned char *state,
 		  int auto_ack);
 void qdio_check_outbound_after_thinint(struct qdio_q *q);
 int qdio_inbound_q_moved(struct qdio_q *q);
-void qdio_kick_handler(struct qdio_q *q);
+void qdio_kick_inbound_handler(struct qdio_q *q);
 void qdio_stop_polling(struct qdio_q *q);
 int qdio_siga_sync_q(struct qdio_q *q);
 

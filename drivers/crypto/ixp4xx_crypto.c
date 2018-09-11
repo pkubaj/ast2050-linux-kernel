@@ -457,12 +457,10 @@ static int init_ixp_crypto(void)
 	if (!ctx_pool) {
 		goto err;
 	}
-	ret = qmgr_request_queue(SEND_QID, NPE_QLEN_TOTAL, 0, 0,
-				 "ixp_crypto:out", NULL);
+	ret = qmgr_request_queue(SEND_QID, NPE_QLEN_TOTAL, 0, 0);
 	if (ret)
 		goto err;
-	ret = qmgr_request_queue(RECV_QID, NPE_QLEN, 0, 0,
-				 "ixp_crypto:in", NULL);
+	ret = qmgr_request_queue(RECV_QID, NPE_QLEN, 0, 0);
 	if (ret) {
 		qmgr_release_queue(SEND_QID);
 		goto err;

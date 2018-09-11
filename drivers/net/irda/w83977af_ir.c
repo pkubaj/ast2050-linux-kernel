@@ -140,13 +140,6 @@ static void __exit w83977af_cleanup(void)
 	}
 }
 
-static const struct net_device_ops w83977_netdev_ops = {
-	.ndo_open       = w83977af_net_open,
-	.ndo_stop       = w83977af_net_close,
-	.ndo_start_xmit = w83977af_hard_xmit,
-	.ndo_do_ioctl   = w83977af_net_ioctl,
-};
-
 /*
  * Function w83977af_open (iobase, irq)
  *
@@ -238,7 +231,11 @@ static int w83977af_open(int i, unsigned int iobase, unsigned int irq,
 	self->rx_buff.data = self->rx_buff.head;
 	self->netdev = dev;
 
-	dev->netdev_ops	= &w83977_netdev_ops;
+	/* Override the network functions we need to use */
+	dev->hard_start_xmit = w83977af_hard_xmit;
+	dev->open            = w83977af_net_open;
+	dev->stop            = w83977af_net_close;
+	dev->do_ioctl        = w83977af_net_ioctl;
 
 	err = register_netdev(dev);
 	if (err) {

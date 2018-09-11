@@ -292,7 +292,7 @@ enum {
 #define E1000_RAH(_i)  (((_i) <= 15) ? (0x05404 + ((_i) * 8)) : \
                                        (0x054E4 + ((_i - 16) * 8)))
 #define E1000_VFTA     0x05600  /* VLAN Filter Table Array - RW Array */
-#define E1000_VT_CTL   0x0581C  /* VMDq Control - RW */
+#define E1000_VMD_CTL  0x0581C  /* VMDq Control - RW */
 #define E1000_WUC      0x05800  /* Wakeup Control - RW */
 #define E1000_WUFC     0x05808  /* Wakeup Filter Control - RW */
 #define E1000_WUS      0x05810  /* Wakeup Status - RO */
@@ -319,23 +319,6 @@ enum {
 /* Redirection Table - RW Array */
 #define E1000_RETA(_i)  (0x05C00 + ((_i) * 4))
 #define E1000_RSSRK(_i) (0x05C80 + ((_i) * 4)) /* RSS Random Key - RW Array */
-
-/* VT Registers */
-#define E1000_MBVFICR   0x00C80 /* Mailbox VF Cause - RWC */
-#define E1000_MBVFIMR   0x00C84 /* Mailbox VF int Mask - RW */
-#define E1000_VFLRE     0x00C88 /* VF Register Events - RWC */
-#define E1000_VFRE      0x00C8C /* VF Receive Enables */
-#define E1000_VFTE      0x00C90 /* VF Transmit Enables */
-#define E1000_QDE       0x02408 /* Queue Drop Enable - RW */
-#define E1000_DTXSWC    0x03500 /* DMA Tx Switch Control - RW */
-#define E1000_RPLOLR    0x05AF0 /* Replication Offload - RW */
-#define E1000_IOVTCL    0x05BBC /* IOV Control Register */
-/* These act per VF so an array friendly macro is used */
-#define E1000_P2VMAILBOX(_n)   (0x00C00 + (4 * (_n)))
-#define E1000_VMBMEM(_n)       (0x00800 + (64 * (_n)))
-#define E1000_VMOLR(_n)        (0x05AD0 + (4 * (_n)))
-#define E1000_VLVF(_n)         (0x05D00 + (4 * (_n))) /* VLAN Virtual Machine
-                                                       * Filter - RW */
 
 #define wr32(reg, value) (writel(value, hw->hw_addr + reg))
 #define rd32(reg) (readl(hw->hw_addr + reg))

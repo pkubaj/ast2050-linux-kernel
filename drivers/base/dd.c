@@ -18,11 +18,9 @@
  */
 
 #include <linux/device.h>
-#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
-#include <linux/async.h>
 
 #include "base.h"
 #include "power/power.h"
@@ -30,7 +28,7 @@
 
 static void driver_bound(struct device *dev)
 {
-	if (klist_node_attached(&dev->p->knode_driver)) {
+	if (klist_node_attached(&dev->knode_driver)) {
 		printk(KERN_WARNING "%s: device %s already bound\n",
 			__func__, kobject_name(&dev->kobj));
 		return;
@@ -43,7 +41,7 @@ static void driver_bound(struct device *dev)
 		blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
 					     BUS_NOTIFY_BOUND_DRIVER, dev);
 
-	klist_add_tail(&dev->p->knode_driver, &dev->driver->p->klist_devices);
+	klist_add_tail(&dev->knode_driver, &dev->driver->p->klist_devices);
 }
 
 static int driver_sysfs_add(struct device *dev)
@@ -170,23 +168,18 @@ int driver_probe_done(void)
 }
 
 /**
- * wait_for_device_probe
- * Wait for device probing to be completed.
- */
-void wait_for_device_probe(void)
-{
-	/* wait for the known devices to complete their probing */
-	wait_event(probe_waitqueue, atomic_read(&probe_count) == 0);
-	async_synchronize_full();
-}
-
-/**
  * driver_probe_device - attempt to bind device & driver together
  * @drv: driver to bind a device to
  * @dev: device to try to bind to the driver
  *
- * This function returns -ENODEV if the device is not registered,
- * 1 if the device is bound sucessfully and 0 otherwise.
+ * First, we call the bus's match function, if one present, which should
+ * compare the device IDs the driver supports with the device IDs of the
+ * device. Note we don't do this ourselves because we don't know the
+ * format of the ID structures, nor what is to be considered a match and
+ * what is not.
+ *
+ * This function returns 1 if a match is found, -ENODEV if the device is
+ * not registered, and 0 otherwise.
  *
  * This function must be called with @dev->sem held.  When called for a
  * USB interface, @dev->parent->sem must be held as well.
@@ -197,22 +190,21 @@ int driver_probe_device(struct device_driver *drv, struct device *dev)
 
 	if (!device_is_registered(dev))
 		return -ENODEV;
+	if (drv->bus->match && !drv->bus->match(dev, drv))
+		goto done;
 
 	pr_debug("bus: '%s': %s: matched device %s with driver %s\n",
 		 drv->bus->name, __func__, dev_name(dev), drv->name);
 
 	ret = really_probe(dev, drv);
 
+done:
 	return ret;
 }
 
 static int __device_attach(struct device_driver *drv, void *data)
 {
 	struct device *dev = data;
-
-	if (!driver_match_device(drv, dev))
-		return 0;
-
 	return driver_probe_device(drv, dev);
 }
 
@@ -265,7 +257,7 @@ static int __driver_attach(struct device *dev, void *data)
 	 * is an error.
 	 */
 
-	if (!driver_match_device(drv, dev))
+	if (drv->bus->match && !drv->bus->match(dev, drv))
 		return 0;
 
 	if (dev->parent)	/* Needed for USB */
@@ -318,7 +310,7 @@ static void __device_release_driver(struct device *dev)
 			drv->remove(dev);
 		devres_release_all(dev);
 		dev->driver = NULL;
-		klist_remove(&dev->p->knode_driver);
+		klist_remove(&dev->knode_driver);
 	}
 }
 
@@ -348,7 +340,6 @@ EXPORT_SYMBOL_GPL(device_release_driver);
  */
 void driver_detach(struct device_driver *drv)
 {
-	struct device_private *dev_prv;
 	struct device *dev;
 
 	for (;;) {
@@ -357,10 +348,8 @@ void driver_detach(struct device_driver *drv)
 			spin_unlock(&drv->p->klist_devices.k_lock);
 			break;
 		}
-		dev_prv = list_entry(drv->p->klist_devices.k_list.prev,
-				     struct device_private,
-				     knode_driver.n_node);
-		dev = dev_prv->device;
+		dev = list_entry(drv->p->klist_devices.k_list.prev,
+				struct device, knode_driver.n_node);
 		get_device(dev);
 		spin_unlock(&drv->p->klist_devices.k_lock);
 

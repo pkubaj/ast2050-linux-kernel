@@ -319,18 +319,16 @@ static int wb35_probe(struct usb_interface *intf, const struct usb_device_id *id
 	struct usb_device *udev = interface_to_usbdev(intf);
 	struct wbsoft_priv *priv;
 	struct ieee80211_hw *dev;
-	int nr, err;
+	int err;
 
 	usb_get_dev(udev);
 
 	// 20060630.2 Check the device if it already be opened
-	nr = usb_control_msg(udev, usb_rcvctrlpipe( udev, 0 ),
-			     0x01, USB_TYPE_VENDOR|USB_RECIP_DEVICE|USB_DIR_IN,
-			     0x0, 0x400, &ltmp, 4, HZ*100 );
-	if (nr < 0) {
-		err = nr;
+	err = usb_control_msg(udev, usb_rcvctrlpipe( udev, 0 ),
+			      0x01, USB_TYPE_VENDOR|USB_RECIP_DEVICE|USB_DIR_IN,
+			      0x0, 0x400, &ltmp, 4, HZ*100 );
+	if (err)
 		goto error;
-	}
 
 	ltmp = cpu_to_le32(ltmp);
 	if (ltmp) {  // Is already initialized?
@@ -339,10 +337,8 @@ static int wb35_probe(struct usb_interface *intf, const struct usb_device_id *id
 	}
 
 	dev = ieee80211_alloc_hw(sizeof(*priv), &wbsoft_ops);
-	if (!dev) {
-		err = -ENOMEM;
+	if (!dev)
 		goto error;
-	}
 
 	priv = dev->priv;
 
@@ -373,11 +369,9 @@ static int wb35_probe(struct usb_interface *intf, const struct usb_device_id *id
 	}
 
 	dev->extra_tx_headroom = 12;	/* FIXME */
-	dev->flags = IEEE80211_HW_SIGNAL_UNSPEC;
-	dev->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION);
+	dev->flags = 0;
 
 	dev->channel_change_time = 1000;
-	dev->max_signal = 100;
 	dev->queues = 1;
 
 	dev->wiphy->bands[IEEE80211_BAND_2GHZ] = &wbsoft_band_2GHz;

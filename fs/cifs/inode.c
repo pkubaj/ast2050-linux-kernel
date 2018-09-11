@@ -199,49 +199,6 @@ static void fill_fake_finddataunix(FILE_UNIX_BASIC_INFO *pfnd_dat,
 	pfnd_dat->Gid = cpu_to_le64(pinode->i_gid);
 }
 
-/**
- * cifs_new inode - create new inode, initialize, and hash it
- * @sb - pointer to superblock
- * @inum - if valid pointer and serverino is enabled, replace i_ino with val
- *
- * Create a new inode, initialize it for CIFS and hash it. Returns the new
- * inode or NULL if one couldn't be allocated.
- *
- * If the share isn't mounted with "serverino" or inum is a NULL pointer then
- * we'll just use the inode number assigned by new_inode(). Note that this can
- * mean i_ino collisions since the i_ino assigned by new_inode is not
- * guaranteed to be unique.
- */
-struct inode *
-cifs_new_inode(struct super_block *sb, __u64 *inum)
-{
-	struct inode *inode;
-
-	inode = new_inode(sb);
-	if (inode == NULL)
-		return NULL;
-
-	/*
-	 * BB: Is i_ino == 0 legal? Here, we assume that it is. If it isn't we
-	 *     stop passing inum as ptr. Are there sanity checks we can use to
-	 *     ensure that the server is really filling in that field? Also,
-	 *     if serverino is disabled, perhaps we should be using iunique()?
-	 */
-	if (inum && (CIFS_SB(sb)->mnt_cifs_flags & CIFS_MOUNT_SERVER_INUM))
-		inode->i_ino = (unsigned long) *inum;
-
-	/*
-	 * must set this here instead of cifs_alloc_inode since VFS will
-	 * clobber i_flags
-	 */
-	if (sb->s_flags & MS_NOATIME)
-		inode->i_flags |= S_NOATIME | S_NOCMTIME;
-
-	insert_inode_hash(inode);
-
-	return inode;
-}
-
 int cifs_get_inode_info_unix(struct inode **pinode,
 	const unsigned char *full_path, struct super_block *sb, int xid)
 {
@@ -276,11 +233,22 @@ int cifs_get_inode_info_unix(struct inode **pinode,
 
 	/* get new inode */
 	if (*pinode == NULL) {
-		*pinode = cifs_new_inode(sb, &find_data.UniqueId);
+		*pinode = new_inode(sb);
 		if (*pinode == NULL) {
 			rc = -ENOMEM;
 			goto cgiiu_exit;
 		}
+		/* Is an i_ino of zero legal? */
+		/* note ino incremented to unique num in new_inode */
+		/* Are there sanity checks we can use to ensure that
+		   the server is really filling in that field? */
+		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SERVER_INUM)
+			(*pinode)->i_ino = (unsigned long)find_data.UniqueId;
+
+		if (sb->s_flags & MS_NOATIME)
+			(*pinode)->i_flags |= S_NOATIME | S_NOCMTIME;
+
+		insert_inode_hash(*pinode);
 	}
 
 	inode = *pinode;
@@ -497,9 +465,11 @@ int cifs_get_inode_info(struct inode **pinode,
 
 	/* get new inode */
 	if (*pinode == NULL) {
-		__u64 inode_num;
-		__u64 *pinum = &inode_num;
-
+		*pinode = new_inode(sb);
+		if (*pinode == NULL) {
+			rc = -ENOMEM;
+			goto cgii_exit;
+		}
 		/* Is an i_ino of zero legal? Can we use that to check
 		   if the server supports returning inode numbers?  Are
 		   there other sanity checks we can use to ensure that
@@ -516,26 +486,22 @@ int cifs_get_inode_info(struct inode **pinode,
 
 		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SERVER_INUM) {
 			int rc1 = 0;
+			__u64 inode_num;
 
 			rc1 = CIFSGetSrvInodeNumber(xid, pTcon,
-					full_path, pinum,
+					full_path, &inode_num,
 					cifs_sb->local_nls,
 					cifs_sb->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
 			if (rc1) {
 				cFYI(1, ("GetSrvInodeNum rc %d", rc1));
-				pinum = NULL;
 				/* BB EOPNOSUPP disable SERVER_INUM? */
-			}
-		} else {
-			pinum = NULL;
-		}
-
-		*pinode = cifs_new_inode(sb, pinum);
-		if (*pinode == NULL) {
-			rc = -ENOMEM;
-			goto cgii_exit;
-		}
+			} else /* do we need cast or hash to ino? */
+				(*pinode)->i_ino = inode_num;
+		} /* else ino incremented to unique num in new_inode*/
+		if (sb->s_flags & MS_NOATIME)
+			(*pinode)->i_flags |= S_NOATIME | S_NOCMTIME;
+		insert_inode_hash(*pinode);
 	}
 	inode = *pinode;
 	cifsInfo = CIFS_I(inode);
@@ -655,7 +621,7 @@ static const struct inode_operations cifs_ipc_inode_ops = {
 	.lookup = cifs_lookup,
 };
 
-char *cifs_build_path_to_root(struct cifs_sb_info *cifs_sb)
+static char *build_path_to_root(struct cifs_sb_info *cifs_sb)
 {
 	int pplen = cifs_sb->prepathlen;
 	int dfsplen;
@@ -712,7 +678,7 @@ struct inode *cifs_iget(struct super_block *sb, unsigned long ino)
 		return inode;
 
 	cifs_sb = CIFS_SB(inode->i_sb);
-	full_path = cifs_build_path_to_root(cifs_sb);
+	full_path = build_path_to_root(cifs_sb);
 	if (full_path == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -762,9 +728,6 @@ cifs_set_file_info(struct inode *inode, struct iattr *attrs, int xid,
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
 	struct cifsTconInfo *pTcon = cifs_sb->tcon;
 	FILE_BASIC_INFO	info_buf;
-
-	if (attrs == NULL)
-		return -EINVAL;
 
 	if (attrs->ia_valid & ATTR_ATIME) {
 		set_time = true;
@@ -1054,7 +1017,7 @@ out_reval:
 	return rc;
 }
 
-void posix_fill_in_inode(struct inode *tmp_inode,
+static void posix_fill_in_inode(struct inode *tmp_inode,
 	FILE_UNIX_BASIC_INFO *pData, int isNewInode)
 {
 	struct cifsInodeInfo *cifsInfo = CIFS_I(tmp_inode);
@@ -1151,14 +1114,24 @@ int cifs_mkdir(struct inode *inode, struct dentry *direntry, int mode)
 			else
 				direntry->d_op = &cifs_dentry_ops;
 
-			newinode = cifs_new_inode(inode->i_sb,
-						  &pInfo->UniqueId);
+			newinode = new_inode(inode->i_sb);
 			if (newinode == NULL) {
 				kfree(pInfo);
 				goto mkdir_get_info;
 			}
 
+			/* Is an i_ino of zero legal? */
+			/* Are there sanity checks we can use to ensure that
+			   the server is really filling in that field? */
+			if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SERVER_INUM) {
+				newinode->i_ino =
+					(unsigned long)pInfo->UniqueId;
+			} /* note ino incremented to unique num in new_inode */
+			if (inode->i_sb->s_flags & MS_NOATIME)
+				newinode->i_flags |= S_NOATIME | S_NOCMTIME;
 			newinode->i_nlink = 2;
+
+			insert_inode_hash(newinode);
 			d_instantiate(direntry, newinode);
 
 			/* we already checked in POSIXCreate whether

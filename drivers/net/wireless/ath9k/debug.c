@@ -14,14 +14,10 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <asm/unaligned.h>
-
 #include "ath9k.h"
 
 static unsigned int ath9k_debug = DBG_DEFAULT;
 module_param_named(debug, ath9k_debug, uint, 0);
-
-static struct dentry *ath9k_debugfs_root;
 
 void DPRINTF(struct ath_softc *sc, int dbg_mask, const char *fmt, ...)
 {
@@ -262,14 +258,13 @@ void ath_debug_stat_rc(struct ath_softc *sc, struct sk_buff *skb)
 
 /* FIXME: legacy rates, later on .. */
 void ath_debug_stat_retries(struct ath_softc *sc, int rix,
-			    int xretries, int retries, u8 per)
+			    int xretries, int retries)
 {
 	if (conf_is_ht(&sc->hw->conf)) {
 		int idx = sc->cur_rate_table->info[rix].dot11rate;
 
 		sc->debug.stats.n_rcstats[idx].xretries += xretries;
 		sc->debug.stats.n_rcstats[idx].retries += retries;
-		sc->debug.stats.n_rcstats[idx].per = per;
 	}
 }
 
@@ -282,16 +277,15 @@ static ssize_t ath_read_file_stat_11n_rc(struct file *file,
 	unsigned int len = 0;
 	int i = 0;
 
-	len += sprintf(buf, "%7s %13s %8s %8s %6s\n\n", "Rate", "Success",
-		       "Retries", "XRetries", "PER");
+	len += sprintf(buf, "%7s %13s %8s %8s\n\n", "Rate", "Success",
+		       "Retries", "XRetries");
 
 	for (i = 0; i <= 15; i++) {
 		len += snprintf(buf + len, sizeof(buf) - len,
-				"%5s%3d: %8u %8u %8u %8u\n", "MCS", i,
+				"%5s%3d: %8u %8u %8u\n", "MCS", i,
 				sc->debug.stats.n_rcstats[i].success,
 				sc->debug.stats.n_rcstats[i].retries,
-				sc->debug.stats.n_rcstats[i].xretries,
-				sc->debug.stats.n_rcstats[i].per);
+				sc->debug.stats.n_rcstats[i].xretries);
 	}
 
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
@@ -322,9 +316,6 @@ static ssize_t read_file_rcstat(struct file *file, char __user *user_buf,
 {
 	struct ath_softc *sc = file->private_data;
 
-	if (sc->cur_rate_table == NULL)
-		return 0;
-
 	if (conf_is_ht(&sc->hw->conf))
 		return ath_read_file_stat_11n_rc(file, user_buf, count, ppos);
 	else
@@ -337,169 +328,16 @@ static const struct file_operations fops_rcstat = {
 	.owner = THIS_MODULE
 };
 
-static const char * ath_wiphy_state_str(enum ath_wiphy_state state)
-{
-	switch (state) {
-	case ATH_WIPHY_INACTIVE:
-		return "INACTIVE";
-	case ATH_WIPHY_ACTIVE:
-		return "ACTIVE";
-	case ATH_WIPHY_PAUSING:
-		return "PAUSING";
-	case ATH_WIPHY_PAUSED:
-		return "PAUSED";
-	case ATH_WIPHY_SCAN:
-		return "SCAN";
-	}
-	return "?";
-}
-
-static ssize_t read_file_wiphy(struct file *file, char __user *user_buf,
-			       size_t count, loff_t *ppos)
-{
-	struct ath_softc *sc = file->private_data;
-	char buf[512];
-	unsigned int len = 0;
-	int i;
-	u8 addr[ETH_ALEN];
-
-	len += snprintf(buf + len, sizeof(buf) - len,
-			"primary: %s (%s chan=%d ht=%d)\n",
-			wiphy_name(sc->pri_wiphy->hw->wiphy),
-			ath_wiphy_state_str(sc->pri_wiphy->state),
-			sc->pri_wiphy->chan_idx, sc->pri_wiphy->chan_is_ht);
-	for (i = 0; i < sc->num_sec_wiphy; i++) {
-		struct ath_wiphy *aphy = sc->sec_wiphy[i];
-		if (aphy == NULL)
-			continue;
-		len += snprintf(buf + len, sizeof(buf) - len,
-				"secondary: %s (%s chan=%d ht=%d)\n",
-				wiphy_name(aphy->hw->wiphy),
-				ath_wiphy_state_str(aphy->state),
-				aphy->chan_idx, aphy->chan_is_ht);
-	}
-
-	put_unaligned_le32(REG_READ(sc->sc_ah, AR_STA_ID0), addr);
-	put_unaligned_le16(REG_READ(sc->sc_ah, AR_STA_ID1) & 0xffff, addr + 4);
-	len += snprintf(buf + len, sizeof(buf) - len,
-			"addr: %pM\n", addr);
-	put_unaligned_le32(REG_READ(sc->sc_ah, AR_BSSMSKL), addr);
-	put_unaligned_le16(REG_READ(sc->sc_ah, AR_BSSMSKU) & 0xffff, addr + 4);
-	len += snprintf(buf + len, sizeof(buf) - len,
-			"addrmask: %pM\n", addr);
-
-	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
-}
-
-static struct ath_wiphy * get_wiphy(struct ath_softc *sc, const char *name)
-{
-	int i;
-	if (strcmp(name, wiphy_name(sc->pri_wiphy->hw->wiphy)) == 0)
-		return sc->pri_wiphy;
-	for (i = 0; i < sc->num_sec_wiphy; i++) {
-		struct ath_wiphy *aphy = sc->sec_wiphy[i];
-		if (aphy && strcmp(name, wiphy_name(aphy->hw->wiphy)) == 0)
-			return aphy;
-	}
-	return NULL;
-}
-
-static int del_wiphy(struct ath_softc *sc, const char *name)
-{
-	struct ath_wiphy *aphy = get_wiphy(sc, name);
-	if (!aphy)
-		return -ENOENT;
-	return ath9k_wiphy_del(aphy);
-}
-
-static int pause_wiphy(struct ath_softc *sc, const char *name)
-{
-	struct ath_wiphy *aphy = get_wiphy(sc, name);
-	if (!aphy)
-		return -ENOENT;
-	return ath9k_wiphy_pause(aphy);
-}
-
-static int unpause_wiphy(struct ath_softc *sc, const char *name)
-{
-	struct ath_wiphy *aphy = get_wiphy(sc, name);
-	if (!aphy)
-		return -ENOENT;
-	return ath9k_wiphy_unpause(aphy);
-}
-
-static int select_wiphy(struct ath_softc *sc, const char *name)
-{
-	struct ath_wiphy *aphy = get_wiphy(sc, name);
-	if (!aphy)
-		return -ENOENT;
-	return ath9k_wiphy_select(aphy);
-}
-
-static int schedule_wiphy(struct ath_softc *sc, const char *msec)
-{
-	ath9k_wiphy_set_scheduler(sc, simple_strtoul(msec, NULL, 0));
-	return 0;
-}
-
-static ssize_t write_file_wiphy(struct file *file, const char __user *user_buf,
-				size_t count, loff_t *ppos)
-{
-	struct ath_softc *sc = file->private_data;
-	char buf[50];
-	size_t len;
-
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-	buf[len] = '\0';
-	if (len > 0 && buf[len - 1] == '\n')
-		buf[len - 1] = '\0';
-
-	if (strncmp(buf, "add", 3) == 0) {
-		int res = ath9k_wiphy_add(sc);
-		if (res < 0)
-			return res;
-	} else if (strncmp(buf, "del=", 4) == 0) {
-		int res = del_wiphy(sc, buf + 4);
-		if (res < 0)
-			return res;
-	} else if (strncmp(buf, "pause=", 6) == 0) {
-		int res = pause_wiphy(sc, buf + 6);
-		if (res < 0)
-			return res;
-	} else if (strncmp(buf, "unpause=", 8) == 0) {
-		int res = unpause_wiphy(sc, buf + 8);
-		if (res < 0)
-			return res;
-	} else if (strncmp(buf, "select=", 7) == 0) {
-		int res = select_wiphy(sc, buf + 7);
-		if (res < 0)
-			return res;
-	} else if (strncmp(buf, "schedule=", 9) == 0) {
-		int res = schedule_wiphy(sc, buf + 9);
-		if (res < 0)
-			return res;
-	} else
-		return -EOPNOTSUPP;
-
-	return count;
-}
-
-static const struct file_operations fops_wiphy = {
-	.read = read_file_wiphy,
-	.write = write_file_wiphy,
-	.open = ath9k_debugfs_open,
-	.owner = THIS_MODULE
-};
-
-
 int ath9k_init_debug(struct ath_softc *sc)
 {
 	sc->debug.debug_mask = ath9k_debug;
 
+	sc->debug.debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
+	if (!sc->debug.debugfs_root)
+		goto err;
+
 	sc->debug.debugfs_phy = debugfs_create_dir(wiphy_name(sc->hw->wiphy),
-						      ath9k_debugfs_root);
+						      sc->debug.debugfs_root);
 	if (!sc->debug.debugfs_phy)
 		goto err;
 
@@ -522,12 +360,6 @@ int ath9k_init_debug(struct ath_softc *sc)
 	if (!sc->debug.debugfs_rcstat)
 		goto err;
 
-	sc->debug.debugfs_wiphy = debugfs_create_file(
-		"wiphy", S_IRUGO | S_IWUSR, sc->debug.debugfs_phy, sc,
-		&fops_wiphy);
-	if (!sc->debug.debugfs_wiphy)
-		goto err;
-
 	return 0;
 err:
 	ath9k_exit_debug(sc);
@@ -536,24 +368,9 @@ err:
 
 void ath9k_exit_debug(struct ath_softc *sc)
 {
-	debugfs_remove(sc->debug.debugfs_wiphy);
 	debugfs_remove(sc->debug.debugfs_rcstat);
 	debugfs_remove(sc->debug.debugfs_interrupt);
 	debugfs_remove(sc->debug.debugfs_dma);
 	debugfs_remove(sc->debug.debugfs_phy);
-}
-
-int ath9k_debug_create_root(void)
-{
-	ath9k_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
-	if (!ath9k_debugfs_root)
-		return -ENOENT;
-
-	return 0;
-}
-
-void ath9k_debug_remove_root(void)
-{
-	debugfs_remove(ath9k_debugfs_root);
-	ath9k_debugfs_root = NULL;
+	debugfs_remove(sc->debug.debugfs_root);
 }

@@ -75,28 +75,10 @@
 #define SUB_NUM_CTL_MODES_AT_5G_40 2
 #define SUB_NUM_CTL_MODES_AT_2G_40 3
 
-#define INCREASE_MAXPOW_BY_TWO_CHAIN     6  /* 10*log10(2)*2 */
-#define INCREASE_MAXPOW_BY_THREE_CHAIN   10 /* 10*log10(3)*2 */
-
-/*
- * For AR9285 and later chipsets, the following bits are not being programmed
- * in EEPROM and so need to be enabled always.
- *
- * Bit 0: en_fcc_mid
- * Bit 1: en_jap_mid
- * Bit 2: en_fcc_dfs_ht40
- * Bit 3: en_jap_ht40
- * Bit 4: en_jap_dfs_ht40
- */
-#define AR9285_RDEXT_DEFAULT    0x1F
-
 #define AR_EEPROM_MAC(i)	(0x1d+(i))
 #define ATH9K_POW_SM(_r, _s)	(((_r) & 0x3f) << (_s))
 #define FREQ2FBIN(x, y)		((y) ? ((x) - 2300) : (((x) - 4800) / 5))
 #define ath9k_hw_use_flash(_ah)	(!(_ah->ah_flags & AH_USE_EEPROM))
-
-#define OLC_FOR_AR9280_20_LATER (AR_SREV_9280_20_OR_LATER(ah) && \
-				 ah->eep_ops->get_eeprom(ah, EEP_OL_PWRCTRL))
 
 #define AR_EEPROM_RFSILENT_GPIO_SEL     0x001c
 #define AR_EEPROM_RFSILENT_GPIO_SEL_S   2
@@ -128,7 +110,6 @@
 #define AR5416_EEP_MINOR_VER_17      0x11
 #define AR5416_EEP_MINOR_VER_19      0x13
 #define AR5416_EEP_MINOR_VER_20      0x14
-#define AR5416_EEP_MINOR_VER_22      0x16
 
 #define AR5416_NUM_5G_CAL_PIERS         8
 #define AR5416_NUM_2G_CAL_PIERS         4
@@ -171,8 +152,6 @@
 #define AR5416_EEP4K_PD_GAIN_ICEPTS           5
 #define AR5416_EEP4K_MAX_CHAINS               1
 
-#define AR9280_TX_GAIN_TABLE_SIZE 22
-
 enum eeprom_param {
 	EEP_NFTHRESH_5,
 	EEP_NFTHRESH_2,
@@ -193,10 +172,7 @@ enum eeprom_param {
 	EEP_RX_MASK,
 	EEP_RXGAIN_TYPE,
 	EEP_TXGAIN_TYPE,
-	EEP_OL_PWRCTRL,
-	EEP_RC_CHAIN_MASK,
 	EEP_DAC_HPWR_5G,
-	EEP_FRAC_N_5G
 };
 
 enum ar5416_rates {
@@ -236,14 +212,12 @@ struct base_eep_header {
 	u8 futureBase_1[2];
 	u8 rxGainType;
 	u8 dacHiPwrMode_5G;
-	u8 openLoopPwrCntl;
+	u8 futureBase_2;
 	u8 dacLpMode;
 	u8 txGainType;
 	u8 rcChainMask;
 	u8 desiredScaleCCK;
-	u8 power_table_offset;
-	u8 frac_n_5g;
-	u8 futureBase_3[21];
+	u8 futureBase_3[23];
 } __packed;
 
 struct base_eep_header_4k {
@@ -261,7 +235,7 @@ struct base_eep_header_4k {
 	u16 deviceCap;
 	u32 binBuildNumber;
 	u8 deviceType;
-	u8 txGainType;
+	u8 futureBase[1];
 } __packed;
 
 
@@ -315,13 +289,6 @@ struct modal_eep_header {
 	u8 futureModal[6];
 
 	struct spur_chan spurChans[AR5416_EEPROM_MODAL_SPURS];
-} __packed;
-
-struct calDataPerFreqOpLoop {
-	u8 pwrPdg[2][5];
-	u8 vpdPdg[2][5];
-	u8 pcdac[2][5];
-	u8 empty[2][5];
 } __packed;
 
 struct modal_eep_4k_header {

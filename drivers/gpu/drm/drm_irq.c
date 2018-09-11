@@ -435,8 +435,6 @@ EXPORT_SYMBOL(drm_vblank_get);
  */
 void drm_vblank_put(struct drm_device *dev, int crtc)
 {
-	BUG_ON (atomic_read (&dev->vblank_refcount[crtc]) == 0);
-
 	/* Last user schedules interrupt disable */
 	if (atomic_dec_and_test(&dev->vblank_refcount[crtc]))
 		mod_timer(&dev->vblank_disable_timer, jiffies + 5*DRM_HZ);
@@ -462,9 +460,8 @@ void drm_vblank_pre_modeset(struct drm_device *dev, int crtc)
 	 * so that interrupts remain enabled in the interim.
 	 */
 	if (!dev->vblank_inmodeset[crtc]) {
-		dev->vblank_inmodeset[crtc] = 0x1;
-		if (drm_vblank_get(dev, crtc) == 0)
-			dev->vblank_inmodeset[crtc] |= 0x2;
+		dev->vblank_inmodeset[crtc] = 1;
+		drm_vblank_get(dev, crtc);
 	}
 }
 EXPORT_SYMBOL(drm_vblank_pre_modeset);
@@ -476,12 +473,9 @@ void drm_vblank_post_modeset(struct drm_device *dev, int crtc)
 	if (dev->vblank_inmodeset[crtc]) {
 		spin_lock_irqsave(&dev->vbl_lock, irqflags);
 		dev->vblank_disable_allowed = 1;
-		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
-
-		if (dev->vblank_inmodeset[crtc] & 0x2)
-			drm_vblank_put(dev, crtc);
-
 		dev->vblank_inmodeset[crtc] = 0;
+		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
+		drm_vblank_put(dev, crtc);
 	}
 }
 EXPORT_SYMBOL(drm_vblank_post_modeset);

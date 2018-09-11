@@ -16,7 +16,6 @@
 #include <asm/unistd.h>
 #include <cpu/mmu_context.h>
 #include <asm/page.h>
-#include <asm/cache.h>
 
 ! NOTE:
 ! GNU as (as of 2.9.1) changes bf/s into bt/s and bra, when the address
@@ -188,35 +187,44 @@ call_dae:
 #if defined(CONFIG_SH_STANDARD_BIOS)
 	/* Unwind the stack and jmp to the debug entry */
 ENTRY(sh_bios_handler)
-	mov.l	1f, r8
-	bsr	restore_regs
-	 nop
-
-	lds	k2, pr			! restore pr
-	mov	k4, r15
+	mov.l	@r15+, r0
+	mov.l	@r15+, r1
+	mov.l	@r15+, r2
+	mov.l	@r15+, r3
+	mov.l	@r15+, r4
+	mov.l	@r15+, r5
+	mov.l	@r15+, r6
+	mov.l	@r15+, r7
+	stc	sr, r8
+	mov.l	1f, r9			! BL =1, RB=1, IMASK=0x0F
+	or	r9, r8
+	ldc	r8, sr			! here, change the register bank
+	mov.l	@r15+, r8
+	mov.l	@r15+, r9
+	mov.l	@r15+, r10
+	mov.l	@r15+, r11
+	mov.l	@r15+, r12
+	mov.l	@r15+, r13
+	mov.l	@r15+, r14
+	mov.l	@r15+, k0
+	ldc.l	@r15+, spc
+	lds.l	@r15+, pr
+	mov.l	@r15+, k1
+	ldc.l	@r15+, gbr
+	lds.l	@r15+, mach
+	lds.l	@r15+, macl
+	mov	k0, r15
 	!
 	mov.l	2f, k0
 	mov.l	@k0, k0
 	jmp	@k0
-	 ldc	k3, ssr
+	 ldc	k1, ssr
 	.align	2
 1:	.long	0x300000f0
 2:	.long	gdb_vbr_vector
 #endif /* CONFIG_SH_STANDARD_BIOS */
 
-! restore_regs()
-! - restore r0, r1, r2, r3, r4, r5, r6, r7 from the stack
-! - switch bank
-! - restore r8, r9, r10, r11, r12, r13, r14, r15 from the stack
-! - restore spc, pr*, ssr, gbr, mach, macl, skip default tra
-! k2 returns original pr
-! k3 returns original sr
-! k4 returns original stack pointer
-! r8 passes SR bitmask, overwritten with restored data on return
-! r9 trashed
-! BL=0 on entry, on exit BL=1 (depending on r8).
-
-ENTRY(restore_regs)
+restore_all:
 	mov.l	@r15+, r0
 	mov.l	@r15+, r1
 	mov.l	@r15+, r2
@@ -226,9 +234,10 @@ ENTRY(restore_regs)
 	mov.l	@r15+, r6
 	mov.l	@r15+, r7
 	!
-	stc	sr, r9
-	or	r8, r9
-	ldc	r9, sr
+	stc	sr, r8
+	mov.l	7f, r9
+	or	r9, r8			! BL =1, RB=1
+	ldc	r8, sr			! here, change the register bank
 	!
 	mov.l	@r15+, r8
 	mov.l	@r15+, r9
@@ -239,20 +248,12 @@ ENTRY(restore_regs)
 	mov.l	@r15+, r14
 	mov.l	@r15+, k4		! original stack pointer
 	ldc.l	@r15+, spc
-	mov.l	@r15+, k2		! original PR
+	lds.l	@r15+, pr
 	mov.l	@r15+, k3		! original SR
 	ldc.l	@r15+, gbr
 	lds.l	@r15+, mach
 	lds.l	@r15+, macl
-	rts
-	 add	#4, r15			! Skip syscall number
-
-restore_all:
-	mov.l	7f, r8
-	bsr	restore_regs
-	 nop
-
-	lds	k2, pr			! restore pr
+	add	#4, r15			! Skip syscall number
 	!
 #ifdef CONFIG_SH_DSP
 	mov.l	@r15+, k0		! DSP mode marker
@@ -293,7 +294,7 @@ skip_restore:
 	mov	#0xf0, k1
 	extu.b	k1, k1
 	not	k1, k1
-	and	k1, k2			! Mask original SR value
+	and	k1, k2			! Mask orignal SR value
 	!
 	mov	k3, k0			! Calculate IMASK-bits
 	shlr2	k0
@@ -312,6 +313,7 @@ skip_restore:
 	mov	#0, k1
 	mov.b	k1, @k0
 #endif
+	mov.l	@r15+, k2		! restore EXPEVT
 	mov	k4, r15
 	rte
 	 nop
@@ -334,55 +336,81 @@ skip_restore:
 ENTRY(vbr_base)
 	.long	0
 !
-! 0x100: General exception vector
-!
 	.balign 	256,0,256
 general_exception:
-#ifndef CONFIG_CPU_SUBTYPE_SHX3
-	bra	handle_exception
-	 sts	pr, k3		! save original pr value in k3
-#else
-	mov.l	1f, k4
-	mov.l	@k4, k4
+	mov.l	1f, k2
+	mov.l	2f, k3
+#ifdef CONFIG_CPU_SUBTYPE_SHX3
+	mov.l	@k2, k2
 
 	! Is EXPEVT larger than 0x800?
 	mov	#0x8, k0
 	shll8	k0
-	cmp/hs	k0, k4
+	cmp/hs	k0, k2
 	bf	0f
 
 	! then add 0x580 (k2 is 0xd80 or 0xda0)
 	mov	#0x58, k0
 	shll2	k0
 	shll2	k0
-	add	k0, k4
+	add	k0, k2
 0:
-	! Setup stack and save DSP context (k0 contains original r15 on return)
-	bsr	prepare_stack_save_dsp
+	bra	handle_exception
 	 nop
+#else
+	bra	handle_exception
+	 mov.l	@k2, k2
+#endif
+	.align	2
+1:	.long	EXPEVT
+2:	.long	ret_from_exception
+!
+!
 
-	! Save registers / Switch to bank 0
-	mov		k4, k2		! keep vector in k2
-	mov.l	1f, k4		! SR bits to clear in k4
-	bsr	save_regs	! needs original pr value in k3
+	.balign 	1024,0,1024
+tlb_miss:
+	mov.l	1f, k2
+	mov.l	4f, k3
+	bra	handle_exception
+	 mov.l	@k2, k2
+!
+	.balign 	512,0,512
+interrupt:
+	mov.l	3f, k3
+#if defined(CONFIG_KGDB)
+	mov.l	2f, k2
+	! Debounce (filter nested NMI)
+	mov.l	@k2, k0
+	mov.l	5f, k1
+	cmp/eq	k1, k0
+	bf	0f
+	mov.l	6f, k1
+	tas.b	@k1
+	bt	0f
+	rte
 	 nop
-
-	bra	handle_exception_special
-	 nop
+	.align	2
+2:	.long	INTEVT
+5:	.long	NMI_VEC
+6:	.long	in_nmi
+0:
+#endif /* defined(CONFIG_KGDB) */
+	bra	handle_exception
+	 mov	#-1, k2		! interrupt exception marker
 
 	.align	2
 1:	.long	EXPEVT
-#endif
+3:	.long	ret_from_irq
+4:	.long	ret_from_exception
 
-! prepare_stack_save_dsp()
-! - roll back gRB
-! - switch to kernel stack
-! - save DSP
-! k0 returns original sp (after roll back)
-! k1 trashed
-! k2 trashed
+!
+!
+	.align	2
+ENTRY(handle_exception)
+	! Using k0, k1 for scratch registers (r0_bank1, r1_bank),
+	! save all registers onto stack.
+	!
 
-prepare_stack_save_dsp:
 #ifdef CONFIG_GUSA
 	! Check for roll back gRB (User and Kernel)
 	mov	r15, k0
@@ -402,7 +430,7 @@ prepare_stack_save_dsp:
 2:	mov	k1, r15		! SP = r1
 1:
 #endif
-	! Switch to kernel stack if needed
+
 	stc	ssr, k0		! Is it from kernel space?
 	shll	k0		! Check MD bit (bit30) by shifting it into...
 	shll	k0		!       ...the T bit
@@ -415,17 +443,18 @@ prepare_stack_save_dsp:
 	add	current, k1
 	mov	k1, r15		! change to kernel stack
 	!
-1:
+1:	mov.l	2f, k1
+	!
 #ifdef CONFIG_SH_DSP
-	! Save DSP context if needed
-	stc	sr, k1
-	mov	#0x10, k2
-	shll8   k2			! DSP=1 (0x00001000)
-	tst	k2, k1			! Check if in DSP mode (passed in k2)
+	mov.l	r2, @-r15		! Save r2, we need another reg
+	stc	sr, k4
+	mov.l	1f, r2
+	tst	r2, k4			! Check if in DSP mode
+	mov.l	@r15+, r2		! Restore r2 now
 	bt/s	skip_save
-	 mov	#0, k1			! Set marker for no stack frame
+	 mov	#0, k4			! Set marker for no stack frame
 
-	mov	k2, k1			! Save has-frame marker
+	mov	r2, k4			! Backup r2 (in k4) for later
 
 	! Save DSP registers on stack
 	stc.l	mod, @-r15
@@ -444,74 +473,35 @@ prepare_stack_save_dsp:
 	! as we're not at all interested in supporting ancient toolchains at
 	! this point. -- PFM.
 
-	mov	r15, k2
+	mov	r15, r2
 	.word	0xf653			! movs.l	a1, @-r2
 	.word	0xf6f3			! movs.l	a0g, @-r2
 	.word	0xf6d3			! movs.l	a1g, @-r2
 	.word	0xf6c3			! movs.l	m0, @-r2
 	.word	0xf6e3			! movs.l	m1, @-r2
-	mov	k2, r15
+	mov	r2, r15
 
+	mov	k4, r2			! Restore r2
+	mov.l	1f, k4			! Force DSP stack frame
 skip_save:
-	mov.l	k1, @-r15		! Push DSP mode marker onto stack
+	mov.l	k4, @-r15		! Push DSP mode marker onto stack
 #endif
-	rts
-	 nop
-!
-! 0x400: Instruction and Data TLB miss exception vector
-!
-	.balign 	1024,0,1024
-tlb_miss:
-	sts	pr, k3		! save original pr value in k3
+	! Save the user registers on the stack.
+	mov.l	k2, @-r15	! EXPEVT
 
-handle_exception:
-	mova	exception_data, k0
-
-	! Setup stack and save DSP context (k0 contains original r15 on return)
-	bsr	prepare_stack_save_dsp
-	 PREF(k0)
-
-	! Save registers / Switch to bank 0
-	mov.l	5f, k2		! vector register address
-	mov.l	1f, k4		! SR bits to clear in k4
-	bsr	save_regs	! needs original pr value in k3
-	 mov.l	@k2, k2		! read out vector and keep in k2
-
-handle_exception_special:
-	! Setup return address and jump to exception handler
-	mov.l	7f, r9		! fetch return address
-	stc	r2_bank, r0	! k2 (vector)
-	mov.l	6f, r10
-	shlr2	r0
-	shlr	r0
-	mov.l	@(r0, r10), r10
-	jmp	@r10
-	 lds	r9, pr		! put return address in pr
-
-	.align	L1_CACHE_SHIFT
-
-! save_regs()
-! - save default tra, macl, mach, gbr, ssr, pr* and spc on the stack
-! - save r15*, r14, r13, r12, r11, r10, r9, r8 on the stack
-! - switch bank
-! - save r7, r6, r5, r4, r3, r2, r1, r0 on the stack
-! k0 contains original stack pointer*
-! k1 trashed
-! k3 passes original pr*
-! k4 passes SR bitmask
-! BL=1 on entry, on exit BL=0.
-
-ENTRY(save_regs)
-	mov	#-1, r1
-	mov.l	k1, @-r15	! set TRA (default: -1)
+	mov	#-1, k4
+	mov.l	k4, @-r15	! set TRA (default: -1)
+	!
 	sts.l	macl, @-r15
 	sts.l	mach, @-r15
 	stc.l	gbr, @-r15
 	stc.l	ssr, @-r15
-	mov.l	k3, @-r15	! original pr in k3
+	sts.l	pr, @-r15
 	stc.l	spc, @-r15
-
-	mov.l	k0, @-r15	! original stack pointer in k0
+	!
+	lds	k3, pr		! Set the return address to pr
+	!
+	mov.l	k0, @-r15	! save orignal stack
 	mov.l	r14, @-r15
 	mov.l	r13, @-r15
 	mov.l	r12, @-r15
@@ -519,23 +509,13 @@ ENTRY(save_regs)
 	mov.l	r10, @-r15
 	mov.l	r9, @-r15
 	mov.l	r8, @-r15
-
-	mov.l	0f, k3		! SR bits to set in k3
-
-	! fall-through
-
-! save_low_regs()
-! - modify SR for bank switch
-! - save r7, r6, r5, r4, r3, r2, r1, r0 on the stack
-! k3 passes bits to set in SR
-! k4 passes bits to clear in SR
-
-ENTRY(save_low_regs)
-	stc	sr, r8
-	or	k3, r8
-	and	k4, r8
-	ldc	r8, sr
-
+	!
+	stc	sr, r8		! Back to normal register bank, and
+	or	k1, r8		! Block all interrupts
+	mov.l	3f, k1
+	and	k1, r8		! ...
+	ldc	r8, sr		! ...changed here.
+	!
 	mov.l	r7, @-r15
 	mov.l	r6, @-r15
 	mov.l	r5, @-r15
@@ -543,63 +523,52 @@ ENTRY(save_low_regs)
 	mov.l	r3, @-r15
 	mov.l	r2, @-r15
 	mov.l	r1, @-r15
-	rts
-	 mov.l	r0, @-r15
+	mov.l	r0, @-r15
 
-!
-! 0x600: Interrupt / NMI vector
-!
-	.balign 	512,0,512
-ENTRY(handle_interrupt)
-#if defined(CONFIG_KGDB)
-	mov.l	2f, k2
-	! Debounce (filter nested NMI)
-	mov.l	@k2, k0
-	mov.l	9f, k1
-	cmp/eq	k1, k0
-	bf	11f
-	mov.l	10f, k1
-	tas.b	@k1
-	bt	11f
-	rte
-	 nop
-	.align	2
-9:	.long	NMI_VEC
-10:	.long	in_nmi
-11:
-#endif /* defined(CONFIG_KGDB) */
-	sts	pr, k3		! save original pr value in k3
-	mova	exception_data, k0
-
-	! Setup stack and save DSP context (k0 contains original r15 on return)
-	bsr	prepare_stack_save_dsp
-	 PREF(k0)
-
-	! Save registers / Switch to bank 0
-	mov.l	1f, k4		! SR bits to clear in k4
-	bsr	save_regs	! needs original pr value in k3
-	 mov	#-1, k2		! default vector kept in k2
-
-	! Setup return address and jump to do_IRQ
-	mov.l	4f, r9		! fetch return address
-	lds	r9, pr		! put return address in pr
-	mov.l	2f, r4
-	mov.l	3f, r9
-	mov.l	@r4, r4		! pass INTEVT vector as arg0
+	/*
+	 * This gets a bit tricky.. in the INTEVT case we don't want to use
+	 * the VBR offset as a destination in the jump call table, since all
+	 * of the destinations are the same. In this case, (interrupt) sets
+	 * a marker in r2 (now r2_bank since SR.RB changed), which we check
+	 * to determine the exception type. For all other exceptions, we
+	 * forcibly read EXPEVT from memory and fix up the jump address, in
+	 * the interrupt exception case we jump to do_IRQ() and defer the
+	 * INTEVT read until there. As a bonus, we can also clean up the SR.RB
+	 * checks that do_IRQ() was doing..
+	 */
+	stc	r2_bank, r8
+	cmp/pz	r8
+	bf	interrupt_exception
+	shlr2	r8
+	shlr	r8
+	mov.l	4f, r9
+	add	r8, r9
+	mov.l	@r9, r9
 	jmp	@r9
-	 mov	r15, r5		! pass saved registers as arg1
+	 nop
+	rts
+	 nop
 
+	.align	2
+1:	.long	0x00001000	! DSP=1
+2:	.long	0x000080f0	! FD=1, IMASK=15
+3:	.long	0xcfffffff	! RB=0, BL=0
+4:	.long	exception_handling_table
+
+interrupt_exception:
+	mov.l	1f, r9
+	mov.l	2f, r4
+	mov.l	@r4, r4
+	jmp	@r9
+	 mov	r15, r5
+	rts
+	 nop
+
+	.align 2
+1:	.long	do_IRQ
+2:	.long	INTEVT
+
+	.align	2
 ENTRY(exception_none)
 	rts
 	 nop
-
-	.align	L1_CACHE_SHIFT
-exception_data:
-0:	.long	0x000080f0	! FD=1, IMASK=15
-1:	.long	0xcfffffff	! RB=0, BL=0
-2:	.long	INTEVT
-3:	.long	do_IRQ
-4:	.long	ret_from_irq
-5:	.long	EXPEVT
-6:	.long	exception_handling_table
-7:	.long	ret_from_exception

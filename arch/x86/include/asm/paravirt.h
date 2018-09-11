@@ -1352,7 +1352,14 @@ static inline void arch_leave_lazy_cpu_mode(void)
 	PVOP_VCALL0(pv_cpu_ops.lazy_mode.leave);
 }
 
-void arch_flush_lazy_cpu_mode(void);
+static inline void arch_flush_lazy_cpu_mode(void)
+{
+	if (unlikely(paravirt_get_lazy_mode() == PARAVIRT_LAZY_CPU)) {
+		arch_leave_lazy_cpu_mode();
+		arch_enter_lazy_cpu_mode();
+	}
+}
+
 
 #define  __HAVE_ARCH_ENTER_LAZY_MMU_MODE
 static inline void arch_enter_lazy_mmu_mode(void)
@@ -1365,7 +1372,13 @@ static inline void arch_leave_lazy_mmu_mode(void)
 	PVOP_VCALL0(pv_mmu_ops.lazy_mode.leave);
 }
 
-void arch_flush_lazy_mmu_mode(void);
+static inline void arch_flush_lazy_mmu_mode(void)
+{
+	if (unlikely(paravirt_get_lazy_mode() == PARAVIRT_LAZY_MMU)) {
+		arch_leave_lazy_mmu_mode();
+		arch_enter_lazy_mmu_mode();
+	}
+}
 
 static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 				unsigned long phys, pgprot_t flags)

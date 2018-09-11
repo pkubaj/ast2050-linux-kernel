@@ -52,15 +52,7 @@
 #define __deprecated			__attribute__((deprecated))
 #define __packed			__attribute__((packed))
 #define __weak				__attribute__((weak))
-
-/*
- * it doesn't make sense on ARM (currently the only user of __naked) to trace
- * naked functions because then mcount is called without stack and frame pointer
- * being set up and there is no chance to restore the lr register to the value
- * before mcount was called.
- */
-#define __naked				__attribute__((naked)) notrace
-
+#define __naked				__attribute__((naked))
 #define __noreturn			__attribute__((noreturn))
 
 /*

@@ -59,6 +59,7 @@ static struct
 static struct xt_table security_table = {
 	.name		= "security",
 	.valid_hooks	= SECURITY_VALID_HOOKS,
+	.lock		= __RW_LOCK_UNLOCKED(security_table.lock),
 	.me		= THIS_MODULE,
 	.af		= AF_INET6,
 };

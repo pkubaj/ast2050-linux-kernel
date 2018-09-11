@@ -31,7 +31,6 @@
 #include "ixgbe_type.h"
 #include "ixgbe_dcb.h"
 #include "ixgbe_dcb_82598.h"
-#include "ixgbe_dcb_82599.h"
 
 /**
  * ixgbe_dcb_config - Struct containing DCB settings.
@@ -216,8 +215,6 @@ s32 ixgbe_dcb_get_tc_stats(struct ixgbe_hw *hw, struct ixgbe_hw_stats *stats,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_get_tc_stats_82598(hw, stats, tc_count);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_get_tc_stats_82599(hw, stats, tc_count);
 	return ret;
 }
 
@@ -235,8 +232,6 @@ s32 ixgbe_dcb_get_pfc_stats(struct ixgbe_hw *hw, struct ixgbe_hw_stats *stats,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_get_pfc_stats_82598(hw, stats, tc_count);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_get_pfc_stats_82599(hw, stats, tc_count);
 	return ret;
 }
 
@@ -253,8 +248,6 @@ s32 ixgbe_dcb_config_rx_arbiter(struct ixgbe_hw *hw,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_config_rx_arbiter_82598(hw, dcb_config);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_config_rx_arbiter_82599(hw, dcb_config);
 	return ret;
 }
 
@@ -271,8 +264,6 @@ s32 ixgbe_dcb_config_tx_desc_arbiter(struct ixgbe_hw *hw,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_config_tx_desc_arbiter_82598(hw, dcb_config);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_config_tx_desc_arbiter_82599(hw, dcb_config);
 	return ret;
 }
 
@@ -289,8 +280,6 @@ s32 ixgbe_dcb_config_tx_data_arbiter(struct ixgbe_hw *hw,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_config_tx_data_arbiter_82598(hw, dcb_config);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_config_tx_data_arbiter_82599(hw, dcb_config);
 	return ret;
 }
 
@@ -307,8 +296,6 @@ s32 ixgbe_dcb_config_pfc(struct ixgbe_hw *hw,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_config_pfc_82598(hw, dcb_config);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_config_pfc_82599(hw, dcb_config);
 	return ret;
 }
 
@@ -324,8 +311,6 @@ s32 ixgbe_dcb_config_tc_stats(struct ixgbe_hw *hw)
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_config_tc_stats_82598(hw);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_config_tc_stats_82599(hw);
 	return ret;
 }
 
@@ -342,8 +327,6 @@ s32 ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
 	s32 ret = 0;
 	if (hw->mac.type == ixgbe_mac_82598EB)
 		ret = ixgbe_dcb_hw_config_82598(hw, dcb_config);
-	else if (hw->mac.type == ixgbe_mac_82599EB)
-		ret = ixgbe_dcb_hw_config_82599(hw, dcb_config);
 	return ret;
 }
 

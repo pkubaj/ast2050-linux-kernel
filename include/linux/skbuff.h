@@ -135,7 +135,8 @@ struct skb_frag_struct {
 #define HAVE_HW_TIME_STAMP
 
 /**
- * struct skb_shared_hwtstamps - hardware time stamps
+ * skb_shared_hwtstamps - hardware time stamps
+ *
  * @hwtstamp:	hardware time stamp transformed into duration
  *		since arbitrary point in time
  * @syststamp:	hwtstamp transformed to system time base
@@ -163,7 +164,8 @@ struct skb_shared_hwtstamps {
 };
 
 /**
- * struct skb_shared_tx - instructions for time stamping of outgoing packets
+ * skb_shared_tx - instructions for time stamping of outgoing packets
+ *
  * @hardware:		generate hardware time stamp
  * @software:		generate software time stamp
  * @in_progress:	device driver is going to provide
@@ -421,7 +423,6 @@ extern void skb_dma_unmap(struct device *dev, struct sk_buff *skb,
 #endif
 
 extern void kfree_skb(struct sk_buff *skb);
-extern void consume_skb(struct sk_buff *skb);
 extern void	       __kfree_skb(struct sk_buff *skb);
 extern struct sk_buff *__alloc_skb(unsigned int size,
 				   gfp_t priority, int fclone, int node);
@@ -460,12 +461,20 @@ extern int	       skb_to_sgvec(struct sk_buff *skb,
 extern int	       skb_cow_data(struct sk_buff *skb, int tailbits,
 				    struct sk_buff **trailer);
 extern int	       skb_pad(struct sk_buff *skb, int pad);
-#define dev_kfree_skb(a)	consume_skb(a)
-#define dev_consume_skb(a)	kfree_skb_clean(a)
+#define dev_kfree_skb(a)	kfree_skb(a)
 extern void	      skb_over_panic(struct sk_buff *skb, int len,
 				     void *here);
 extern void	      skb_under_panic(struct sk_buff *skb, int len,
 				      void *here);
+extern void	      skb_truesize_bug(struct sk_buff *skb);
+
+static inline void skb_truesize_check(struct sk_buff *skb)
+{
+	int len = sizeof(struct sk_buff) + skb->len;
+
+	if (unlikely((int)skb->truesize < len))
+		skb_truesize_bug(skb);
+}
 
 extern int skb_append_datato_frags(struct sock *sk, struct sk_buff *skb,
 			int getfrag(void *from, char *to, int offset,
@@ -1969,7 +1978,7 @@ static inline void skb_set_queue_mapping(struct sk_buff *skb, u16 queue_mapping)
 	skb->queue_mapping = queue_mapping;
 }
 
-static inline u16 skb_get_queue_mapping(const struct sk_buff *skb)
+static inline u16 skb_get_queue_mapping(struct sk_buff *skb)
 {
 	return skb->queue_mapping;
 }
@@ -1984,18 +1993,15 @@ static inline void skb_record_rx_queue(struct sk_buff *skb, u16 rx_queue)
 	skb->queue_mapping = rx_queue + 1;
 }
 
-static inline u16 skb_get_rx_queue(const struct sk_buff *skb)
+static inline u16 skb_get_rx_queue(struct sk_buff *skb)
 {
 	return skb->queue_mapping - 1;
 }
 
-static inline bool skb_rx_queue_recorded(const struct sk_buff *skb)
+static inline bool skb_rx_queue_recorded(struct sk_buff *skb)
 {
 	return (skb->queue_mapping != 0);
 }
-
-extern u16 skb_tx_hash(const struct net_device *dev,
-		       const struct sk_buff *skb);
 
 #ifdef CONFIG_XFRM
 static inline struct sec_path *skb_sec_path(struct sk_buff *skb)

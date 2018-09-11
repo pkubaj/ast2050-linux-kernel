@@ -42,8 +42,8 @@
 #define AR5416_MAGIC		0x19641014
 
 /* Register read/write primitives */
-#define REG_WRITE(_ah, _reg, _val) ath9k_iowrite32((_ah), (_reg), (_val))
-#define REG_READ(_ah, _reg) ath9k_ioread32((_ah), (_reg))
+#define REG_WRITE(_ah, _reg, _val) iowrite32(_val, _ah->ah_sc->mem + _reg)
+#define REG_READ(_ah, _reg) ioread32(_ah->ah_sc->mem + _reg)
 
 #define SM(_v, _f)  (((_v) << _f##_S) & _f)
 #define MS(_v, _f)  (((_v) & _f) >> _f##_S)
@@ -93,7 +93,7 @@
 #define ATH9K_NUM_QUEUES            10
 
 #define MAX_RATE_POWER              63
-#define AH_WAIT_TIMEOUT             100000 /* (us) */
+#define AH_TIMEOUT                  100000
 #define AH_TIME_QUANTUM             10
 #define AR_KEYTABLE_SIZE            128
 #define POWER_UP_TIME               200000
@@ -153,10 +153,16 @@ enum ath9k_capability_type {
 	ATH9K_CAP_CIPHER = 0,
 	ATH9K_CAP_TKIP_MIC,
 	ATH9K_CAP_TKIP_SPLIT,
+	ATH9K_CAP_PHYCOUNTERS,
 	ATH9K_CAP_DIVERSITY,
 	ATH9K_CAP_TXPOW,
+	ATH9K_CAP_PHYDIAG,
 	ATH9K_CAP_MCAST_KEYSRCH,
-	ATH9K_CAP_DS
+	ATH9K_CAP_TSF_ADJUST,
+	ATH9K_CAP_WME_TKIPMIC,
+	ATH9K_CAP_RFSILENT,
+	ATH9K_CAP_ANT_CFG_2GHZ,
+	ATH9K_CAP_ANT_CFG_5GHZ
 };
 
 struct ath9k_hw_capabilities {
@@ -243,7 +249,6 @@ enum ath9k_int {
 	ATH9K_INT_DTIMSYNC = 0x00800000,
 	ATH9K_INT_GPIO = 0x01000000,
 	ATH9K_INT_CABEND = 0x02000000,
-	ATH9K_INT_TSFOOR = 0x04000000,
 	ATH9K_INT_CST = 0x10000000,
 	ATH9K_INT_GTT = 0x20000000,
 	ATH9K_INT_FATAL = 0x40000000,
@@ -251,7 +256,6 @@ enum ath9k_int {
 	ATH9K_INT_BMISC = ATH9K_INT_TIM |
 		ATH9K_INT_DTIM |
 		ATH9K_INT_DTIMSYNC |
-		ATH9K_INT_TSFOOR |
 		ATH9K_INT_CABEND,
 	ATH9K_INT_COMMON = ATH9K_INT_RXNOFRM |
 		ATH9K_INT_RXDESC |
@@ -381,7 +385,6 @@ struct ath9k_beacon_state {
 #define ATH9K_BEACON_PERIOD       0x0000ffff
 #define ATH9K_BEACON_ENA          0x00800000
 #define ATH9K_BEACON_RESET_TSF    0x01000000
-#define ATH9K_TSFOOR_THRESHOLD    0x00004240 /* 16k us */
 	u32 bs_dtimperiod;
 	u16 bs_cfpperiod;
 	u16 bs_cfpmaxduration;
@@ -389,7 +392,6 @@ struct ath9k_beacon_state {
 	u16 bs_timoffset;
 	u16 bs_bmissthreshold;
 	u32 bs_sleepduration;
-	u32 bs_tsfoor_threshold;
 };
 
 struct chan_centers {
@@ -545,10 +547,6 @@ struct ath_hw {
 	u8 txchainmask;
 	u8 rxchainmask;
 
-	u32 originalGain[22];
-	int initPDADC;
-	int PDADCdelta;
-
 	struct ar5416IniArray iniModes;
 	struct ar5416IniArray iniCommon;
 	struct ar5416IniArray iniBank0;
@@ -584,7 +582,7 @@ bool ath9k_hw_keyreset(struct ath_hw *ah, u16 entry);
 bool ath9k_hw_keysetmac(struct ath_hw *ah, u16 entry, const u8 *mac);
 bool ath9k_hw_set_keycache_entry(struct ath_hw *ah, u16 entry,
 				 const struct ath9k_keyval *k,
-				 const u8 *mac);
+				 const u8 *mac, int xorKey);
 bool ath9k_hw_keyisvalid(struct ath_hw *ah, u16 entry);
 
 /* GPIO / RFKILL / Antennae */
@@ -605,7 +603,7 @@ bool ath9k_hw_setantennaswitch(struct ath_hw *ah,
 			       u8 *antenna_cfgd);
 
 /* General Operation */
-bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val, u32 timeout);
+bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val);
 u32 ath9k_hw_reverse_bits(u32 val, u32 n);
 bool ath9k_get_channel_edges(struct ath_hw *ah, u16 flags, u16 *low, u16 *high);
 u16 ath9k_hw_computetxtime(struct ath_hw *ah, struct ath_rate_table *rates,

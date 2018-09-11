@@ -698,7 +698,7 @@ int
 mgt_commit(islpci_private *priv)
 {
 	int rvalue;
-	enum oid_num_t u;
+	u32 u;
 
 	if (islpci_get_state(priv) < PRV_STATE_INIT)
 		return 0;

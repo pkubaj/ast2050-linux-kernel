@@ -1165,7 +1165,6 @@ static int futex_wait(u32 __user *uaddr, int fshared,
 		      u32 val, ktime_t *abs_time, u32 bitset, int clockrt)
 {
 	struct task_struct *curr = current;
-	struct restart_block *restart;
 	DECLARE_WAITQUEUE(wait, curr);
 	struct futex_hash_bucket *hb;
 	struct futex_q q;
@@ -1217,13 +1216,11 @@ retry:
 
 		if (!ret)
 			goto retry;
-		goto out;
+		return ret;
 	}
 	ret = -EWOULDBLOCK;
-	if (unlikely(uval != val)) {
-		queue_unlock(&q, hb);
-		goto out_put_key;
-	}
+	if (uval != val)
+		goto out_unlock_put_key;
 
 	/* Only actually queue if *uaddr contained val.  */
 	queue_me(&q, hb);
@@ -1287,38 +1284,38 @@ retry:
 	 */
 
 	/* If we were woken (and unqueued), we succeeded, whatever. */
-	ret = 0;
 	if (!unqueue_me(&q))
-		goto out_put_key;
-	ret = -ETIMEDOUT;
+		return 0;
 	if (rem)
-		goto out_put_key;
+		return -ETIMEDOUT;
 
 	/*
 	 * We expect signal_pending(current), but another thread may
 	 * have handled it for us already.
 	 */
-	ret = -ERESTARTSYS;
 	if (!abs_time)
-		goto out_put_key;
+		return -ERESTARTSYS;
+	else {
+		struct restart_block *restart;
+		restart = &current_thread_info()->restart_block;
+		restart->fn = futex_wait_restart;
+		restart->futex.uaddr = (u32 *)uaddr;
+		restart->futex.val = val;
+		restart->futex.time = abs_time->tv64;
+		restart->futex.bitset = bitset;
+		restart->futex.flags = 0;
 
-	restart = &current_thread_info()->restart_block;
-	restart->fn = futex_wait_restart;
-	restart->futex.uaddr = (u32 *)uaddr;
-	restart->futex.val = val;
-	restart->futex.time = abs_time->tv64;
-	restart->futex.bitset = bitset;
-	restart->futex.flags = 0;
+		if (fshared)
+			restart->futex.flags |= FLAGS_SHARED;
+		if (clockrt)
+			restart->futex.flags |= FLAGS_CLOCKRT;
+		return -ERESTART_RESTARTBLOCK;
+	}
 
-	if (fshared)
-		restart->futex.flags |= FLAGS_SHARED;
-	if (clockrt)
-		restart->futex.flags |= FLAGS_CLOCKRT;
-
-	ret = -ERESTART_RESTARTBLOCK;
-
-out_put_key:
+out_unlock_put_key:
+	queue_unlock(&q, hb);
 	put_futex_key(fshared, &q.key);
+
 out:
 	return ret;
 }

@@ -2135,7 +2135,6 @@ struct qla_msix_entry {
 /* Work events.  */
 enum qla_work_type {
 	QLA_EVT_AEN,
-	QLA_EVT_IDC_ACK,
 };
 
 
@@ -2150,10 +2149,6 @@ struct qla_work_evt {
 			enum fc_host_event_code code;
 			u32 data;
 		} aen;
-		struct {
-#define QLA_IDC_ACK_REGS	7
-			uint16_t mb[QLA_IDC_ACK_REGS];
-		} idc_ack;
 	} u;
 };
 

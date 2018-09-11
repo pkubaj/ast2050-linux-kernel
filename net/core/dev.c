@@ -135,6 +135,14 @@
 /* This should be increased if a protocol with a bigger head is added. */
 #define GRO_MAX_HEAD (MAX_HEADER + 128)
 
+enum {
+	GRO_MERGED,
+	GRO_MERGED_FREE,
+	GRO_HELD,
+	GRO_NORMAL,
+	GRO_DROP,
+};
+
 /*
  *	The list of packet types we will receive (as opposed to discard)
  *	and the routines to invoke.
@@ -1664,12 +1672,23 @@ static int dev_gso_segment(struct sk_buff *skb)
 	return 0;
 }
 
+static void tstamp_tx(struct sk_buff *skb)
+{
+	union skb_shared_tx *shtx =
+		skb_tx(skb);
+	if (unlikely(shtx->software &&
+			!shtx->in_progress)) {
+		skb_tstamp_tx(skb, NULL);
+	}
+}
+
 int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			struct netdev_queue *txq)
 {
 	const struct net_device_ops *ops = dev->netdev_ops;
 	int rc;
 
+	prefetch(&dev->netdev_ops->ndo_start_xmit);
 	if (likely(!skb->next)) {
 		if (!list_empty(&ptype_all))
 			dev_queue_xmit_nit(skb, dev);
@@ -1696,6 +1715,8 @@ int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 		 * the skb destructor before the call and restoring it
 		 * afterwards, then doing the skb_orphan() ourselves?
 		 */
+		if (likely(!rc))
+			tstamp_tx(skb);
 		return rc;
 	}
 
@@ -1711,6 +1732,7 @@ gso:
 			skb->next = nskb;
 			return rc;
 		}
+		tstamp_tx(skb);
 		if (unlikely(netif_tx_queue_stopped(txq) && skb->next))
 			return NETDEV_TX_BUSY;
 	} while (skb->next);
@@ -1723,10 +1745,16 @@ out_kfree_skb:
 }
 
 static u32 skb_tx_hashrnd;
+static int skb_tx_hashrnd_initialized = 0;
 
-u16 skb_tx_hash(const struct net_device *dev, const struct sk_buff *skb)
+static u16 skb_tx_hash(struct net_device *dev, struct sk_buff *skb)
 {
 	u32 hash;
+
+	if (unlikely(!skb_tx_hashrnd_initialized)) {
+		get_random_bytes(&skb_tx_hashrnd, 4);
+		skb_tx_hashrnd_initialized = 1;
+	}
 
 	if (skb_rx_queue_recorded(skb)) {
 		hash = skb_get_rx_queue(skb);
@@ -1739,7 +1767,6 @@ u16 skb_tx_hash(const struct net_device *dev, const struct sk_buff *skb)
 
 	return (u16) (((u64) hash * dev->real_num_tx_queues) >> 32);
 }
-EXPORT_SYMBOL(skb_tx_hash);
 
 static struct netdev_queue *dev_pick_tx(struct net_device *dev,
 					struct sk_buff *skb)
@@ -2246,6 +2273,12 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	rcu_read_lock();
 
+	/* Don't receive packets in an exiting network namespace */
+	if (!net_alive(dev_net(skb->dev))) {
+		kfree_skb(skb);
+		goto out;
+	}
+
 #ifdef CONFIG_NET_CLS_ACT
 	if (skb->tc_verd & TC_NCLS) {
 		skb->tc_verd = CLR_TC_NCLS(skb->tc_verd);
@@ -2466,9 +2499,6 @@ static int __napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb)
 {
 	struct sk_buff *p;
 
-	if (netpoll_rx_on(skb))
-		return GRO_NORMAL;
-
 	for (p = napi->gro_list; p; p = p->next) {
 		NAPI_GRO_CB(p)->same_flow = !compare_ether_header(
 			skb_mac_header(p), skb_gro_mac_header(skb));
@@ -2627,9 +2657,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		local_irq_disable();
 		skb = __skb_dequeue(&queue->input_pkt_queue);
 		if (!skb) {
+			__napi_complete(napi);
 			local_irq_enable();
-			napi_complete(napi);
-			goto out;
+			break;
 		}
 		local_irq_enable();
 
@@ -2638,7 +2668,6 @@ static int process_backlog(struct napi_struct *napi, int quota)
 
 	napi_gro_flush(napi);
 
-out:
 	return work;
 }
 
@@ -2712,7 +2741,7 @@ void netif_napi_del(struct napi_struct *napi)
 	struct sk_buff *skb, *next;
 
 	list_del_init(&napi->dev_list);
-	kfree_skb(napi->skb);
+	kfree(napi->skb);
 
 	for (skb = napi->gro_list; skb; skb = next) {
 		next = skb->next;
@@ -4326,39 +4355,6 @@ unsigned long netdev_fix_features(unsigned long features, const char *name)
 }
 EXPORT_SYMBOL(netdev_fix_features);
 
-/* Some devices need to (re-)set their netdev_ops inside
- * ->init() or similar.  If that happens, we have to setup
- * the compat pointers again.
- */
-void netdev_resync_ops(struct net_device *dev)
-{
-#ifdef CONFIG_COMPAT_NET_DEV_OPS
-	const struct net_device_ops *ops = dev->netdev_ops;
-
-	dev->init = ops->ndo_init;
-	dev->uninit = ops->ndo_uninit;
-	dev->open = ops->ndo_open;
-	dev->change_rx_flags = ops->ndo_change_rx_flags;
-	dev->set_rx_mode = ops->ndo_set_rx_mode;
-	dev->set_multicast_list = ops->ndo_set_multicast_list;
-	dev->set_mac_address = ops->ndo_set_mac_address;
-	dev->validate_addr = ops->ndo_validate_addr;
-	dev->do_ioctl = ops->ndo_do_ioctl;
-	dev->set_config = ops->ndo_set_config;
-	dev->change_mtu = ops->ndo_change_mtu;
-	dev->neigh_setup = ops->ndo_neigh_setup;
-	dev->tx_timeout = ops->ndo_tx_timeout;
-	dev->get_stats = ops->ndo_get_stats;
-	dev->vlan_rx_register = ops->ndo_vlan_rx_register;
-	dev->vlan_rx_add_vid = ops->ndo_vlan_rx_add_vid;
-	dev->vlan_rx_kill_vid = ops->ndo_vlan_rx_kill_vid;
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	dev->poll_controller = ops->ndo_poll_controller;
-#endif
-#endif
-}
-EXPORT_SYMBOL(netdev_resync_ops);
-
 /**
  *	register_netdevice	- register a network device
  *	@dev: device to register
@@ -4403,7 +4399,27 @@ int register_netdevice(struct net_device *dev)
 	 * This is temporary until all network devices are converted.
 	 */
 	if (dev->netdev_ops) {
-		netdev_resync_ops(dev);
+		const struct net_device_ops *ops = dev->netdev_ops;
+
+		dev->init = ops->ndo_init;
+		dev->uninit = ops->ndo_uninit;
+		dev->open = ops->ndo_open;
+		dev->change_rx_flags = ops->ndo_change_rx_flags;
+		dev->set_rx_mode = ops->ndo_set_rx_mode;
+		dev->set_multicast_list = ops->ndo_set_multicast_list;
+		dev->set_mac_address = ops->ndo_set_mac_address;
+		dev->validate_addr = ops->ndo_validate_addr;
+		dev->do_ioctl = ops->ndo_do_ioctl;
+		dev->set_config = ops->ndo_set_config;
+		dev->change_mtu = ops->ndo_change_mtu;
+		dev->tx_timeout = ops->ndo_tx_timeout;
+		dev->get_stats = ops->ndo_get_stats;
+		dev->vlan_rx_register = ops->ndo_vlan_rx_register;
+		dev->vlan_rx_add_vid = ops->ndo_vlan_rx_add_vid;
+		dev->vlan_rx_kill_vid = ops->ndo_vlan_rx_kill_vid;
+#ifdef CONFIG_NET_POLL_CONTROLLER
+		dev->poll_controller = ops->ndo_poll_controller;
+#endif
 	} else {
 		char drivername[64];
 		pr_info("%s (%s): not using net_device_ops yet\n",
@@ -5274,14 +5290,6 @@ out:
 }
 
 subsys_initcall(net_dev_init);
-
-static int __init initialize_hashrnd(void)
-{
-	get_random_bytes(&skb_tx_hashrnd, sizeof(skb_tx_hashrnd));
-	return 0;
-}
-
-late_initcall_sync(initialize_hashrnd);
 
 EXPORT_SYMBOL(__dev_get_by_index);
 EXPORT_SYMBOL(__dev_get_by_name);

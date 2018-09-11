@@ -56,6 +56,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
@@ -2625,7 +2626,7 @@ static int udc_probe(struct device *dev, void __iomem *regs, const char *name)
 	INIT_LIST_HEAD(&udc->gadget.ep_list);
 	udc->gadget.ep0 = NULL;
 
-	dev_set_name(&udc->gadget.dev, "gadget");
+	strcpy(udc->gadget.dev.bus_id, "gadget");
 	udc->gadget.dev.dma_mask = dev->dma_mask;
 	udc->gadget.dev.parent   = dev;
 	udc->gadget.dev.release  = udc_release;

@@ -279,21 +279,21 @@ static struct xt_target ebt_ulog_tg_reg __read_mostly = {
 	.me		= THIS_MODULE,
 };
 
-static struct nf_logger ebt_ulog_logger __read_mostly = {
-	.name		= "ebt_ulog",
+static const struct nf_logger ebt_ulog_logger = {
+	.name		= "ulog",
 	.logfn		= &ebt_log_packet,
 	.me		= THIS_MODULE,
 };
 
 static int __init ebt_ulog_init(void)
 {
-	int ret;
+	bool ret = true;
 	int i;
 
 	if (nlbufsiz >= 128*1024) {
 		printk(KERN_NOTICE "ebt_ulog: Netlink buffer has to be <= 128kB,"
 		       " please try a smaller nlbufsiz parameter.\n");
-		return -EINVAL;
+		return false;
 	}
 
 	/* initialize ulog_buffers */
@@ -308,12 +308,12 @@ static int __init ebt_ulog_init(void)
 	if (!ebtulognl) {
 		printk(KERN_WARNING KBUILD_MODNAME ": out of memory trying to "
 		       "call netlink_kernel_create\n");
-		ret = -ENOMEM;
-	} else if ((ret = xt_register_target(&ebt_ulog_tg_reg)) != 0) {
+		ret = false;
+	} else if (xt_register_target(&ebt_ulog_tg_reg) != 0) {
 		netlink_kernel_release(ebtulognl);
 	}
 
-	if (ret == 0)
+	if (ret)
 		nf_log_register(NFPROTO_BRIDGE, &ebt_ulog_logger);
 
 	return ret;

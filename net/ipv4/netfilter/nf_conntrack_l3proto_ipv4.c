@@ -120,10 +120,8 @@ static unsigned int ipv4_confirm(unsigned int hooknum,
 		typeof(nf_nat_seq_adjust_hook) seq_adjust;
 
 		seq_adjust = rcu_dereference(nf_nat_seq_adjust_hook);
-		if (!seq_adjust || !seq_adjust(skb, ct, ctinfo)) {
-			NF_CT_STAT_INC_ATOMIC(nf_ct_net(ct), drop);
+		if (!seq_adjust || !seq_adjust(skb, ct, ctinfo))
 			return NF_DROP;
-		}
 	}
 out:
 	/* We've seen it coming out the other side: confirm it */

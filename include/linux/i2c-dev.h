@@ -33,7 +33,7 @@
  */
 #define I2C_RETRIES	0x0701	/* number of times a device address should
 				   be polled when not acknowledging */
-#define I2C_TIMEOUT	0x0702	/* set timeout in units of 10 ms */
+#define I2C_TIMEOUT	0x0702	/* set timeout in jiffies - call with int */
 
 /* NOTE: Slave address is 7 or 10 bits, but 10-bit addresses
  * are NOT supported! (due to code brokenness)
@@ -46,6 +46,7 @@
 #define I2C_FUNCS	0x0705	/* Get the adapter functionality mask */
 
 #define I2C_RDWR	0x0707	/* Combined R/W transfer (one STOP only) */
+#define I2C_SLAVE_RDWR	0x0709	/* Slave Read Write */
 
 #define I2C_PEC		0x0708	/* != 0 to use PEC with SMBus */
 #define I2C_SMBUS	0x0720	/* SMBus transfer */

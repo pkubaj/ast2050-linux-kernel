@@ -168,22 +168,12 @@ static void atml_plat_remove(void)
 	}
 }
 
-static int tpm_atml_suspend(struct platform_device *dev, pm_message_t msg)
-{
-	return tpm_pm_suspend(&dev->dev, msg);
-}
-
-static int tpm_atml_resume(struct platform_device *dev)
-{
-	return tpm_pm_resume(&dev->dev);
-}
-static struct platform_driver atml_drv = {
-	.driver = {
-		.name = "tpm_atmel",
-		.owner		= THIS_MODULE,
-	},
-	.suspend = tpm_atml_suspend,
-	.resume = tpm_atml_resume,
+static struct device_driver atml_drv = {
+	.name = "tpm_atmel",
+	.bus = &platform_bus_type,
+	.owner = THIS_MODULE,
+	.suspend = tpm_pm_suspend,
+	.resume = tpm_pm_resume,
 };
 
 static int __init init_atmel(void)
@@ -194,7 +184,7 @@ static int __init init_atmel(void)
 	unsigned long base;
 	struct  tpm_chip *chip;
 
-	rc = platform_driver_register(&atml_drv);
+	rc = driver_register(&atml_drv);
 	if (rc)
 		return rc;
 
@@ -233,13 +223,13 @@ err_rel_reg:
 		atmel_release_region(base,
 				     region_size);
 err_unreg_drv:
-	platform_driver_unregister(&atml_drv);
+	driver_unregister(&atml_drv);
 	return rc;
 }
 
 static void __exit cleanup_atmel(void)
 {
-	platform_driver_unregister(&atml_drv);
+	driver_unregister(&atml_drv);
 	atml_plat_remove();
 }
 

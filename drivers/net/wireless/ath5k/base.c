@@ -79,7 +79,7 @@ MODULE_VERSION("0.6.0 (EXPERIMENTAL)");
 
 
 /* Known PCI ids */
-static const struct pci_device_id ath5k_pci_id_table[] = {
+static struct pci_device_id ath5k_pci_id_table[] __devinitdata = {
 	{ PCI_VDEVICE(ATHEROS, 0x0207), .driver_data = AR5K_AR5210 }, /* 5210 early */
 	{ PCI_VDEVICE(ATHEROS, 0x0007), .driver_data = AR5K_AR5210 }, /* 5210 */
 	{ PCI_VDEVICE(ATHEROS, 0x0011), .driver_data = AR5K_AR5211 }, /* 5311 - this is on AHB bus !*/
@@ -103,7 +103,7 @@ static const struct pci_device_id ath5k_pci_id_table[] = {
 MODULE_DEVICE_TABLE(pci, ath5k_pci_id_table);
 
 /* Known SREVs */
-static const struct ath5k_srev_name srev_names[] = {
+static struct ath5k_srev_name srev_names[] = {
 	{ "5210",	AR5K_VERSION_MAC,	AR5K_SREV_AR5210 },
 	{ "5311",	AR5K_VERSION_MAC,	AR5K_SREV_AR5311 },
 	{ "5311A",	AR5K_VERSION_MAC,	AR5K_SREV_AR5311A },
@@ -142,7 +142,7 @@ static const struct ath5k_srev_name srev_names[] = {
 	{ "xxxxx",	AR5K_VERSION_RAD,	AR5K_SREV_UNKNOWN },
 };
 
-static const struct ieee80211_rate ath5k_rates[] = {
+static struct ieee80211_rate ath5k_rates[] = {
 	{ .bitrate = 10,
 	  .hw_value = ATH5K_RATE_CODE_1M, },
 	{ .bitrate = 20,
@@ -248,7 +248,7 @@ static void ath5k_bss_info_changed(struct ieee80211_hw *hw,
 		struct ieee80211_bss_conf *bss_conf,
 		u32 changes);
 
-static const struct ieee80211_ops ath5k_hw_ops = {
+static struct ieee80211_ops ath5k_hw_ops = {
 	.tx 		= ath5k_tx,
 	.start 		= ath5k_start,
 	.stop 		= ath5k_stop,
@@ -350,7 +350,6 @@ static int 	ath5k_beacon_setup(struct ath5k_softc *sc,
 static void 	ath5k_beacon_send(struct ath5k_softc *sc);
 static void 	ath5k_beacon_config(struct ath5k_softc *sc);
 static void	ath5k_beacon_update_timers(struct ath5k_softc *sc, u64 bc_tsf);
-static void	ath5k_tasklet_beacon(unsigned long data);
 
 static inline u64 ath5k_extend_tsf(struct ath5k_hw *ah, u32 rstamp)
 {
@@ -370,6 +369,11 @@ static irqreturn_t ath5k_intr(int irq, void *dev_id);
 static void 	ath5k_tasklet_reset(unsigned long data);
 
 static void 	ath5k_calibrate(unsigned long data);
+/* LED functions */
+static int	ath5k_init_leds(struct ath5k_softc *sc);
+static void	ath5k_led_enable(struct ath5k_softc *sc);
+static void	ath5k_led_off(struct ath5k_softc *sc);
+static void	ath5k_unregister_leds(struct ath5k_softc *sc);
 
 /*
  * Module init/exit functions
@@ -785,7 +789,6 @@ ath5k_attach(struct pci_dev *pdev, struct ieee80211_hw *hw)
 	tasklet_init(&sc->rxtq, ath5k_tasklet_rx, (unsigned long)sc);
 	tasklet_init(&sc->txtq, ath5k_tasklet_tx, (unsigned long)sc);
 	tasklet_init(&sc->restq, ath5k_tasklet_reset, (unsigned long)sc);
-	tasklet_init(&sc->beacontq, ath5k_tasklet_beacon, (unsigned long)sc);
 	setup_timer(&sc->calib_tim, ath5k_calibrate, (unsigned long)sc);
 
 	ret = ath5k_eeprom_read_mac(ah, mac);
@@ -1095,8 +1098,7 @@ ath5k_mode_setup(struct ath5k_softc *sc)
 static inline int
 ath5k_hw_to_driver_rix(struct ath5k_softc *sc, int hw_rix)
 {
-	WARN(hw_rix < 0 || hw_rix >= AR5K_MAX_RATES,
-			"hw_rix out of bounds: %x\n", hw_rix);
+	WARN_ON(hw_rix < 0 || hw_rix > AR5K_MAX_RATES);
 	return sc->rate_idx[sc->curband->band][hw_rix];
 }
 
@@ -1216,10 +1218,6 @@ ath5k_txbuf_setup(struct ath5k_softc *sc, struct ath5k_buf *bf)
 
 	pktlen = skb->len;
 
-	if (info->control.hw_key) {
-		keyidx = info->control.hw_key->hw_key_idx;
-		pktlen += info->control.hw_key->icv_len;
-	}
 	if (rc_flags & IEEE80211_TX_RC_USE_RTS_CTS) {
 		flags |= AR5K_TXDESC_RTSENA;
 		cts_rate = ieee80211_get_rts_cts_rate(sc->hw, info)->hw_value;
@@ -1231,6 +1229,11 @@ ath5k_txbuf_setup(struct ath5k_softc *sc, struct ath5k_buf *bf)
 		cts_rate = ieee80211_get_rts_cts_rate(sc->hw, info)->hw_value;
 		duration = le16_to_cpu(ieee80211_ctstoself_duration(sc->hw,
 			sc->vif, pktlen, info));
+	}
+
+	if (info->control.hw_key) {
+		keyidx = info->control.hw_key->hw_key_idx;
+		pktlen += info->control.hw_key->icv_len;
 	}
 	ret = ah->ah_setup_tx_desc(ah, ds, pktlen,
 		ieee80211_get_hdrlen_from_skb(skb), AR5K_PKT_TYPE_NORMAL,
@@ -1697,34 +1700,6 @@ ath5k_check_ibss_tsf(struct ath5k_softc *sc, struct sk_buff *skb,
 	}
 }
 
-static void ath5k_tasklet_beacon(unsigned long data)
-{
-	struct ath5k_softc *sc = (struct ath5k_softc *) data;
-
-	/*
-	 * Software beacon alert--time to send a beacon.
-	 *
-	 * In IBSS mode we use this interrupt just to
-	 * keep track of the next TBTT (target beacon
-	 * transmission time) in order to detect wether
-	 * automatic TSF updates happened.
-	 */
-	if (sc->opmode == NL80211_IFTYPE_ADHOC) {
-		/* XXX: only if VEOL suppported */
-		u64 tsf = ath5k_hw_get_tsf64(sc->ah);
-		sc->nexttbtt += sc->bintval;
-		ATH5K_DBG(sc, ATH5K_DEBUG_BEACON,
-				"SWBA nexttbtt: %x hw_tu: %x "
-				"TSF: %llx\n",
-				sc->nexttbtt,
-				TSF_TO_TU(tsf),
-				(unsigned long long) tsf);
-	} else {
-		spin_lock(&sc->block);
-		ath5k_beacon_send(sc);
-		spin_unlock(&sc->block);
-	}
-}
 
 static void
 ath5k_tasklet_rx(unsigned long data)
@@ -2065,8 +2040,9 @@ err_unmap:
  * frame contents are done as needed and the slot time is
  * also adjusted based on current state.
  *
- * This is called from software irq context (beacontq or restq
- * tasklets) or user context from ath5k_beacon_config.
+ * this is usually called from interrupt context (ath5k_intr())
+ * but also from ath5k_beacon_config() in IBSS mode which in turn
+ * can be called from a tasklet and user context
  */
 static void
 ath5k_beacon_send(struct ath5k_softc *sc)
@@ -2240,7 +2216,6 @@ static void
 ath5k_beacon_config(struct ath5k_softc *sc)
 {
 	struct ath5k_hw *ah = sc->ah;
-	unsigned long flags;
 
 	ath5k_hw_set_imr(ah, 0);
 	sc->bmisscount = 0;
@@ -2262,9 +2237,9 @@ ath5k_beacon_config(struct ath5k_softc *sc)
 
 		if (sc->opmode == NL80211_IFTYPE_ADHOC) {
 			if (ath5k_hw_hasveol(ah)) {
-				spin_lock_irqsave(&sc->block, flags);
+				spin_lock(&sc->block);
 				ath5k_beacon_send(sc);
-				spin_unlock_irqrestore(&sc->block, flags);
+				spin_unlock(&sc->block);
 			}
 		} else
 			ath5k_beacon_update_timers(sc, -1);
@@ -2416,7 +2391,6 @@ ath5k_stop_hw(struct ath5k_softc *sc)
 	tasklet_kill(&sc->rxtq);
 	tasklet_kill(&sc->txtq);
 	tasklet_kill(&sc->restq);
-	tasklet_kill(&sc->beacontq);
 
 	return ret;
 }
@@ -2434,9 +2408,16 @@ ath5k_intr(int irq, void *dev_id)
 		return IRQ_NONE;
 
 	do {
+		/*
+		 * Figure out the reason(s) for the interrupt.  Note
+		 * that get_isr returns a pseudo-ISR that may include
+		 * bits we haven't explicitly enabled so we mask the
+		 * value to insure we only process bits we requested.
+		 */
 		ath5k_hw_get_isr(ah, &status);		/* NB: clears IRQ too */
 		ATH5K_DBG(sc, ATH5K_DEBUG_INTR, "status 0x%x/0x%x\n",
 				status, sc->imask);
+		status &= sc->imask; /* discard unasked for bits */
 		if (unlikely(status & AR5K_INT_FATAL)) {
 			/*
 			 * Fatal errors are unrecoverable.
@@ -2447,7 +2428,32 @@ ath5k_intr(int irq, void *dev_id)
 			tasklet_schedule(&sc->restq);
 		} else {
 			if (status & AR5K_INT_SWBA) {
-				tasklet_schedule(&sc->beacontq);
+				/*
+				* Software beacon alert--time to send a beacon.
+				* Handle beacon transmission directly; deferring
+				* this is too slow to meet timing constraints
+				* under load.
+				*
+				* In IBSS mode we use this interrupt just to
+				* keep track of the next TBTT (target beacon
+				* transmission time) in order to detect wether
+				* automatic TSF updates happened.
+				*/
+				if (sc->opmode == NL80211_IFTYPE_ADHOC) {
+					 /* XXX: only if VEOL suppported */
+					u64 tsf = ath5k_hw_get_tsf64(ah);
+					sc->nexttbtt += sc->bintval;
+					ATH5K_DBG(sc, ATH5K_DEBUG_BEACON,
+						  "SWBA nexttbtt: %x hw_tu: %x "
+						  "TSF: %llx\n",
+						  sc->nexttbtt,
+						  TSF_TO_TU(tsf),
+						  (unsigned long long) tsf);
+				} else {
+					spin_lock(&sc->block);
+					ath5k_beacon_send(sc);
+					spin_unlock(&sc->block);
+				}
 			}
 			if (status & AR5K_INT_RXEOL) {
 				/*
@@ -2522,6 +2528,141 @@ ath5k_calibrate(unsigned long data)
 
 	mod_timer(&sc->calib_tim, round_jiffies(jiffies +
 			msecs_to_jiffies(ath5k_calinterval * 1000)));
+}
+
+
+
+/***************\
+* LED functions *
+\***************/
+
+static void
+ath5k_led_enable(struct ath5k_softc *sc)
+{
+	if (test_bit(ATH_STAT_LEDSOFT, sc->status)) {
+		ath5k_hw_set_gpio_output(sc->ah, sc->led_pin);
+		ath5k_led_off(sc);
+	}
+}
+
+static void
+ath5k_led_on(struct ath5k_softc *sc)
+{
+	if (!test_bit(ATH_STAT_LEDSOFT, sc->status))
+		return;
+	ath5k_hw_set_gpio(sc->ah, sc->led_pin, sc->led_on);
+}
+
+static void
+ath5k_led_off(struct ath5k_softc *sc)
+{
+	if (!test_bit(ATH_STAT_LEDSOFT, sc->status))
+		return;
+	ath5k_hw_set_gpio(sc->ah, sc->led_pin, !sc->led_on);
+}
+
+static void
+ath5k_led_brightness_set(struct led_classdev *led_dev,
+	enum led_brightness brightness)
+{
+	struct ath5k_led *led = container_of(led_dev, struct ath5k_led,
+		led_dev);
+
+	if (brightness == LED_OFF)
+		ath5k_led_off(led->sc);
+	else
+		ath5k_led_on(led->sc);
+}
+
+static int
+ath5k_register_led(struct ath5k_softc *sc, struct ath5k_led *led,
+		   const char *name, char *trigger)
+{
+	int err;
+
+	led->sc = sc;
+	strncpy(led->name, name, sizeof(led->name));
+	led->led_dev.name = led->name;
+	led->led_dev.default_trigger = trigger;
+	led->led_dev.brightness_set = ath5k_led_brightness_set;
+
+	err = led_classdev_register(&sc->pdev->dev, &led->led_dev);
+	if (err) {
+		ATH5K_WARN(sc, "could not register LED %s\n", name);
+		led->sc = NULL;
+	}
+	return err;
+}
+
+static void
+ath5k_unregister_led(struct ath5k_led *led)
+{
+	if (!led->sc)
+		return;
+	led_classdev_unregister(&led->led_dev);
+	ath5k_led_off(led->sc);
+	led->sc = NULL;
+}
+
+static void
+ath5k_unregister_leds(struct ath5k_softc *sc)
+{
+	ath5k_unregister_led(&sc->rx_led);
+	ath5k_unregister_led(&sc->tx_led);
+}
+
+
+static int
+ath5k_init_leds(struct ath5k_softc *sc)
+{
+	int ret = 0;
+	struct ieee80211_hw *hw = sc->hw;
+	struct pci_dev *pdev = sc->pdev;
+	char name[ATH5K_LED_MAX_NAME_LEN + 1];
+
+	/*
+	 * Auto-enable soft led processing for IBM cards and for
+	 * 5211 minipci cards.
+	 */
+	if (pdev->device == PCI_DEVICE_ID_ATHEROS_AR5212_IBM ||
+	    pdev->device == PCI_DEVICE_ID_ATHEROS_AR5211) {
+		__set_bit(ATH_STAT_LEDSOFT, sc->status);
+		sc->led_pin = 0;
+		sc->led_on = 0;  /* active low */
+	}
+	/* Enable softled on PIN1 on HP Compaq nc6xx, nc4000 & nx5000 laptops */
+	if (pdev->subsystem_vendor == PCI_VENDOR_ID_COMPAQ) {
+		__set_bit(ATH_STAT_LEDSOFT, sc->status);
+		sc->led_pin = 1;
+		sc->led_on = 1;  /* active high */
+	}
+	/*
+	 * Pin 3 on Foxconn chips used in Acer Aspire One (0x105b:e008) and
+	 * in emachines notebooks with AMBIT subsystem.
+	 */
+	if (pdev->subsystem_vendor == PCI_VENDOR_ID_FOXCONN ||
+	    pdev->subsystem_vendor == PCI_VENDOR_ID_AMBIT) {
+		__set_bit(ATH_STAT_LEDSOFT, sc->status);
+		sc->led_pin = 3;
+		sc->led_on = 0;  /* active low */
+	}
+
+	if (!test_bit(ATH_STAT_LEDSOFT, sc->status))
+		goto out;
+
+	ath5k_led_enable(sc);
+
+	snprintf(name, sizeof(name), "ath5k-%s::rx", wiphy_name(hw->wiphy));
+	ret = ath5k_register_led(sc, &sc->rx_led, name,
+		ieee80211_get_rx_led_name(hw));
+	if (ret)
+		goto out;
+
+	snprintf(name, sizeof(name), "ath5k-%s::tx", wiphy_name(hw->wiphy));
+	ret = ath5k_register_led(sc, &sc->tx_led, name,
+		ieee80211_get_tx_led_name(hw));
+out:
+	return ret;
 }
 
 

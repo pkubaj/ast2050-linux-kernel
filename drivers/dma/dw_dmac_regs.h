@@ -139,6 +139,8 @@ struct dw_dma_chan {
 	struct list_head	queue;
 	struct list_head	free_list;
 
+	struct dw_dma_slave	*dws;
+
 	unsigned int		descs_allocated;
 };
 

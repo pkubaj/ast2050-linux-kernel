@@ -46,9 +46,6 @@ MODULE_PARM_DESC(cidmode, "Call-ID mode");
 /* length limit according to Siemens 3070usb-protokoll.doc ch. 2.1 */
 #define IF_WRITEBUF 264
 
-/* interrupt pipe message size according to ibid. ch. 2.2 */
-#define IP_MSGSIZE 3
-
 /* Values for the Gigaset 307x */
 #define USB_GIGA_VENDOR_ID      0x0681
 #define USB_3070_PRODUCT_ID     0x0001
@@ -113,7 +110,7 @@ struct bas_cardstate {
 	unsigned char		*rcvbuf;	/* AT reply receive buffer */
 
 	struct urb		*urb_int_in;	/* URB for interrupt pipe */
-	unsigned char		*int_in_buf;
+	unsigned char		int_in_buf[3];
 
 	spinlock_t		lock;		/* locks all following */
 	int			basstate;	/* bitmap (BS_*) */
@@ -660,7 +657,7 @@ static void read_int_callback(struct urb *urb)
 	}
 
 	/* drop incomplete packets even if the missing bytes wouldn't matter */
-	if (unlikely(urb->actual_length < IP_MSGSIZE)) {
+	if (unlikely(urb->actual_length < 3)) {
 		dev_warn(cs->dev, "incomplete interrupt packet (%d bytes)\n",
 			 urb->actual_length);
 		goto resubmit;
@@ -2130,7 +2127,6 @@ static void gigaset_reinitbcshw(struct bc_state *bcs)
 static void gigaset_freecshw(struct cardstate *cs)
 {
 	/* timers, URBs and rcvbuf are disposed of in disconnect */
-	kfree(cs->hw.bas->int_in_buf);
 	kfree(cs->hw.bas);
 	cs->hw.bas = NULL;
 }
@@ -2141,12 +2137,6 @@ static int gigaset_initcshw(struct cardstate *cs)
 
 	cs->hw.bas = ucs = kmalloc(sizeof *ucs, GFP_KERNEL);
 	if (!ucs) {
-		pr_err("out of memory\n");
-		return 0;
-	}
-	ucs->int_in_buf = kmalloc(IP_MSGSIZE, GFP_KERNEL);
-	if (!ucs->int_in_buf) {
-		kfree(ucs);
 		pr_err("out of memory\n");
 		return 0;
 	}
@@ -2302,7 +2292,7 @@ static int gigaset_probe(struct usb_interface *interface,
 	usb_fill_int_urb(ucs->urb_int_in, udev,
 			 usb_rcvintpipe(udev,
 					(endpoint->bEndpointAddress) & 0x0f),
-			 ucs->int_in_buf, IP_MSGSIZE, read_int_callback, cs,
+			 ucs->int_in_buf, 3, read_int_callback, cs,
 			 endpoint->bInterval);
 	if ((rc = usb_submit_urb(ucs->urb_int_in, GFP_KERNEL)) != 0) {
 		dev_err(cs->dev, "could not submit interrupt URB: %s\n",

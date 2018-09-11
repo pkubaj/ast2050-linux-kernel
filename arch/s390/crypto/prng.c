@@ -201,7 +201,8 @@ out_free:
 static void __exit prng_exit(void)
 {
 	/* wipe me */
-	kzfree(p->buf);
+	memset(p->buf, 0, prng_chunk_size);
+	kfree(p->buf);
 	kfree(p);
 
 	misc_deregister(&prng_dev);

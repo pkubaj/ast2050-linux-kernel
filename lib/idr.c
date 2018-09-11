@@ -449,7 +449,6 @@ void idr_remove_all(struct idr *idp)
 
 	n = idp->layers * IDR_BITS;
 	p = idp->top;
-	rcu_assign_pointer(idp->top, NULL);
 	max = 1 << n;
 
 	id = 0;
@@ -468,6 +467,7 @@ void idr_remove_all(struct idr *idp)
 			p = *--paa;
 		}
 	}
+	rcu_assign_pointer(idp->top, NULL);
 	idp->layers = 0;
 }
 EXPORT_SYMBOL(idr_remove_all);

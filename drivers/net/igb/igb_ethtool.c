@@ -398,7 +398,7 @@ static void igb_get_regs(struct net_device *netdev,
 	regs_buff[34] = rd32(E1000_RLPML);
 	regs_buff[35] = rd32(E1000_RFCTL);
 	regs_buff[36] = rd32(E1000_MRQC);
-	regs_buff[37] = rd32(E1000_VT_CTL);
+	regs_buff[37] = rd32(E1000_VMD_CTL);
 
 	/* Transmit */
 	regs_buff[38] = rd32(E1000_TCTL);
@@ -1773,15 +1773,6 @@ static int igb_wol_exclusion(struct igb_adapter *adapter,
 	case E1000_DEV_ID_82576_SERDES:
 		/* Wake events not supported on port B */
 		if (rd32(E1000_STATUS) & E1000_STATUS_FUNC_1) {
-			wol->supported = 0;
-			break;
-		}
-		/* return success for non excluded adapter ports */
-		retval = 0;
-		break;
-	case E1000_DEV_ID_82576_QUAD_COPPER:
-		/* quad port adapters only support WoL on port A */
-		if (!(adapter->flags & IGB_FLAG_QUAD_PORT_A)) {
 			wol->supported = 0;
 			break;
 		}

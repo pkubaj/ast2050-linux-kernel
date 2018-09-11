@@ -84,13 +84,11 @@ static u32 ath9k_hw_mac_to_clks(struct ath_hw *ah, u32 usecs)
 		return ath9k_hw_mac_clks(ah, usecs);
 }
 
-bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val, u32 timeout)
+bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val)
 {
 	int i;
 
-	BUG_ON(timeout < AH_TIME_QUANTUM);
-
-	for (i = 0; i < (timeout / AH_TIME_QUANTUM); i++) {
+	for (i = 0; i < (AH_TIMEOUT / AH_TIME_QUANTUM); i++) {
 		if ((REG_READ(ah, reg) & mask) == val)
 			return true;
 
@@ -98,8 +96,8 @@ bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val, u32 timeout)
 	}
 
 	DPRINTF(ah->ah_sc, ATH_DBG_REG_IO,
-		"timeout (%d us) on reg 0x%x: 0x%08x & 0x%08x != 0x%08x\n",
-		timeout, reg, REG_READ(ah, reg), mask, val);
+		"timeout on reg 0x%x: 0x%08x & 0x%08x != 0x%08x\n",
+		reg, REG_READ(ah, reg), mask, val);
 
 	return false;
 }
@@ -391,25 +389,6 @@ static void ath9k_hw_set_defaults(struct ath_hw *ah)
 	}
 
 	ah->config.intr_mitigation = 1;
-
-	/*
-	 * We need this for PCI devices only (Cardbus, PCI, miniPCI)
-	 * _and_ if on non-uniprocessor systems (Multiprocessor/HT).
-	 * This means we use it for all AR5416 devices, and the few
-	 * minor PCI AR9280 devices out there.
-	 *
-	 * Serialization is required because these devices do not handle
-	 * well the case of two concurrent reads/writes due to the latency
-	 * involved. During one read/write another read/write can be issued
-	 * on another CPU while the previous read/write may still be working
-	 * on our hardware, if we hit this case the hardware poops in a loop.
-	 * We prevent this by serializing reads and writes.
-	 *
-	 * This issue is not present on PCI-Express devices or pre-AR5416
-	 * devices (legacy, 802.11abg).
-	 */
-	if (num_possible_cpus() > 1)
-		ah->config.serialize_regmode = SER_REG_MODE_AUTO;
 }
 
 static struct ath_hw *ath9k_hw_newstate(u16 devid, struct ath_softc *sc,
@@ -629,8 +608,7 @@ static struct ath_hw *ath9k_hw_do_attach(u16 devid, struct ath_softc *sc,
 	}
 
 	if (ah->config.serialize_regmode == SER_REG_MODE_AUTO) {
-		if (ah->hw_version.macVersion == AR_SREV_VERSION_5416_PCI ||
-		    (AR_SREV_9280(ah) && !ah->is_pciexpress)) {
+		if (ah->hw_version.macVersion == AR_SREV_VERSION_5416_PCI) {
 			ah->config.serialize_regmode =
 				SER_REG_MODE_ON;
 		} else {
@@ -682,16 +660,22 @@ static struct ath_hw *ath9k_hw_do_attach(u16 devid, struct ath_softc *sc,
 		ah->supp_cals = ADC_GAIN_CAL | ADC_DC_CAL | IQ_MISMATCH_CAL;
 	}
 
-	ah->ani_function = ATH9K_ANI_ALL;
-	if (AR_SREV_9280_10_OR_LATER(ah))
-		ah->ani_function &= ~ATH9K_ANI_NOISE_IMMUNITY_LEVEL;
+	if (AR_SREV_9160(ah)) {
+		ah->config.enable_ani = 1;
+		ah->ani_function = (ATH9K_ANI_SPUR_IMMUNITY_LEVEL |
+					ATH9K_ANI_FIRSTEP_LEVEL);
+	} else {
+		ah->ani_function = ATH9K_ANI_ALL;
+		if (AR_SREV_9280_10_OR_LATER(ah)) {
+			ah->ani_function &=	~ATH9K_ANI_NOISE_IMMUNITY_LEVEL;
+		}
+	}
 
 	DPRINTF(sc, ATH_DBG_RESET,
 		"This Mac Chip Rev 0x%02x.%x is \n",
 		ah->hw_version.macVersion, ah->hw_version.macRev);
 
 	if (AR_SREV_9285_12_OR_LATER(ah)) {
-
 		INIT_INI_ARRAY(&ah->iniModes, ar9285Modes_9285_1_2,
 			       ARRAY_SIZE(ar9285Modes_9285_1_2), 6);
 		INIT_INI_ARRAY(&ah->iniCommon, ar9285Common_9285_1_2,
@@ -831,22 +815,6 @@ static struct ath_hw *ath9k_hw_do_attach(u16 devid, struct ath_softc *sc,
 	if (ecode != 0)
 		goto bad;
 
-	if (AR_SREV_9285_12_OR_LATER(ah)) {
-		u32 txgain_type = ah->eep_ops->get_eeprom(ah, EEP_TXGAIN_TYPE);
-
-		/* txgain table */
-		if (txgain_type == AR5416_EEP_TXGAIN_HIGH_POWER) {
-			INIT_INI_ARRAY(&ah->iniModesTxGain,
-			ar9285Modes_high_power_tx_gain_9285_1_2,
-			ARRAY_SIZE(ar9285Modes_high_power_tx_gain_9285_1_2), 6);
-		} else {
-			INIT_INI_ARRAY(&ah->iniModesTxGain,
-			ar9285Modes_original_tx_gain_9285_1_2,
-			ARRAY_SIZE(ar9285Modes_original_tx_gain_9285_1_2), 6);
-		}
-
-	}
-
 	/* rxgain table */
 	if (AR_SREV_9280_20(ah))
 		ath9k_hw_init_rxgain_ini(ah);
@@ -855,16 +823,7 @@ static struct ath_hw *ath9k_hw_do_attach(u16 devid, struct ath_softc *sc,
 	if (AR_SREV_9280_20(ah))
 		ath9k_hw_init_txgain_ini(ah);
 
-	if (!ath9k_hw_fill_cap_info(ah)) {
-		DPRINTF(sc, ATH_DBG_RESET, "failed ath9k_hw_fill_cap_info\n");
-		ecode = -EINVAL;
-		goto bad;
-	}
-
-	if ((ah->hw_version.devid == AR9280_DEVID_PCI) &&
-	    test_bit(ATH9K_MODE_11A, ah->caps.wireless_modes)) {
-
-		/* EEPROM Fixup */
+	if (ah->hw_version.devid == AR9280_DEVID_PCI) {
 		for (i = 0; i < ah->iniModes.ia_rows; i++) {
 			u32 reg = INI_RA(&ah->iniModes, i, 0);
 
@@ -877,6 +836,13 @@ static struct ath_hw *ath9k_hw_do_attach(u16 devid, struct ath_softc *sc,
 							   reg, val);
 			}
 		}
+	}
+
+	if (!ath9k_hw_fill_cap_info(ah)) {
+		DPRINTF(sc, ATH_DBG_RESET,
+			"failed ath9k_hw_fill_cap_info\n");
+		ecode = -EINVAL;
+		goto bad;
 	}
 
 	ecode = ath9k_hw_init_macaddr(ah);
@@ -1183,7 +1149,7 @@ static void ath9k_hw_override_ini(struct ath_hw *ah,
 	REG_SET_BIT(ah, AR_DIAG_SW, (AR_DIAG_RX_DIS | AR_DIAG_RX_ABORT));
 
 
-	if (!AR_SREV_5416_20_OR_LATER(ah) ||
+	if (!AR_SREV_5416_V20_OR_LATER(ah) ||
 	    AR_SREV_9280_10_OR_LATER(ah))
 		return;
 
@@ -1234,17 +1200,6 @@ static u32 ath9k_hw_ini_fixup(struct ath_hw *ah,
 		return ath9k_hw_def_ini_fixup(ah, pEepData, reg, value);
 }
 
-static void ath9k_olc_init(struct ath_hw *ah)
-{
-	u32 i;
-
-	for (i = 0; i < AR9280_TX_GAIN_TABLE_SIZE; i++)
-		ah->originalGain[i] =
-			MS(REG_READ(ah, AR_PHY_TX_GAIN_TBL1 + i * 4),
-					AR_PHY_TX_GAIN);
-	ah->PDADCdelta = 0;
-}
-
 static int ath9k_hw_process_ini(struct ath_hw *ah,
 				struct ath9k_channel *chan,
 				enum ath9k_ht_macmode macmode)
@@ -1285,7 +1240,7 @@ static int ath9k_hw_process_ini(struct ath_hw *ah,
 	REG_WRITE(ah, AR_PHY_ADC_SERIAL_CTL, AR_PHY_SEL_EXTERNAL_RADIO);
 	ah->eep_ops->set_addac(ah, chan);
 
-	if (AR_SREV_5416_22_OR_LATER(ah)) {
+	if (AR_SREV_5416_V22_OR_LATER(ah)) {
 		REG_WRITE_ARRAY(&ah->iniAddac, 1, regWrites);
 	} else {
 		struct ar5416IniArray temp;
@@ -1323,8 +1278,7 @@ static int ath9k_hw_process_ini(struct ath_hw *ah,
 	if (AR_SREV_9280(ah))
 		REG_WRITE_ARRAY(&ah->iniModesRxGain, modesIndex, regWrites);
 
-	if (AR_SREV_9280(ah) || (AR_SREV_9285(ah) &&
-	    AR_SREV_9285_12_OR_LATER(ah)))
+	if (AR_SREV_9280(ah))
 		REG_WRITE_ARRAY(&ah->iniModesTxGain, modesIndex, regWrites);
 
 	for (i = 0; i < ah->iniCommon.ia_rows; i++) {
@@ -1351,9 +1305,6 @@ static int ath9k_hw_process_ini(struct ath_hw *ah,
 	ath9k_hw_override_ini(ah, chan);
 	ath9k_hw_set_regs(ah, chan, macmode);
 	ath9k_hw_init_chain_masks(ah);
-
-	if (OLC_FOR_AR9280_20_LATER)
-		ath9k_olc_init(ah);
 
 	status = ah->eep_ops->set_txpower(ah, chan,
 				  ath9k_regd_get_ctl(ah, chan),
@@ -1513,14 +1464,6 @@ static bool ath9k_hw_set_reset(struct ath_hw *ah, int type)
 	u32 rst_flags;
 	u32 tmpReg;
 
-	if (AR_SREV_9100(ah)) {
-		u32 val = REG_READ(ah, AR_RTC_DERIVED_CLK);
-		val &= ~AR_RTC_DERIVED_CLK_PERIOD;
-		val |= SM(1, AR_RTC_DERIVED_CLK_PERIOD);
-		REG_WRITE(ah, AR_RTC_DERIVED_CLK, val);
-		(void)REG_READ(ah, AR_RTC_DERIVED_CLK);
-	}
-
 	REG_WRITE(ah, AR_RTC_FORCE_WAKE, AR_RTC_FORCE_WAKE_EN |
 		  AR_RTC_FORCE_WAKE_ON_INT);
 
@@ -1547,7 +1490,7 @@ static bool ath9k_hw_set_reset(struct ath_hw *ah, int type)
 	udelay(50);
 
 	REG_WRITE(ah, AR_RTC_RC, 0);
-	if (!ath9k_hw_wait(ah, AR_RTC_RC, AR_RTC_RC_M, 0, AH_WAIT_TIMEOUT)) {
+	if (!ath9k_hw_wait(ah, AR_RTC_RC, AR_RTC_RC_M, 0)) {
 		DPRINTF(ah->ah_sc, ATH_DBG_RESET,
 			"RTC stuck in MAC reset\n");
 		return false;
@@ -1570,14 +1513,12 @@ static bool ath9k_hw_set_reset_power_on(struct ath_hw *ah)
 		  AR_RTC_FORCE_WAKE_ON_INT);
 
 	REG_WRITE(ah, AR_RTC_RESET, 0);
-	udelay(2);
 	REG_WRITE(ah, AR_RTC_RESET, 1);
 
 	if (!ath9k_hw_wait(ah,
 			   AR_RTC_STATUS,
 			   AR_RTC_STATUS_M,
-			   AR_RTC_STATUS_ON,
-			   AH_WAIT_TIMEOUT)) {
+			   AR_RTC_STATUS_ON)) {
 		DPRINTF(ah->ah_sc, ATH_DBG_RESET, "RTC not waking up\n");
 		return false;
 	}
@@ -1639,10 +1580,7 @@ static void ath9k_hw_set_regs(struct ath_hw *ah, struct ath9k_channel *chan,
 static bool ath9k_hw_chip_reset(struct ath_hw *ah,
 				struct ath9k_channel *chan)
 {
-	if (OLC_FOR_AR9280_20_LATER) {
-		if (!ath9k_hw_set_reset_reg(ah, ATH9K_RESET_POWER_ON))
-			return false;
-	} else if (!ath9k_hw_set_reset_reg(ah, ATH9K_RESET_WARM))
+	if (!ath9k_hw_set_reset_reg(ah, ATH9K_RESET_WARM))
 		return false;
 
 	if (!ath9k_hw_setpower(ah, ATH9K_PM_AWAKE))
@@ -1672,7 +1610,7 @@ static bool ath9k_hw_channel_change(struct ath_hw *ah,
 
 	REG_WRITE(ah, AR_PHY_RFBUS_REQ, AR_PHY_RFBUS_REQ_EN);
 	if (!ath9k_hw_wait(ah, AR_PHY_RFBUS_GRANT, AR_PHY_RFBUS_GRANT_EN,
-			   AR_PHY_RFBUS_GRANT_EN, AH_WAIT_TIMEOUT)) {
+			   AR_PHY_RFBUS_GRANT_EN)) {
 		DPRINTF(ah->ah_sc, ATH_DBG_REG_IO,
 			"Could not kill baseband RX\n");
 		return false;
@@ -2446,11 +2384,14 @@ bool ath9k_hw_keysetmac(struct ath_hw *ah, u16 entry, const u8 *mac)
 
 bool ath9k_hw_set_keycache_entry(struct ath_hw *ah, u16 entry,
 				 const struct ath9k_keyval *k,
-				 const u8 *mac)
+				 const u8 *mac, int xorKey)
 {
 	const struct ath9k_hw_capabilities *pCap = &ah->caps;
 	u32 key0, key1, key2, key3, key4;
 	u32 keyType;
+	u32 xorMask = xorKey ?
+		(ATH9K_KEY_XOR << 24 | ATH9K_KEY_XOR << 16 | ATH9K_KEY_XOR << 8
+		 | ATH9K_KEY_XOR) : 0;
 
 	if (entry >= pCap->keycache_size) {
 		DPRINTF(ah->ah_sc, ATH_DBG_KEYCACHE,
@@ -2502,57 +2443,26 @@ bool ath9k_hw_set_keycache_entry(struct ath_hw *ah, u16 entry,
 		return false;
 	}
 
-	key0 = get_unaligned_le32(k->kv_val + 0);
-	key1 = get_unaligned_le16(k->kv_val + 4);
-	key2 = get_unaligned_le32(k->kv_val + 6);
-	key3 = get_unaligned_le16(k->kv_val + 10);
-	key4 = get_unaligned_le32(k->kv_val + 12);
+	key0 = get_unaligned_le32(k->kv_val + 0) ^ xorMask;
+	key1 = (get_unaligned_le16(k->kv_val + 4) ^ xorMask) & 0xffff;
+	key2 = get_unaligned_le32(k->kv_val + 6) ^ xorMask;
+	key3 = (get_unaligned_le16(k->kv_val + 10) ^ xorMask) & 0xffff;
+	key4 = get_unaligned_le32(k->kv_val + 12) ^ xorMask;
 	if (k->kv_len <= LEN_WEP104)
 		key4 &= 0xff;
-
-	/*
-	 * Note: Key cache registers access special memory area that requires
-	 * two 32-bit writes to actually update the values in the internal
-	 * memory. Consequently, the exact order and pairs used here must be
-	 * maintained.
-	 */
 
 	if (keyType == AR_KEYTABLE_TYPE_TKIP && ATH9K_IS_MIC_ENABLED(ah)) {
 		u16 micentry = entry + 64;
 
-		/*
-		 * Write inverted key[47:0] first to avoid Michael MIC errors
-		 * on frames that could be sent or received at the same time.
-		 * The correct key will be written in the end once everything
-		 * else is ready.
-		 */
 		REG_WRITE(ah, AR_KEYTABLE_KEY0(entry), ~key0);
 		REG_WRITE(ah, AR_KEYTABLE_KEY1(entry), ~key1);
-
-		/* Write key[95:48] */
 		REG_WRITE(ah, AR_KEYTABLE_KEY2(entry), key2);
 		REG_WRITE(ah, AR_KEYTABLE_KEY3(entry), key3);
-
-		/* Write key[127:96] and key type */
 		REG_WRITE(ah, AR_KEYTABLE_KEY4(entry), key4);
 		REG_WRITE(ah, AR_KEYTABLE_TYPE(entry), keyType);
-
-		/* Write MAC address for the entry */
 		(void) ath9k_hw_keysetmac(ah, entry, mac);
 
 		if (ah->misc_mode & AR_PCU_MIC_NEW_LOC_ENA) {
-			/*
-			 * TKIP uses two key cache entries:
-			 * Michael MIC TX/RX keys in the same key cache entry
-			 * (idx = main index + 64):
-			 * key0 [31:0] = RX key [31:0]
-			 * key1 [15:0] = TX key [31:16]
-			 * key1 [31:16] = reserved
-			 * key2 [31:0] = RX key [63:32]
-			 * key3 [15:0] = TX key [15:0]
-			 * key3 [31:16] = reserved
-			 * key4 [31:0] = TX key [63:32]
-			 */
 			u32 mic0, mic1, mic2, mic3, mic4;
 
 			mic0 = get_unaligned_le32(k->kv_mic + 0);
@@ -2560,83 +2470,44 @@ bool ath9k_hw_set_keycache_entry(struct ath_hw *ah, u16 entry,
 			mic1 = get_unaligned_le16(k->kv_txmic + 2) & 0xffff;
 			mic3 = get_unaligned_le16(k->kv_txmic + 0) & 0xffff;
 			mic4 = get_unaligned_le32(k->kv_txmic + 4);
-
-			/* Write RX[31:0] and TX[31:16] */
 			REG_WRITE(ah, AR_KEYTABLE_KEY0(micentry), mic0);
 			REG_WRITE(ah, AR_KEYTABLE_KEY1(micentry), mic1);
-
-			/* Write RX[63:32] and TX[15:0] */
 			REG_WRITE(ah, AR_KEYTABLE_KEY2(micentry), mic2);
 			REG_WRITE(ah, AR_KEYTABLE_KEY3(micentry), mic3);
-
-			/* Write TX[63:32] and keyType(reserved) */
 			REG_WRITE(ah, AR_KEYTABLE_KEY4(micentry), mic4);
 			REG_WRITE(ah, AR_KEYTABLE_TYPE(micentry),
 				  AR_KEYTABLE_TYPE_CLR);
 
 		} else {
-			/*
-			 * TKIP uses four key cache entries (two for group
-			 * keys):
-			 * Michael MIC TX/RX keys are in different key cache
-			 * entries (idx = main index + 64 for TX and
-			 * main index + 32 + 96 for RX):
-			 * key0 [31:0] = TX/RX MIC key [31:0]
-			 * key1 [31:0] = reserved
-			 * key2 [31:0] = TX/RX MIC key [63:32]
-			 * key3 [31:0] = reserved
-			 * key4 [31:0] = reserved
-			 *
-			 * Upper layer code will call this function separately
-			 * for TX and RX keys when these registers offsets are
-			 * used.
-			 */
 			u32 mic0, mic2;
 
 			mic0 = get_unaligned_le32(k->kv_mic + 0);
 			mic2 = get_unaligned_le32(k->kv_mic + 4);
-
-			/* Write MIC key[31:0] */
 			REG_WRITE(ah, AR_KEYTABLE_KEY0(micentry), mic0);
 			REG_WRITE(ah, AR_KEYTABLE_KEY1(micentry), 0);
-
-			/* Write MIC key[63:32] */
 			REG_WRITE(ah, AR_KEYTABLE_KEY2(micentry), mic2);
 			REG_WRITE(ah, AR_KEYTABLE_KEY3(micentry), 0);
-
-			/* Write TX[63:32] and keyType(reserved) */
 			REG_WRITE(ah, AR_KEYTABLE_KEY4(micentry), 0);
 			REG_WRITE(ah, AR_KEYTABLE_TYPE(micentry),
 				  AR_KEYTABLE_TYPE_CLR);
 		}
-
-		/* MAC address registers are reserved for the MIC entry */
 		REG_WRITE(ah, AR_KEYTABLE_MAC0(micentry), 0);
 		REG_WRITE(ah, AR_KEYTABLE_MAC1(micentry), 0);
-
-		/*
-		 * Write the correct (un-inverted) key[47:0] last to enable
-		 * TKIP now that all other registers are set with correct
-		 * values.
-		 */
 		REG_WRITE(ah, AR_KEYTABLE_KEY0(entry), key0);
 		REG_WRITE(ah, AR_KEYTABLE_KEY1(entry), key1);
 	} else {
-		/* Write key[47:0] */
 		REG_WRITE(ah, AR_KEYTABLE_KEY0(entry), key0);
 		REG_WRITE(ah, AR_KEYTABLE_KEY1(entry), key1);
-
-		/* Write key[95:48] */
 		REG_WRITE(ah, AR_KEYTABLE_KEY2(entry), key2);
 		REG_WRITE(ah, AR_KEYTABLE_KEY3(entry), key3);
-
-		/* Write key[127:96] and key type */
 		REG_WRITE(ah, AR_KEYTABLE_KEY4(entry), key4);
 		REG_WRITE(ah, AR_KEYTABLE_TYPE(entry), keyType);
 
-		/* Write MAC address for the entry */
 		(void) ath9k_hw_keysetmac(ah, entry, mac);
 	}
+
+	if (ah->curchan == NULL)
+		return true;
 
 	return true;
 }
@@ -2930,8 +2801,6 @@ bool ath9k_hw_getisr(struct ath_hw *ah, enum ath9k_int *masked)
 				mask2 |= ATH9K_INT_GTT;
 			if (isr2 & AR_ISR_S2_CST)
 				mask2 |= ATH9K_INT_CST;
-			if (isr2 & AR_ISR_S2_TSFOOR)
-				mask2 |= ATH9K_INT_TSFOOR;
 		}
 
 		isr = REG_READ(ah, AR_ISR_RAC);
@@ -3077,9 +2946,7 @@ enum ath9k_int ath9k_hw_set_interrupts(struct ath_hw *ah, enum ath9k_int ints)
 		if (ints & ATH9K_INT_DTIMSYNC)
 			mask2 |= AR_IMR_S2_DTIMSYNC;
 		if (ints & ATH9K_INT_CABEND)
-			mask2 |= AR_IMR_S2_CABEND;
-		if (ints & ATH9K_INT_TSFOOR)
-			mask2 |= AR_IMR_S2_TSFOOR;
+			mask2 |= (AR_IMR_S2_CABEND);
 	}
 
 	if (ints & (ATH9K_INT_GTT | ATH9K_INT_CST)) {
@@ -3249,8 +3116,6 @@ void ath9k_hw_set_sta_beacon_timers(struct ath_hw *ah,
 		    AR_TBTT_TIMER_EN | AR_TIM_TIMER_EN |
 		    AR_DTIM_TIMER_EN);
 
-	/* TSF Out of Range Threshold */
-	REG_WRITE(ah, AR_TSFOOR_THRESHOLD, bs->bs_tsfoor_threshold);
 }
 
 /*******************/
@@ -3263,11 +3128,10 @@ bool ath9k_hw_fill_cap_info(struct ath_hw *ah)
 	u16 capField = 0, eeval;
 
 	eeval = ah->eep_ops->get_eeprom(ah, EEP_REG_0);
+
 	ah->regulatory.current_rd = eeval;
 
 	eeval = ah->eep_ops->get_eeprom(ah, EEP_REG_1);
-	if (AR_SREV_9285_10_OR_LATER(ah))
-		eeval |= AR9285_RDEXT_DEFAULT;
 	ah->regulatory.current_rd_ext = eeval;
 
 	capField = ah->eep_ops->get_eeprom(ah, EEP_OP_CAP);
@@ -3318,11 +3182,14 @@ bool ath9k_hw_fill_cap_info(struct ath_hw *ah)
 	}
 
 	pCap->tx_chainmask = ah->eep_ops->get_eeprom(ah, EEP_TX_MASK);
-	if ((ah->hw_version.devid == AR5416_DEVID_PCI) &&
-	    !(eeval & AR5416_OPFLAGS_11A))
-		pCap->rx_chainmask = ath9k_hw_gpio_get(ah, 0) ? 0x5 : 0x7;
-	else
-		pCap->rx_chainmask = ah->eep_ops->get_eeprom(ah, EEP_RX_MASK);
+	if ((ah->is_pciexpress)
+	    || (eeval & AR5416_OPFLAGS_11A)) {
+		pCap->rx_chainmask =
+			ah->eep_ops->get_eeprom(ah, EEP_RX_MASK);
+	} else {
+		pCap->rx_chainmask =
+			(ath9k_hw_gpio_get(ah, 0)) ? 0x5 : 0x7;
+	}
 
 	if (!(AR_SREV_9280(ah) && (ah->hw_version.macRev == 0)))
 		ah->misc_mode |= AR_PCU_MIC_NEW_LOC_ENA;
@@ -3450,6 +3317,8 @@ bool ath9k_hw_fill_cap_info(struct ath_hw *ah)
 bool ath9k_hw_getcapability(struct ath_hw *ah, enum ath9k_capability_type type,
 			    u32 capability, u32 *result)
 {
+	const struct ath9k_hw_capabilities *pCap = &ah->caps;
+
 	switch (type) {
 	case ATH9K_CAP_CIPHER:
 		switch (capability) {
@@ -3475,10 +3344,16 @@ bool ath9k_hw_getcapability(struct ath_hw *ah, enum ath9k_capability_type type,
 	case ATH9K_CAP_TKIP_SPLIT:
 		return (ah->misc_mode & AR_PCU_MIC_NEW_LOC_ENA) ?
 			false : true;
+	case ATH9K_CAP_WME_TKIPMIC:
+		return 0;
+	case ATH9K_CAP_PHYCOUNTERS:
+		return ah->has_hw_phycounters ? 0 : -ENXIO;
 	case ATH9K_CAP_DIVERSITY:
 		return (REG_READ(ah, AR_PHY_CCK_DETECT) &
 			AR_PHY_CCK_DETECT_BB_ENABLE_ANT_FAST_DIV) ?
 			true : false;
+	case ATH9K_CAP_PHYDIAG:
+		return true;
 	case ATH9K_CAP_MCAST_KEYSRCH:
 		switch (capability) {
 		case 0:
@@ -3493,6 +3368,18 @@ bool ath9k_hw_getcapability(struct ath_hw *ah, enum ath9k_capability_type type,
 			}
 		}
 		return false;
+	case ATH9K_CAP_TSF_ADJUST:
+		return (ah->misc_mode & AR_PCU_TX_ADD_TSF) ?
+			true : false;
+	case ATH9K_CAP_RFSILENT:
+		if (capability == 3)
+			return false;
+	case ATH9K_CAP_ANT_CFG_2GHZ:
+		*result = pCap->num_antcfg_2ghz;
+		return true;
+	case ATH9K_CAP_ANT_CFG_5GHZ:
+		*result = pCap->num_antcfg_5ghz;
+		return true;
 	case ATH9K_CAP_TXPOW:
 		switch (capability) {
 		case 0:
@@ -3508,10 +3395,6 @@ bool ath9k_hw_getcapability(struct ath_hw *ah, enum ath9k_capability_type type,
 			return 0;
 		}
 		return false;
-	case ATH9K_CAP_DS:
-		return (AR_SREV_9280_20_OR_LATER(ah) &&
-			(ah->eep_ops->get_eeprom(ah, EEP_RC_CHAIN_MASK) == 1))
-			? false : true;
 	default:
 		return false;
 	}
@@ -3544,6 +3427,12 @@ bool ath9k_hw_setcapability(struct ath_hw *ah, enum ath9k_capability_type type,
 			ah->sta_id1_defaults |= AR_STA_ID1_MCAST_KSRCH;
 		else
 			ah->sta_id1_defaults &= ~AR_STA_ID1_MCAST_KSRCH;
+		return true;
+	case ATH9K_CAP_TSF_ADJUST:
+		if (setting)
+			ah->misc_mode |= AR_PCU_TX_ADD_TSF;
+		else
+			ah->misc_mode &= ~AR_PCU_TX_ADD_TSF;
 		return true;
 	default:
 		return false;
@@ -3811,8 +3700,9 @@ u64 ath9k_hw_gettsf64(struct ath_hw *ah)
 
 void ath9k_hw_settsf64(struct ath_hw *ah, u64 tsf64)
 {
-	REG_WRITE(ah, AR_TSF_L32, tsf64 & 0xffffffff);
+	REG_WRITE(ah, AR_TSF_L32, 0x00000000);
 	REG_WRITE(ah, AR_TSF_U32, (tsf64 >> 32) & 0xffffffff);
+	REG_WRITE(ah, AR_TSF_L32, tsf64 & 0xffffffff);
 }
 
 void ath9k_hw_reset_tsf(struct ath_hw *ah)

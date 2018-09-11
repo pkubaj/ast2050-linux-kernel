@@ -22,7 +22,7 @@
 static int superhyway_devices;
 
 static struct device superhyway_bus_device = {
-	.init_name = "superhyway",
+	.bus_id = "superhyway",
 };
 
 static void superhyway_device_release(struct device *dev)
@@ -83,7 +83,7 @@ int superhyway_add_device(unsigned long base, struct superhyway_device *sdev,
 	dev->id.id		= dev->vcr.mod_id;
 
 	sprintf(dev->name, "SuperHyway device %04x", dev->id.id);
-	dev_set_name(&dev->dev, "%02x", superhyway_devices);
+	sprintf(dev->dev.bus_id, "%02x", superhyway_devices);
 
 	superhyway_devices++;
 

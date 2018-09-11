@@ -38,10 +38,6 @@ int snd_free_sgbuf_pages(struct snd_dma_buffer *dmab)
 	if (! sgbuf)
 		return -EINVAL;
 
-	if (dmab->area)
-		vunmap(dmab->area);
-	dmab->area = NULL;
-
 	tmpb.dev.type = SNDRV_DMA_TYPE_DEV;
 	tmpb.dev.dev = sgbuf->dev;
 	for (i = 0; i < sgbuf->pages; i++) {
@@ -52,6 +48,9 @@ int snd_free_sgbuf_pages(struct snd_dma_buffer *dmab)
 		tmpb.bytes = (sgbuf->table[i].addr & ~PAGE_MASK) << PAGE_SHIFT;
 		snd_dma_free_pages(&tmpb);
 	}
+	if (dmab->area)
+		vunmap(dmab->area);
+	dmab->area = NULL;
 
 	kfree(sgbuf->table);
 	kfree(sgbuf->page_table);

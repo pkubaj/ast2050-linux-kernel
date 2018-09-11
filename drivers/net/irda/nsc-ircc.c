@@ -331,20 +331,6 @@ static void __exit nsc_ircc_cleanup(void)
 	pnp_registered = 0;
 }
 
-static const struct net_device_ops nsc_ircc_sir_ops = {
-	.ndo_open       = nsc_ircc_net_open,
-	.ndo_stop       = nsc_ircc_net_close,
-	.ndo_start_xmit = nsc_ircc_hard_xmit_sir,
-	.ndo_do_ioctl   = nsc_ircc_net_ioctl,
-};
-
-static const struct net_device_ops nsc_ircc_fir_ops = {
-	.ndo_open       = nsc_ircc_net_open,
-	.ndo_stop       = nsc_ircc_net_close,
-	.ndo_start_xmit = nsc_ircc_hard_xmit_fir,
-	.ndo_do_ioctl   = nsc_ircc_net_ioctl,
-};
-
 /*
  * Function nsc_ircc_open (iobase, irq)
  *
@@ -455,7 +441,10 @@ static int __init nsc_ircc_open(chipio_t *info)
 	self->tx_fifo.tail = self->tx_buff.head;
 
 	/* Override the network functions we need to use */
-	dev->netdev_ops = &nsc_ircc_sir_ops;
+	dev->hard_start_xmit = nsc_ircc_hard_xmit_sir;
+	dev->open            = nsc_ircc_net_open;
+	dev->stop            = nsc_ircc_net_close;
+	dev->do_ioctl        = nsc_ircc_net_ioctl;
 
 	err = register_netdev(dev);
 	if (err) {
@@ -1331,12 +1320,12 @@ static __u8 nsc_ircc_change_speed(struct nsc_ircc_cb *self, __u32 speed)
 	switch_bank(iobase, BANK0); 
 	if (speed > 115200) {
 		/* Install FIR xmit handler */
-		dev->netdev_ops = &nsc_ircc_fir_ops;
+		dev->hard_start_xmit = nsc_ircc_hard_xmit_fir;
 		ier = IER_SFIF_IE;
 		nsc_ircc_dma_receive(self);
 	} else {
 		/* Install SIR xmit handler */
-		dev->netdev_ops = &nsc_ircc_sir_ops;
+		dev->hard_start_xmit = nsc_ircc_hard_xmit_sir;
 		ier = IER_RXHDL_IE;
 	}
 	/* Set our current interrupt mask */
