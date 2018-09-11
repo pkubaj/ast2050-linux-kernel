@@ -83,11 +83,9 @@ identify_ramdisk_image(int fd, int start_block,  decompress_fn *decompressor)
 		printk(KERN_NOTICE
 		       "RAMDISK: Compressed image found at block %d\n",
 		       start_block);
-		*decompressor = gunzip;
 		nblocks = 0;
 		goto done;
 	}
-#endif
 
 	/*
 	 * If it matches the bzip2 magic numbers, return -1
@@ -96,7 +94,6 @@ identify_ramdisk_image(int fd, int start_block,  decompress_fn *decompressor)
 		printk(KERN_NOTICE
 		       "RAMDISK: Bzipped image found at block %d\n",
 		       start_block);
-		*decompressor = bunzip2;
 		nblocks = 0;
 		goto done;
 	}
@@ -108,7 +105,6 @@ identify_ramdisk_image(int fd, int start_block,  decompress_fn *decompressor)
 		printk(KERN_NOTICE
 		       "RAMDISK: Lzma image found at block %d\n",
 		       start_block);
-		*decompressor = unlzma;
 		nblocks = 0;
 		goto done;
 	}
